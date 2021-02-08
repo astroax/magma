@@ -97,7 +97,7 @@ MAGMA_DEPS=(
     "python3-protobuf >= 3.14.0"
     "redis-server >= 3.2.0"
     "sudo"
-    "dnsmasq > 2.83"
+    "dnsmasq >= 2.7"
     "net-tools" # for ifconfig
     "python3-pip"
     "python3-apt" # The version in pypi is abandoned and broken on stretch
@@ -354,7 +354,9 @@ $(glob_files "${MAGMA_ROOT}/lte/gateway/configs/templates/*" /etc/magma/template
 $(glob_files "${MAGMA_ROOT}/orc8r/gateway/configs/templates/*" /etc/magma/templates/) \
 ${CONTROL_PROXY_FILE}=/etc/magma/ \
 $(glob_files "${ANSIBLE_FILES}/magma_modules_load" /etc/modules-load.d/magma.conf) \
+$(glob_files "${ANSIBLE_FILES}/configure_envoy_namespace.sh" /usr/local/bin/ ) \
 $(glob_files "${ANSIBLE_FILES}/logrotate_oai.conf" /etc/logrotate.d/oai) \
+$(glob_files "${ANSIBLE_FILES}/logrotate_rsyslog.conf" /etc/logrotate.d/rsyslog) \
 $(glob_files "${ANSIBLE_FILES}/local-cdn/*" /var/www/local-cdn/) \
 ${ANSIBLE_FILES}/99-magma.conf=/etc/sysctl.d/ \
 ${ANSIBLE_FILES}/magma_ifaces_gtp=/etc/network/interfaces.d/gtp \
