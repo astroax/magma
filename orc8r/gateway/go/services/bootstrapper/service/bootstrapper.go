@@ -140,8 +140,9 @@ func (b *Bootstrapper) Start() error {
 		return err
 	}
 	// Start certificate update loop
-	c := time.Tick(PERIODIC_BOOTSTRAP_CHECK_INTERVAL)
-	for now := range c {
+	certUpdateTicker := time.NewTicker(PERIODIC_BOOTSTRAP_CHECK_INTERVAL)
+	defer certUpdateTicker.Stop()
+	for now := range certUpdateTicker.C {
 		if err := b.PeriodicCheck(now); err != nil {
 			return err
 		}
@@ -173,8 +174,7 @@ func (b *Bootstrapper) PeriodicCheck(now time.Time) (err error) {
 	if err != nil {
 		return
 	}
-	oldCertFile, oldCertKeyFile, newCertFile, newCertKeyFile :=
-		certFile+".old", certKeyFile+".old", certFile+".new", certKeyFile+".new"
+	oldCertFile, oldCertKeyFile, newCertFile, newCertKeyFile := certFile+".old", certKeyFile+".old", certFile+".new", certKeyFile+".new"
 
 	if err = key.WriteKey(newCertKeyFile, newCertKey); err != nil {
 		return
@@ -257,7 +257,7 @@ func (b *Bootstrapper) RefreshConfigs() {
 }
 
 // bootstrap generates new gateway key & CSR, reaches to the cloud to sign the CSR and returns new cert & key
-// NOTE: it's a responsibility of a caller to synchronise access to Bootstrapper when calling Bootstrap
+// NOTE: it's a responsibility of a caller to synchronize access to Bootstrapper when calling Bootstrap
 func (b *Bootstrapper) bootstrap() (*protos.Certificate, interface{}, error) {
 	var (
 		err  error
@@ -277,7 +277,7 @@ func (b *Bootstrapper) bootstrap() (*protos.Certificate, interface{}, error) {
 
 	// Complete challenge based auth & sign CSR
 	if b.useLocalService {
-		conn, err = service_registry.Get().GetConnection("bootstrapper")
+		conn, err = service_registry.Get().GetConnection("bootstrapper", protos.ServiceType_SOUTHBOUND)
 	} else {
 		conn, err = b.GetBootstrapperCloudConnection()
 	}

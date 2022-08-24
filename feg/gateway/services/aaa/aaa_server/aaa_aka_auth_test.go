@@ -14,12 +14,11 @@ limitations under the License.
 package main_test
 
 import (
+	"context"
 	"os"
 	"reflect"
 	"testing"
 	"time"
-
-	"golang.org/x/net/context"
 
 	cp "magma/feg/cloud/go/protos"
 	"magma/feg/cloud/go/protos/mconfig"
@@ -80,12 +79,12 @@ func (c testEapServiceClient) HandleIdentity(in *protos.EapIdentity) (*protos.Ea
 // TestEapAkaConcurent tests EAP AKA Provider
 func TestEapAkaConcurent(t *testing.T) {
 	os.Setenv("USE_REMOTE_SWX_PROXY", "false")
-	srv, lis := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
+	srv, lis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
 	var service eap_test.SwxProxy
 	cp.RegisterSwxProxyServer(srv.GrpcServer, service)
-	go srv.RunTest(lis)
+	go srv.RunTest(lis, nil)
 
-	eapSrv, eapLis := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
+	eapSrv, eapLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
 	servicer, err := servicers.NewEapAkaService(&mconfig.EapAkaConfig{
 		Timeout: &mconfig.EapAkaConfig_Timeouts{
 			ChallengeMs:            700,
@@ -98,11 +97,11 @@ func TestEapAkaConcurent(t *testing.T) {
 		return
 	}
 	eapp.RegisterEapServiceServer(eapSrv.GrpcServer, servicer)
-	go eapSrv.RunTest(eapLis)
+	go eapSrv.RunTest(eapLis, nil)
 
-	rtrSrv, rtrLis := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
+	rtrSrv, rtrLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
 	protos.RegisterAuthenticatorServer(rtrSrv.GrpcServer, &testAuthenticator{supportedMethods: eap_client.SupportedTypes()})
-	go rtrSrv.RunTest(rtrLis)
+	go rtrSrv.RunTest(rtrLis, nil)
 
 	client := &testEapServiceClient{}
 	done := make(chan error)
@@ -122,18 +121,18 @@ func TestEAPPeerNak(t *testing.T) {
 	akaPrimeNak := []byte{0x02, 237, 0x00, 0x06, 0x03, 50}
 	akaAkaPrimeNak := []byte{0x02, 236, 0x00, 0x07, 0x03, 50, 23}
 
-	eapSrv, eapLis := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
+	eapSrv, eapLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
 	servicer, err := servicers.NewEapAkaService(nil)
 	if err != nil {
 		t.Fatalf("failed to create EAP AKA Service: %v", err)
 		return
 	}
 	eapp.RegisterEapServiceServer(eapSrv.GrpcServer, servicer)
-	go eapSrv.RunTest(eapLis)
+	go eapSrv.RunTest(eapLis, nil)
 
-	rtrSrv, rtrLis := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
+	rtrSrv, rtrLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
 	protos.RegisterAuthenticatorServer(rtrSrv.GrpcServer, &testAuthenticator{supportedMethods: eap_client.SupportedTypes()})
-	go rtrSrv.RunTest(rtrLis)
+	go rtrSrv.RunTest(rtrLis, nil)
 
 	eapCtx := &protos.Context{SessionId: eap.CreateSessionId()}
 
@@ -141,44 +140,44 @@ func TestEAPPeerNak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected Error: %v", err)
 	}
-	if !reflect.DeepEqual([]byte(peap.GetPayload()), permIdReq) {
+	if !reflect.DeepEqual(peap.GetPayload(), permIdReq) {
 		t.Fatalf("Unexpected Identity Responsen\tReceived: %.3v\n\tExpected: %.3v", peap.GetPayload(), permIdReq)
 	}
 	peap, err = aaa_client.Handle(&protos.Eap{Payload: akaPrimeNak, Ctx: peap.Ctx})
 	if err != nil {
 		t.Fatalf("Unexpected Error: %v", err)
 	}
-	if !reflect.DeepEqual([]byte(peap.GetPayload()), failureEAP) {
+	if !reflect.DeepEqual(peap.GetPayload(), failureEAP) {
 		t.Fatalf("Unexpected AKA' Nak Response\n\tReceived: %.3v\n\tExpected: %.3v", peap.GetPayload(), failureEAP)
 	}
 	peap, err = aaa_client.Handle(&protos.Eap{Payload: akaAkaPrimeNak, Ctx: eapCtx})
 	if err != nil {
 		t.Fatalf("Unexpected Error: %v", err)
 	}
-	if !reflect.DeepEqual([]byte(peap.GetPayload()), permIdReq) {
+	if !reflect.DeepEqual(peap.GetPayload(), permIdReq) {
 		t.Fatalf("Unexpected AKA['] Nak Response\n\tReceived: %.3v\n\tExpected: %.3v", peap.GetPayload(), permIdReq)
 	}
 }
 
 func TestEAPAkaWrongPlmnId(t *testing.T) {
 	os.Setenv("USE_REMOTE_SWX_PROXY", "false")
-	srv, lis := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
+	srv, lis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
 	var service eap_test.NoUseSwxProxy
 	cp.RegisterSwxProxyServer(srv.GrpcServer, service)
-	go srv.RunTest(lis)
+	go srv.RunTest(lis, nil)
 
-	eapSrv, eapLis := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
+	eapSrv, eapLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
 	servicer, err := servicers.NewEapAkaService(&mconfig.EapAkaConfig{PlmnIds: []string{wrongPlmnID6}})
 	if err != nil {
 		t.Fatalf("failed to create EAP AKA Service: %v", err)
 		return
 	}
 	eapp.RegisterEapServiceServer(eapSrv.GrpcServer, servicer)
-	go eapSrv.RunTest(eapLis)
+	go eapSrv.RunTest(eapLis, nil)
 
-	rtrSrv, rtrLis := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
+	rtrSrv, rtrLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
 	protos.RegisterAuthenticatorServer(rtrSrv.GrpcServer, &testAuthenticator{supportedMethods: eap_client.SupportedTypes()})
-	go rtrSrv.RunTest(rtrLis)
+	go rtrSrv.RunTest(rtrLis, nil)
 
 	tst := eap_test.Units[eap_test.IMSI1]
 	eapCtx := &protos.Context{SessionId: eap.CreateSessionId()}
@@ -187,7 +186,7 @@ func TestEAPAkaWrongPlmnId(t *testing.T) {
 		t.Fatalf("Error Handling Test EAP: %v", err)
 	}
 	notifAkaEap := aka.NewAKANotificationReq(eap.Packet(tst.EapIdentityResp).Identifier(), aka.NOTIFICATION_FAILURE)
-	if !reflect.DeepEqual([]byte(peap.GetPayload()), []byte(notifAkaEap)) {
+	if !reflect.DeepEqual(peap.GetPayload(), []byte(notifAkaEap)) {
 		t.Fatalf(
 			"Unexpected identityResponse Notification\n\tReceived: %.3v\n\tExpected: %.3v",
 			peap.GetPayload(), notifAkaEap)
@@ -196,12 +195,12 @@ func TestEAPAkaWrongPlmnId(t *testing.T) {
 
 func TestEAPAkaPlmnId5(t *testing.T) {
 	os.Setenv("USE_REMOTE_SWX_PROXY", "false")
-	srv, lis := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
+	srv, lis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
 	var service eap_test.SwxProxy
 	cp.RegisterSwxProxyServer(srv.GrpcServer, service)
-	go srv.RunTest(lis)
+	go srv.RunTest(lis, nil)
 
-	eapSrv, eapLis := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
+	eapSrv, eapLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
 	servicer, err := servicers.NewEapAkaService(&mconfig.EapAkaConfig{PlmnIds: []string{wrongPlmnID6, plmnID5}})
 	if err != nil {
 		t.Fatalf("failed to create EAP AKA Service: %v", err)
@@ -210,11 +209,11 @@ func TestEAPAkaPlmnId5(t *testing.T) {
 
 	servicer.SetChallengeTimeout(time.Millisecond * 10)
 	eapp.RegisterEapServiceServer(eapSrv.GrpcServer, servicer)
-	go eapSrv.RunTest(eapLis)
+	go eapSrv.RunTest(eapLis, nil)
 
-	rtrSrv, rtrLis := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
+	rtrSrv, rtrLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
 	protos.RegisterAuthenticatorServer(rtrSrv.GrpcServer, &testAuthenticator{supportedMethods: eap_client.SupportedTypes()})
-	go rtrSrv.RunTest(rtrLis)
+	go rtrSrv.RunTest(rtrLis, nil)
 
 	tst := eap_test.Units[eap_test.IMSI1]
 	eapCtx := &protos.Context{SessionId: eap.CreateSessionId()}
@@ -222,7 +221,7 @@ func TestEAPAkaPlmnId5(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error Handling Test EAP: %v", err)
 	}
-	if !reflect.DeepEqual([]byte(peap.GetPayload()), tst.ExpectedChallengeReq) {
+	if !reflect.DeepEqual(peap.GetPayload(), tst.ExpectedChallengeReq) {
 		t.Fatalf(
 			"Unexpected identityResponse EAP\n\tReceived: %.3v\n\tExpected: %.3v",
 			peap.GetPayload(), tst.ExpectedChallengeReq)
@@ -231,24 +230,24 @@ func TestEAPAkaPlmnId5(t *testing.T) {
 
 func TestEAPAkaPlmnId6(t *testing.T) {
 	os.Setenv("USE_REMOTE_SWX_PROXY", "false")
-	srv, lis := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
+	srv, lis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
 	var service eap_test.SwxProxy
 	cp.RegisterSwxProxyServer(srv.GrpcServer, service)
-	go srv.RunTest(lis)
+	go srv.RunTest(lis, nil)
 
-	eapSrv, eapLis := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
-	servicer, err := servicers.NewEapAkaService(&mconfig.EapAkaConfig{PlmnIds: []string{wrongPlmnID6, plmnID6}})
+	eapSrv, eapLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.EAP_AKA)
+	servicer, err := servicers.NewEapAkaService(&mconfig.EapAkaConfig{PlmnIds: []string{plmnID6, wrongPlmnID6}})
 	if err != nil {
 		t.Fatalf("failed to create EAP AKA Service: %v", err)
 		return
 	}
 	servicer.SetChallengeTimeout(time.Millisecond * 10)
 	eapp.RegisterEapServiceServer(eapSrv.GrpcServer, servicer)
-	go eapSrv.RunTest(eapLis)
+	go eapSrv.RunTest(eapLis, nil)
 
-	rtrSrv, rtrLis := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
+	rtrSrv, rtrLis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.AAA_SERVER)
 	protos.RegisterAuthenticatorServer(rtrSrv.GrpcServer, &testAuthenticator{supportedMethods: eap_client.SupportedTypes()})
-	go rtrSrv.RunTest(rtrLis)
+	go rtrSrv.RunTest(rtrLis, nil)
 
 	tst := eap_test.Units[eap_test.IMSI1]
 	eapCtx := &protos.Context{SessionId: eap.CreateSessionId()}
@@ -256,7 +255,20 @@ func TestEAPAkaPlmnId6(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error Handling Test EAP: %v", err)
 	}
-	if !reflect.DeepEqual([]byte(peap.GetPayload()), tst.ExpectedChallengeReq) {
+	if !reflect.DeepEqual(peap.GetPayload(), tst.ExpectedChallengeReq) {
+		t.Fatalf(
+			"Unexpected identityResponse EAP\n\tReceived: %.3v\n\tExpected: %.3v",
+			peap.GetPayload(), tst.ExpectedChallengeReq)
+	}
+
+	servicer.SetPlmnIdFilter([]string{wrongPlmnID6, plmnID6})
+	tst = eap_test.Units[eap_test.IMSI1]
+	eapCtx = &protos.Context{SessionId: eap.CreateSessionId()}
+	peap, err = aaa_client.Handle(&protos.Eap{Payload: tst.EapIdentityResp, Ctx: eapCtx})
+	if err != nil {
+		t.Fatalf("Error Handling Test EAP: %v", err)
+	}
+	if !reflect.DeepEqual(peap.GetPayload(), tst.ExpectedChallengeReq) {
 		t.Fatalf(
 			"Unexpected identityResponse EAP\n\tReceived: %.3v\n\tExpected: %.3v",
 			peap.GetPayload(), tst.ExpectedChallengeReq)

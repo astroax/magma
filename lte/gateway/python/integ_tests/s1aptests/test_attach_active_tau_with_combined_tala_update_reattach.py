@@ -11,8 +11,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import unittest
 import time
+import unittest
 
 import gpp_types
 import s1ap_types
@@ -20,19 +20,22 @@ import s1ap_wrapper
 
 
 class TestAttachActiveTauWithCombinedTalaUpdateReattach(unittest.TestCase):
+    """Test combined TAU with TA/LA updating and active flag set to true"""
+
     def setUp(self):
+        """Initialize"""
         self._s1ap_wrapper = s1ap_wrapper.TestWrapper()
 
     def tearDown(self):
+        """Cleanup"""
         self._s1ap_wrapper.cleanup()
 
     def test_attach_active_tau_with_combined_tala_update_reattach(self):
-        """This test case validates reattach after active combined TAU reject:
+        """This test case validates reattach after active combined TAU with TA/LA updating:
         1. End-to-end attach with attach type COMBINED_EPS_IMSI_ATTACH
         2. Send active TAU request (Combined TALA update)
-        3. Receive TAU reject (Combined TALA update not supported)
-        4. Retry end-to-end combined EPS IMSI attach to verify if UE context
-           was released properly after combined TAU reject
+        3. Receive TAU accept
+        4. Perform end-to-end combined EPS IMSI attach
         """
 
         self._s1ap_wrapper.configUEDevice(1)
@@ -69,14 +72,16 @@ class TestAttachActiveTauWithCombinedTalaUpdateReattach(unittest.TestCase):
         req.ue_Id = ue_id
         req.cause.causeVal = gpp_types.CauseRadioNetwork.USER_INACTIVITY.value
         self._s1ap_wrapper.s1_util.issue_cmd(
-            s1ap_types.tfwCmd.UE_CNTXT_REL_REQUEST, req
+            s1ap_types.tfwCmd.UE_CNTXT_REL_REQUEST,
+            req,
         )
         response = self._s1ap_wrapper.s1_util.get_response()
         self.assertEqual(
-            response.msg_type, s1ap_types.tfwCmd.UE_CTX_REL_IND.value
+            response.msg_type,
+            s1ap_types.tfwCmd.UE_CTX_REL_IND.value,
         )
         print(
-            "************************* Received UE context release indication"
+            "************************* Received UE context release indication",
         )
 
         print(
@@ -92,28 +97,18 @@ class TestAttachActiveTauWithCombinedTalaUpdateReattach(unittest.TestCase):
         req.ueMtmsi.pres = False
         self._s1ap_wrapper.s1_util.issue_cmd(s1ap_types.tfwCmd.UE_TAU_REQ, req)
 
-        # Waiting for TAU Reject Indication -Combined TALA update not supported
-        response = self._s1ap_wrapper.s1_util.get_response()
-        self.assertEqual(
-            response.msg_type, s1ap_types.tfwCmd.UE_TAU_REJECT_IND.value
+        response = (
+            self._s1ap_wrapper._s1_util.receive_initial_ctxt_setup_and_tau_accept()
         )
+        tau_acc = response.cast(s1ap_types.ueTauAccept_t)
         print(
-            "************************* Received Tracking Area Update Reject "
-            "Indication"
-        )
-
-        response = self._s1ap_wrapper.s1_util.get_response()
-        self.assertEqual(
-            response.msg_type, s1ap_types.tfwCmd.UE_CTX_REL_IND.value
-        )
-        print(
-            "************************* Received UE context release indication"
+            "************************* Received Tracking Area Update",
+            "accept for UE Id:",
+            tau_acc.ue_Id,
         )
 
         print(
-            "************************* Running End to End attach to verify if "
-            "UE context was released properly after combined TAU reject for "
-            "UE id ",
+            "************************* Running End to End attach for UE Id:",
             ue_id,
         )
         # Now actually complete the attach
@@ -131,7 +126,9 @@ class TestAttachActiveTauWithCombinedTalaUpdateReattach(unittest.TestCase):
         print("************************* Running UE detach for UE id", ue_id)
         # Now detach the UE
         self._s1ap_wrapper.s1_util.detach(
-            ue_id, s1ap_types.ueDetachType_t.UE_NORMAL_DETACH.value, True
+            ue_id,
+            s1ap_types.ueDetachType_t.UE_NORMAL_DETACH.value,
+            wait_for_s1_ctxt_release=True,
         )
 
 

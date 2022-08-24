@@ -13,10 +13,13 @@ limitations under the License.
 
 import logging
 from collections import deque
-from magma.common.redis.client import get_default_client
+from typing import Optional
+
 from magma.common.redis.containers import RedisHashDict
-from magma.common.redis.serializers import get_json_serializer, \
-    get_json_deserializer
+from magma.common.redis.serializers import (
+    get_json_deserializer,
+    get_json_serializer,
+)
 
 LOG = logging.getLogger('pipelined.qos.id_manager')
 
@@ -25,13 +28,15 @@ class IdManager(object):
     """
     Simple utility class to manage IDs
     """
+
     def __init__(self, start_idx, max_idx):
         self._start_idx = start_idx
         self._max_idx = max_idx
         self._counter = start_idx
         self._free_idx_list = deque()
+        self._restore_done = False
 
-    def allocate_idx(self,) -> int:
+    def allocate_idx(self) -> int:
         idx = self._get_free_idx()
         if idx is None:
             idx = self._counter
@@ -50,6 +55,8 @@ class IdManager(object):
         self._free_idx_list.append(idx)
 
     def restore_state(self, id_set):
+        if self._restore_done:
+            return
         if not id_set:
             return
 
@@ -57,15 +64,18 @@ class IdManager(object):
         for idx in range(self._start_idx, self._counter):
             if idx not in id_set:
                 self._free_idx_list.append(idx)
+        self._restore_done = True
 
-    def _get_free_idx(self) -> int:
+    def _get_free_idx(self) -> Optional[int]:
         if self._free_idx_list:
             return self._free_idx_list.popleft()
         return None
 
 
 class QosStore(RedisHashDict):
-    def __init__(self, redis_type):
-        self.client = get_default_client()
-        super().__init__(self.client, redis_type,
-                         get_json_serializer(), get_json_deserializer())
+    def __init__(self, redis_type, client):
+        self.client = client
+        super().__init__(
+            self.client, redis_type,
+            get_json_serializer(), get_json_deserializer(),
+        )

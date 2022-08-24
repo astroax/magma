@@ -14,24 +14,33 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"math/rand"
 	"time"
 
+	"github.com/golang/glog"
+
 	"magma/orc8r/cloud/go/blobstore"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/service"
+	"magma/orc8r/cloud/go/services/analytics"
+	analytics_protos "magma/orc8r/cloud/go/services/analytics/protos"
+	analytics_servicers "magma/orc8r/cloud/go/services/analytics/servicers/protected"
 	"magma/orc8r/cloud/go/services/certifier"
+	analytics_service "magma/orc8r/cloud/go/services/certifier/analytics"
+	"magma/orc8r/cloud/go/services/certifier/obsidian/handlers"
 	certprotos "magma/orc8r/cloud/go/services/certifier/protos"
-	"magma/orc8r/cloud/go/services/certifier/servicers"
+	servicers "magma/orc8r/cloud/go/services/certifier/servicers/protected"
 	"magma/orc8r/cloud/go/services/certifier/storage"
+	"magma/orc8r/cloud/go/services/obsidian"
+	swagger_protos "magma/orc8r/cloud/go/services/obsidian/swagger/protos"
+	swagger_servicers "magma/orc8r/cloud/go/services/obsidian/swagger/servicers/protected"
 	"magma/orc8r/cloud/go/sqorc"
 	storage2 "magma/orc8r/cloud/go/storage"
 	"magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/security/cert"
-
-	"github.com/golang/glog"
-	"golang.org/x/net/context"
+	"magma/orc8r/lib/go/service/config"
 )
 
 var (
@@ -52,11 +61,11 @@ func main() {
 	}
 
 	// Init storage
-	db, err := sqorc.Open(storage2.SQLDriver, storage2.DatabaseSource)
+	db, err := sqorc.Open(storage2.GetSQLDriver(), storage2.GetDatabaseSource())
 	if err != nil {
 		glog.Fatalf("Failed to connect to database: %s", err)
 	}
-	fact := blobstore.NewEntStorage(storage.CertifierTableBlobstore, db, sqorc.GetSqlBuilder())
+	fact := blobstore.NewSQLStoreFactory(storage.CertifierTableBlobstore, db, sqorc.GetSqlBuilder())
 	err = fact.InitializeFactory()
 	if err != nil {
 		glog.Fatalf("Error initializing certifier database: %s", err)
@@ -83,12 +92,29 @@ func main() {
 		caMap[protos.CertType_VPN] = &servicers.CAInfo{Cert: vpnCert, PrivKey: vpnPrivKey}
 	}
 
+	var serviceConfig certifier.Config
+	_, _, err = config.GetStructuredServiceConfig(orc8r.ModuleName, certifier.ServiceName, &serviceConfig)
+	if err != nil {
+		glog.Fatalf("err %v failed parsing the config file: skipping CollectorServicer creation ", err)
+	}
+	collectorServicer := analytics_servicers.NewCollectorServicer(
+		&serviceConfig.Analytics,
+		analytics.GetPrometheusClient(),
+		analytics_service.GetAnalyticsCalculations(&serviceConfig),
+		nil,
+	)
+	analytics_protos.RegisterAnalyticsCollectorServer(srv.ProtectedGrpcServer, collectorServicer)
+
 	// Register servicer
 	servicer, err := servicers.NewCertifierServer(store, caMap)
 	if err != nil {
 		glog.Fatalf("Failed to create certifier server: %s", err)
 	}
-	certprotos.RegisterCertifierServer(srv.GrpcServer, servicer)
+	certprotos.RegisterCertifierServer(srv.ProtectedGrpcServer, servicer)
+
+	// Add handlers that manages users to Swagger
+	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(certifier.ServiceName))
+	obsidian.AttachHandlers(srv.EchoServer, handlers.GetHandlers())
 
 	// Start Garbage Collector Ticker
 	go func() {

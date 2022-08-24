@@ -11,23 +11,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import asyncio
-from unittest import TestCase, mock
-import grpc
 from concurrent import futures
+from unittest import TestCase, mock
+from unittest.mock import MagicMock, patch
 
+import fakeredis
+import grpc
 import orc8r.protos.state_pb2_grpc as state_pb2_grpc
-from unittest.mock import MagicMock
-from magma.common.redis.client import get_default_client
-from magma.common.redis.containers import RedisFlatDict
-from magma.common.redis.serializers import get_proto_deserializer, \
-    get_proto_serializer, get_json_deserializer, get_json_serializer, \
-    RedisSerde
-from magma.state.garbage_collector import GarbageCollector
 from magma.common.grpc_client_manager import GRPCClientManager
-from magma.common.redis.mocks.mock_redis import MockRedis
+from magma.common.redis.containers import RedisFlatDict
+from magma.common.redis.serializers import (
+    RedisSerde,
+    get_json_deserializer,
+    get_json_serializer,
+    get_proto_deserializer,
+    get_proto_serializer,
+)
+from magma.state.garbage_collector import GarbageCollector
+from orc8r.protos.common_pb2 import NetworkID, Void
 from orc8r.protos.service303_pb2 import LogVerbosity
 from orc8r.protos.state_pb2_grpc import StateServiceStub
-from orc8r.protos.common_pb2 import NetworkID, Void
 
 NID_TYPE = 'network_id'
 LOG_TYPE = 'log_verbosity'
@@ -61,8 +64,8 @@ class Foo:
 
 
 class GarbageCollectorTests(TestCase):
-    @mock.patch("redis.Redis", MockRedis)
     def setUp(self):
+        self.mock_redis = fakeredis.FakeStrictRedis()
 
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
@@ -70,22 +73,27 @@ class GarbageCollectorTests(TestCase):
         service = MagicMock()
         service.config = {
             # Replicate arbitrary orc8r protos
-            'state_protos': [{'proto_file': 'orc8r.protos.common_pb2',
-                              'proto_msg': 'NetworkID',
-                              'redis_key': NID_TYPE,
-                              'state_scope': 'network'},
-                             {'proto_file': 'orc8r.protos.service303_pb2',
-                              'proto_msg': 'LogVerbosity',
-                              'redis_key': LOG_TYPE,
-                              'state_scope': 'gateway'},
-                             ],
-            'json_state': [{'redis_key': FOO_TYPE, 'state_scope': 'gateway'}]
+            'state_protos': [
+                {
+                    'proto_file': 'orc8r.protos.common_pb2',
+                    'proto_msg': 'NetworkID',
+                    'redis_key': NID_TYPE,
+                    'state_scope': 'network',
+                },
+                {
+                    'proto_file': 'orc8r.protos.service303_pb2',
+                    'proto_msg': 'LogVerbosity',
+                    'redis_key': LOG_TYPE,
+                    'state_scope': 'gateway',
+                },
+            ],
+            'json_state': [{'redis_key': FOO_TYPE, 'state_scope': 'gateway'}],
         }
         service.loop = self.loop
 
         # Bind the rpc server to a free port
         self._rpc_server = grpc.server(
-            futures.ThreadPoolExecutor(max_workers=10)
+            futures.ThreadPoolExecutor(max_workers=10),
         )
         port = self._rpc_server.add_insecure_port('0.0.0.0:0')
         # Add the servicer
@@ -95,19 +103,25 @@ class GarbageCollectorTests(TestCase):
         # Create a rpc stub
         self.channel = grpc.insecure_channel('0.0.0.0:{}'.format(port))
 
-        serde1 = RedisSerde(NID_TYPE,
-                            get_proto_serializer(),
-                            get_proto_deserializer(NetworkID))
-        serde2 = RedisSerde(FOO_TYPE,
-                            get_json_serializer(),
-                            get_json_deserializer())
-        serde3 = RedisSerde(LOG_TYPE,
-                            get_proto_serializer(),
-                            get_proto_deserializer(LogVerbosity))
+        serde1 = RedisSerde(
+            NID_TYPE,
+            get_proto_serializer(),
+            get_proto_deserializer(NetworkID),
+        )
+        serde2 = RedisSerde(
+            FOO_TYPE,
+            get_json_serializer(),
+            get_json_deserializer(),
+        )
+        serde3 = RedisSerde(
+            LOG_TYPE,
+            get_proto_serializer(),
+            get_proto_deserializer(LogVerbosity),
+        )
 
-        self.nid_client = RedisFlatDict(get_default_client(), serde1)
-        self.foo_client = RedisFlatDict(get_default_client(), serde2)
-        self.log_client = RedisFlatDict(get_default_client(), serde3)
+        self.nid_client = RedisFlatDict(self.mock_redis, serde1)
+        self.foo_client = RedisFlatDict(self.mock_redis, serde2)
+        self.log_client = RedisFlatDict(self.mock_redis, serde3)
 
         # Set up and start garbage collecting loop
         grpc_client_manager = GRPCClientManager(
@@ -116,15 +130,20 @@ class GarbageCollectorTests(TestCase):
             max_client_reuse=60,
         )
 
-        # Start state garbage collection loop
-        self.garbage_collector = GarbageCollector(service, grpc_client_manager)
+        # mock the get_default_client function used to return the same
+        # fakeredis object
+        func_mock = mock.MagicMock(return_value=self.mock_redis)
+        with patch('magma.state.redis_dicts.get_default_client', func_mock):
+            # Start state garbage collection loop
+            self.garbage_collector = GarbageCollector(
+                service,
+                grpc_client_manager,
+            )
 
-    @mock.patch("redis.Redis", MockRedis)
     def tearDown(self):
         self._rpc_server.stop(None)
         self.loop.close()
 
-    @mock.patch("redis.Redis", MockRedis)
     @mock.patch('snowflake.snowflake', get_mock_snowflake)
     def test_collect_states_to_delete(self):
         async def test():
@@ -157,7 +176,6 @@ class GarbageCollectorTests(TestCase):
 
         self.loop.run_until_complete(test())
 
-    @mock.patch("redis.Redis", MockRedis)
     @mock.patch('snowflake.snowflake', get_mock_snowflake)
     @mock.patch('magma.magmad.state_reporter.ServiceRegistry.get_rpc_channel')
     def test_garbage_collect_success(self, get_rpc_mock):
@@ -185,7 +203,6 @@ class GarbageCollectorTests(TestCase):
 
         self.loop.run_until_complete(test())
 
-    @mock.patch("redis.Redis", MockRedis)
     @mock.patch('snowflake.snowflake', get_mock_snowflake)
     @mock.patch('magma.magmad.state_reporter.ServiceRegistry.get_rpc_channel')
     def test_garbage_collect_rpc_failure(self, get_rpc_mock):
@@ -217,7 +234,6 @@ class GarbageCollectorTests(TestCase):
 
         self.loop.run_until_complete(test())
 
-    @mock.patch("redis.Redis", MockRedis)
     @mock.patch('snowflake.snowflake', get_mock_snowflake)
     @mock.patch('magma.magmad.state_reporter.ServiceRegistry.get_rpc_channel')
     def test_garbage_collect_with_state_update(self, get_rpc_mock):

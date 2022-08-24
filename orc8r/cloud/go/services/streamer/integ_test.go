@@ -14,9 +14,15 @@ limitations under the License.
 package streamer_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/any"
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	streamer_client "magma/gateway/streamer"
 	"magma/orc8r/cloud/go/services/streamer"
@@ -25,11 +31,6 @@ import (
 	"magma/orc8r/lib/go/protos"
 	platform_registry "magma/orc8r/lib/go/registry"
 	"magma/orc8r/lib/go/service/config"
-
-	"github.com/golang/protobuf/ptypes"
-	"github.com/golang/protobuf/ptypes/any"
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -38,17 +39,12 @@ const (
 
 // Mock Cloud Streamer
 type mockStreamProvider struct {
-	name   string
 	retVal []*protos.DataUpdate
 	extra  *any.Any
 	retErr error
 }
 
-func (m *mockStreamProvider) GetStreamName() string {
-	return m.name
-}
-
-func (m *mockStreamProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
+func (m *mockStreamProvider) GetUpdates(ctx context.Context, gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
 	m.extra = extraArgs
 	return m.retVal, m.retErr
 }
@@ -103,10 +99,10 @@ func (cr mockedCloudRegistry) GetCloudConnection(service string) (*grpc.ClientCo
 	if service != definitions.StreamerServiceName {
 		return nil, fmt.Errorf("not Implemented")
 	}
-	return platform_registry.GetConnection(streamer.ServiceName)
+	return platform_registry.GetConnection(streamer.ServiceName, protos.ServiceType_SOUTHBOUND)
 }
 
-func (cr mockedCloudRegistry) GetCloudConnectionFromServiceConfig(serviceConfig *config.ConfigMap, service string) (*grpc.ClientConn, error) {
+func (cr mockedCloudRegistry) GetCloudConnectionFromServiceConfig(serviceConfig *config.Map, service string) (*grpc.ClientConn, error) {
 	return nil, fmt.Errorf("not Implemented")
 
 }
@@ -116,8 +112,8 @@ func TestStreamerClient(t *testing.T) {
 	streamer_test_init.StartTestService(t)
 
 	streamerClient := streamer_client.NewStreamerClient(mockedCloudRegistry{})
-	mockProvider := &mockStreamProvider{name: testStreamName, retVal: expected}
-	streamer_test_init.StartNewTestProvider(t, mockProvider)
+	mockProvider := &mockStreamProvider{retVal: expected}
+	streamer_test_init.StartNewTestProvider(t, mockProvider, testStreamName)
 
 	l := testListener{}
 	l.err = make(chan error)

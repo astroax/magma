@@ -15,12 +15,11 @@ limitations under the License.
 
 import logging
 
+from generate_service_config import generate_template_config
 from magma.common.misc_utils import get_ip_from_if
 from magma.configuration.exceptions import LoadConfigError
 from magma.configuration.mconfig_managers import load_service_mconfig_as_json
 from magma.configuration.service_configs import load_service_config
-
-from generate_service_config import generate_template_config
 
 CONFIG_OVERRIDE_DIR = '/var/opt/magma/tmp'
 
@@ -51,10 +50,13 @@ def get_context():
 def main():
     logging.basicConfig(
         level=logging.INFO,
-        format='[%(asctime)s %(levelname)s %(name)s] %(message)s')
+        format='[%(asctime)s %(levelname)s %(name)s] %(message)s',
+    )
 
-    generate_template_config('lighttpd', 'lighttpd',
-                             CONFIG_OVERRIDE_DIR, get_context())
+    generate_template_config(
+        'lighttpd', 'lighttpd',
+        CONFIG_OVERRIDE_DIR, get_context(),
+    )
 
 
 if __name__ == '__main__':

@@ -4,10 +4,18 @@ title: S1AP Integration Tests
 hide_title: true
 ---
 # S1AP Integration Tests
+
 Current testing workflow for VM-only S1AP integration tests. We cover
 gateway-only tests and some general notes.
 
-TODO: Update this document once integration tests with cloud are also supported
+CRITICAL NOTE: S1AP integration tests are supposed to be run in a headless mode,
+i.e., AGW should not be connected to Orc8r. This is quite critical as S1AP tester
+makes local configurations to Magma AGW in accordance with the testing scenario (e.g.,
+subscriber, APN, policy rules, etc.). If an Orc8r is connected, these configurations
+would be overwritten periodically and also lead to restart of services, both of which will
+interfere with the test scenario.
+
+<!-- TODO: Update this document once integration tests with cloud are also supported -->
 
 Our VM-only tests use 3 Vagrant-managed VMs hosted on the local device (laptop):
 
@@ -43,8 +51,14 @@ From `$MAGMA_ROOT/lte/gateway/python/integ_tests` on the *magma_test* VM, run
 either individual tests or the full suite of tests. A safe, non-flaky test to
 run is `s1aptests/test_attach_detach.py`.
 
-* Individual test(s): `make integ_test TESTS=<test(s)_to_run>`
-* All tests: `make integ_test`
+- Individual test(s): `make integ_test TESTS=<test(s)_to_run>`
+- All Sanity tests: `make integ_test`
+- All Non-Sanity tests: `make nonsanity`
+- Minimal set of tests to be executed before committing changes to magma repository: `make precommit`
+- Run with *-i* flag to enable continuous test runs (ignoring the failing test(s), if any):\
+ `make -i precommit` or `make -i integ_test`
+- Set *enable-flaky-retry=true* to re-run the failing test(s) to identify flaky behavior:\
+`make precommit enable-flaky-retry=true` or `make integ_test enable-flaky-retry=true`
 
 **Note**: The traffic tests will fail as traffic server is not running in this
 setup. Look at the section below on running traffic tests.
@@ -78,22 +92,19 @@ Setup described above.
 ### Testing one stateless service
 
 #### Stateless MME
+
 This section describes how to test whether MME service is persisting state to Redis.
 
 On gateway VM:
 
 1. Disable Pipelined, Mobilityd, Sctpd and Sessiond from restarting when MME
 restarts.
-
- `cd /etc/systemd/system`
-
- comment out the line `PartOf=magma@mme.service` from the following files
- (you will need sudo privileges):
-
+    1. `cd /etc/systemd/system`
+    1. comment out the line `PartOf=magma@mme.service` from the following files
+ (you will need sudo privileges):\
  magma@mobilityd.service, magma@pipelined.service, magma@sessiond.service and
 sctpd.service
-
- `sudo systemctl daemon-reload`
+    1. `sudo systemctl daemon-reload`
 
 1. In `/etc/magma/mme.yml`, set `use_stateless` to true
 1. Clean up all the state in redis: `redis-cli -p 6380 FLUSHALL`. This might
@@ -102,31 +113,26 @@ the redis service with `sudo service magma@redis start` and then try again.
 1. `cd $MAGMA_ROOT/lte/gateway; make restart`
 
 On test VM:
-1. Basic attach/detach test where MME is restarted mid-way:
 
+1. Basic attach/detach test where MME is restarted mid-way:\
   `make integ_test TESTS=s1aptests/test_attach_detach_with_mme_restart.py`
 
 1. Attach with uplink UDP traffic, where MME is restarted while UDP traffic is
-flowing:
-
- `make integ_test TESTS=s1aptests/test_attach_ul_udp_data_with_mme_restart.py`
-
+flowing:\
+ `make integ_test TESTS=s1aptests/test_attach_ul_udp_data_with_mme_restart.py`\
  , make sure traffic server VM is running (as described in traffic tests above) and
 TCP checksum is disabled on all VMs.
 
 #### Stateless Mobilityd
+
 This section describes how to test whether Mobilityd service is persisting state to Redis.
 
 On gateway VM:
 
 1. Disable MME from restarting when Mobilityd restarts.
-
- comment out the line `PartOf=magma@mobilityd.service` from the MME system
-service file `/etc/systemd/system/magma@mme.service` (you will need sudo privileges):
-
- `sudo systemctl daemon-reload`
-
-1. In `/etc/magma/mobilityd.yml`, set `persist_to_redis` to `true`
+    1. comment out the line `PartOf=magma@mobilityd.service` from the MME system
+service file `/etc/systemd/system/magma@mme.service` (you will need sudo privileges)
+    1. `sudo systemctl daemon-reload`
 
 1. Clean up all the state in redis: `redis-cli -p 6380 FLUSHALL`. This might
 throw a "Could not connect" error if magma@redis service is not running. Start
@@ -135,27 +141,25 @@ the redis service with `sudo service magma@redis start` and then try again.
 1. `cd $MAGMA_ROOT/lte/gateway; make restart`
 
 On test VM:
+
 1. `cd $MAGMA_ROOT/lte/gateway/python && make`
 1. `cd integ_tests && make`
-1. Basic attach/detach test where Mobilityd is restarted mid-way:
-
+1. Basic attach/detach test where Mobilityd is restarted mid-way:\
  `make integ_test TESTS=s1aptests/test_attach_detach_with_mobilityd_restart.py`
 
-1. Test IP blocks are maintained across service restart
-
+1. Test IP blocks are maintained across service restart\
  `make integ_test TESTS=s1aptests/test_attach_detach_multiple_ip_blocks_mobilityd_restart.py`
 
 #### Stateless Pipelined
+
 This section describes how to test whether Pipelined service is persisting state to Redis.
 
 On gateway VM:
 
 1. Disable MME from restarting when Pipelined restarts.
-
- comment out the line `PartOf=magma@pipelined.service` from the MME system
-service file `/etc/systemd/system/magma@mme.service` (you will need sudo privileges):
-
- `sudo systemctl daemon-reload`
+    1. comment out the line `PartOf=magma@pipelined.service` from the MME system
+service file `/etc/systemd/system/magma@mme.service` (you will need sudo privileges)
+    1. `sudo systemctl daemon-reload`
 
 1. In `/etc/magma/pipelined.yml`, set `clean_restart` to `false`
 
@@ -166,12 +170,11 @@ the redis service with `sudo service magma@redis start` and then try again.
 1. `cd $MAGMA_ROOT/lte/gateway; make restart`
 
 On test VM:
+
 1. `cd $MAGMA_ROOT/lte/gateway/python && make`
 1. `cd integ_tests && make`
 1. UDP traffic test where Pipelined is restarted mid-way:
-
  `make integ_test TESTS=s1aptests/test_attach_ul_udp_data_with_pipelined_restart.py`
-
 
 ### Testing stateless gateway with all services
 
@@ -182,10 +185,8 @@ listed above
 
 1. On test VM, you can run any of the test cases for individual service restarts
 listed above. Further, you can test attach with uplink UDP traffic, where
-multiple services are restarted while UDP traffic is flowing:
-
- `make integ_test TESTS=s1aptests/test_attach_ul_udp_data_with_multiple_service_restart.py`
-
+multiple services are restarted while UDP traffic is flowing:\
+ `make integ_test TESTS=s1aptests/test_attach_ul_udp_data_with_multiple_service_restart.py`\
  , make sure traffic server VM is running (as described in traffic tests above) and
 TCP checksum is disabled on all VMs.
 

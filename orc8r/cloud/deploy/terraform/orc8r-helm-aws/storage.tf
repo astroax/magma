@@ -12,6 +12,7 @@
 ################################################################################
 
 resource "kubernetes_persistent_volume_claim" "storage" {
+
   for_each = {
     promcfg = {
       access_mode = "ReadWriteMany"
@@ -55,7 +56,7 @@ resource "kubernetes_persistent_volume_claim" "storage" {
         storage = each.value.storage
       }
     }
-    storage_class_name = "efs"
+    storage_class_name = var.efs_storage_class_name
   }
 
   depends_on = [helm_release.efs_provisioner]

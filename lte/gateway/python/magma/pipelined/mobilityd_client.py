@@ -10,15 +10,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
 from typing import List
 
 import grpc
-import logging
-
+from lte.protos.mobilityd_pb2 import GWInfo, IPAddress
+from lte.protos.mobilityd_pb2_grpc import MobilityServiceStub
+from magma.common.rpc_utils import indicates_connection_error
+from magma.common.sentry import EXCLUDE_FROM_ERROR_MONITORING
 from magma.common.service_registry import ServiceRegistry
 from orc8r.protos.common_pb2 import Void
-from lte.protos.mobilityd_pb2_grpc import MobilityServiceStub
-from lte.protos.mobilityd_pb2 import IPAddress, GWInfo
 
 SERVICE_NAME = "mobilityd"
 IPV4_ADDR_KEY = "ipv4_addr"
@@ -29,8 +30,10 @@ def get_mobilityd_gw_info() -> List[GWInfo]:
     Make RPC call to 'GetGatewayInfo' method of local mobilityD service
     """
     try:
-        chan = ServiceRegistry.get_rpc_channel(SERVICE_NAME,
-                                               ServiceRegistry.LOCAL)
+        chan = ServiceRegistry.get_rpc_channel(
+            SERVICE_NAME,
+            ServiceRegistry.LOCAL,
+        )
     except ValueError:
         logging.error('Cant get RPC channel to %s', SERVICE_NAME)
         return GWInfo()
@@ -42,7 +45,9 @@ def get_mobilityd_gw_info() -> List[GWInfo]:
         logging.error(
             "ListGatewayInfo error[%s] %s",
             err.code(),
-            err.details())
+            err.details(),
+            extra=EXCLUDE_FROM_ERROR_MONITORING if indicates_connection_error(err) else None,
+        )
         return []
 
 
@@ -51,8 +56,10 @@ def set_mobilityd_gw_info(ip: IPAddress, mac: str, vlan: str):
     Make RPC call to 'SetGatewayInfo' method of local mobilityD service
     """
     try:
-        chan = ServiceRegistry.get_rpc_channel(SERVICE_NAME,
-                                               ServiceRegistry.LOCAL)
+        chan = ServiceRegistry.get_rpc_channel(
+            SERVICE_NAME,
+            ServiceRegistry.LOCAL,
+        )
     except ValueError:
         logging.error('Cant get RPC channel to %s', SERVICE_NAME)
         return
@@ -65,7 +72,8 @@ def set_mobilityd_gw_info(ip: IPAddress, mac: str, vlan: str):
         logging.error(
             "SetGatewayInfo error[%s] %s",
             err.code(),
-            err.details())
+            err.details(),
+        )
 
 
 def mobilityd_list_ip_blocks():
@@ -73,8 +81,10 @@ def mobilityd_list_ip_blocks():
     Make RPC call to query all ip-blocks.
     """
     try:
-        chan = ServiceRegistry.get_rpc_channel(SERVICE_NAME,
-                                               ServiceRegistry.LOCAL)
+        chan = ServiceRegistry.get_rpc_channel(
+            SERVICE_NAME,
+            ServiceRegistry.LOCAL,
+        )
     except ValueError:
         logging.error('Cant get RPC channel to %s', SERVICE_NAME)
         return
@@ -87,4 +97,5 @@ def mobilityd_list_ip_blocks():
         logging.error(
             "List IpBlock error[%s] %s",
             err.code(),
-            err.details())
+            err.details(),
+        )

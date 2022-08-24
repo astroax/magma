@@ -24,15 +24,15 @@ limitations under the License.
 package types
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/golang/glog"
+	"github.com/thoas/go-funk"
+
 	"magma/orc8r/cloud/go/serde"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/golang/glog"
-	"github.com/pkg/errors"
-	"github.com/thoas/go-funk"
 )
 
 const (
@@ -79,8 +79,6 @@ type SerializedState struct {
 	ReporterID string
 	// TimeMs is the time the state was received in milliseconds.
 	TimeMs uint64
-	// CertExpirationTime is the expiration time in milliseconds.
-	CertExpirationTime int64
 }
 
 // SerializedStatesByID maps state IDs to state.
@@ -178,7 +176,7 @@ func MakeProtoStates(states SerializedStatesByID) ([]*protos.State, error) {
 func MakeProtoState(id ID, st SerializedState) (*protos.State, error) {
 	bytes, err := json.Marshal(st)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal to json-encoded state proto value")
+		return nil, fmt.Errorf("failed to marshal to json-encoded state proto value: %w", err)
 	}
 	p := &protos.State{Type: id.Type, DeviceID: id.DeviceID, Value: bytes, Version: st.Version}
 	return p, nil
@@ -204,7 +202,7 @@ func MakeSerializedState(p *protos.State) (SerializedState, error) {
 	serialized := SerializedState{}
 	err := json.Unmarshal(p.Value, &serialized)
 	if err != nil {
-		return SerializedState{}, errors.Wrap(err, "error unmarshaling json-encoded state proto value")
+		return SerializedState{}, fmt.Errorf("error unmarshaling json-encoded state proto value: %w", err)
 	}
 	return serialized, nil
 }
@@ -242,10 +240,9 @@ func MakeState(p *protos.State, serdes serde.Registry) (State, *protos.IDAndErro
 	}
 
 	st := State{
-		ReporterID:         serialized.ReporterID,
-		TimeMs:             serialized.TimeMs,
-		CertExpirationTime: serialized.CertExpirationTime,
-		Version:            p.Version,
+		ReporterID: serialized.ReporterID,
+		TimeMs:     serialized.TimeMs,
+		Version:    p.Version,
 	}
 
 	// Recover reported state within state struct
@@ -256,17 +253,21 @@ func MakeState(p *protos.State, serdes serde.Registry) (State, *protos.IDAndErro
 	}
 
 	if st.ReportedState == nil {
-		err = errors.Errorf("state {type: %s, key: %s} should not have nil SerializedReportedState value", p.Type, p.DeviceID)
+		err = fmt.Errorf("state {type: %s, key: %s} should not have nil SerializedReportedState value", p.Type, p.DeviceID)
 		sErr := &protos.IDAndError{Type: p.Type, DeviceID: p.DeviceID, Error: err.Error()}
 		return State{}, sErr, nil
 	}
 	model, ok := st.ReportedState.(serde.ValidateableBinaryConvertible)
 	if !ok {
-		err = errors.Errorf("could not convert state {type: %s, key: %s} to validateable model", p.Type, p.DeviceID)
+		err = fmt.Errorf("could not convert state {type: %s, key: %s} to validateable model", p.Type, p.DeviceID)
 		sErr := &protos.IDAndError{Type: p.Type, DeviceID: p.DeviceID, Error: err.Error()}
 		return State{}, sErr, nil
 	}
-	if err := model.ValidateModel(); err != nil {
+
+	// TODO: it's worth re-evaluating if ValidateModel should be allowed to
+	//  have side effects. For now, using context.Background() because
+	//  MakeState should not take in a context.
+	if err := model.ValidateModel(context.Background()); err != nil {
 		sErr := &protos.IDAndError{Type: p.Type, DeviceID: p.DeviceID, Error: err.Error()}
 		return State{}, sErr, nil
 	}

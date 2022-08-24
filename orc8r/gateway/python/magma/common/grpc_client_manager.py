@@ -11,16 +11,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import sys
-import psutil
 import logging
+import sys
+
 import grpc
+import psutil
 from magma.common.service_registry import ServiceRegistry
 
 
 class GRPCClientManager:
-    def __init__(self, service_name: str, service_stub,
-                 max_client_reuse: int = 60):
+    def __init__(
+        self, service_name: str, service_stub,
+        max_client_reuse: int = 60,
+    ):
         self._client = None
         self._service_stub = service_stub
         self._service_name = service_name

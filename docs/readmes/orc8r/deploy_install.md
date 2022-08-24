@@ -43,17 +43,20 @@ mkdir -p ~/secrets/certs
 cd ~/secrets/certs
 ```
 
-You will need the following certificates and private keys placed in this
-directory
+You will need the following 3 certs
 
-1. The public SSL certificate for your Orchestrator domain,
-with `CN=*.yourdomain.com`. This can be an SSL certificate chain, but it must be
-in one file
-2. The private key which corresponds to the above SSL certificate
-3. The root CA certificate which verifies your SSL certificate
+1. TLS certificate
+   - CN: `yourdomain.com`
+   - SANs
+        - `yourdomain.com`
+        - `*.yourdomain.com`
+        - `*.nms.yourdomain.com`
+2. TLS certificate's private key
+3. TLS certificate's root CA certificate (which signed `controller.crt`)
 
 If you aren't worried about a browser warning, you can generate self-signed
-versions of these certs
+certs. Though please note that using trusted certs in production deployments
+is encouraged
 
 ```bash
 ${MAGMA_ROOT}/orc8r/cloud/deploy/scripts/self_sign_certs.sh yourdomain.com
@@ -61,9 +64,9 @@ ${MAGMA_ROOT}/orc8r/cloud/deploy/scripts/self_sign_certs.sh yourdomain.com
 
 Alternatively, if you already have these certs, rename and move them as follows
 
-1. Rename your public SSL certificate to `controller.crt`
-2. Rename your SSL certificate's private key to `controller.key`
-3. Rename your SSL certificate's root CA certificate to `rootCA.pem`
+1. Rename your public TLS certificate to `controller.crt`
+2. Rename your TLS certificate's private key to `controller.key`
+3. Rename your TLS certificate's root CA certificate to `rootCA.pem`
 4. Put these three files under the directory you created above
 
 Next, with the domain certs placed in the correct directory, generate the
@@ -125,26 +128,19 @@ new `main.tf` file. Follow the example Terraform root module at
 `orc8r/cloud/deploy/terraform/orc8r-helm-aws/examples/basic` but make sure to
 override the following parameters
 
-- `nms_db_password` must be at least 8 characters
 - `orc8r_db_password` must be at least 8 characters
 - `orc8r_domain_name` your registered domain name
-- `docker_registry` registry containing desired Orchestrator containers
-- `docker_user`
-- `docker_pass`
-- `helm_repo` repo containing desired Helm charts
-- `helm_user`
-- `helm_pass`
-- `seed_certs_dir`: local certs directory (e.g. `"~/secrets/certs"`)
-- `orc8r_tag`: tag used when you published your Orchestrator containers
-- `orc8r_deployment_type`: type of orc8r deployment (`fwa`, `federated_fwa`, `all`)
-
-If you don't know what values to put for the `docker_*` and `helm_*` variables,
-go through the [building Orchestrator](./deploy_build.md) section first.
+- `seed_certs_dir` local certs directory (e.g. `"~/secrets/certs"`)
+- `orc8r_tag` tag used when you published your Orchestrator containers
+- `orc8r_deployment_type` type of orc8r deployment (`fwa`, `federated_fwa`, `all`)
+- `orc8r_db_engine_version` on fresh Orc8r installs, target Postgres `12.6`
 
 Make sure that the `source` variables for the module definitions point to
-`github.com/magma/magma//orc8r/cloud/deploy/terraform/<module>?ref=v1.4`.
-Adjust any other parameters as you see fit - check the READMEs for the
+`github.com/magma/magma//orc8r/cloud/deploy/terraform/MODULE?ref=v1.6`.
+Adjust any other parameters as you see fit. Check the READMEs for the
 relevant Terraform modules to see additional variables that can be set.
+You can [override values](./deploy_terraform_options.md#override-terraform-module-values)
+that are part of the Terraform files that are used in the GitHub repository.
 
 Finally, initialize Terraform
 
@@ -159,6 +155,8 @@ Initializing provider plugins...
 
 Terraform has been successfully initialized!
 ```
+
+By default, Terraform state file will be stored locally. However, you can [store the state file remotely](./deploy_terraform_options.md#store-terraform-state-in-aws) using an AWS S3 bucket.
 
 ### Terraform Infrastructure
 
@@ -238,15 +236,18 @@ Create the Orchestrator admin user with the `admin_operator` certificate
 created earlier
 
 ```bash
-export ORC_POD=$(kubectl get pod -l app.kubernetes.io/component=orchestrator -o jsonpath='{.items[0].metadata.name}')
-kubectl exec ${ORC_POD} -- envdir /var/opt/magma/envdir /var/opt/magma/bin/accessc add-existing -admin -cert /var/opt/magma/certs/admin_operator.pem admin_operator
+kubectl --namespace orc8r exec deploy/orc8r-orchestrator -- \
+  /var/opt/magma/bin/accessc \
+  add-existing -admin -cert /var/opt/magma/certs/admin_operator.pem \
+  admin_operator
 ```
 
 If you want to verify the admin user was successfully created, inspect the
 output from
 
 ```bash
-$ kubectl exec ${ORC_POD} -- envdir /var/opt/magma/envdir /var/opt/magma/bin/accessc list-certs
+$ kubectl --namespace orc8r exec deploy/orc8r-orchestrator -- \
+  /var/opt/magma/bin/accessc list-certs
 
 # NOTE: actual values will differ
 Serial Number: 83550F07322CEDCD; Identity: Id_Operator_admin_operator; Not Before: 2020-06-26 22:39:55 +0000 UTC; Not After: 2030-06-24 22:39:55 +0000 UTC
@@ -263,8 +264,8 @@ also need to add a new admin user with the updated `admin_operator` cert.
 Create an admin user for the `master` organization on the NMS
 
 ```bash
-export NMS_POD=$(kubectl -n orc8r get pod -l  app.kubernetes.io/component=magmalte -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -it ${NMS_POD} -- yarn setAdminPassword master ADMIN_USER_EMAIL ADMIN_USER_PASSWORD
+kubectl --namespace orc8r exec -it deploy/nms-magmalte -- \
+  yarn setAdminPassword master ADMIN_USER_EMAIL ADMIN_USER_PASSWORD
 ```
 
 ## DNS Resolution
@@ -281,7 +282,7 @@ the Route53 nameservers for the hosted zone for Orchestrator. Access these
 via `terraform output` (you have probably already noticed identical output
 from every `terraform apply`). Output should be of the form:
 
-```
+```text
 Outputs:
 
 nameservers = [
@@ -325,7 +326,7 @@ will rightfully complain. Either ignore the browser warnings at your own risk
 ](https://stackoverflow.com/questions/7580508/getting-chrome-to-accept-self-signed-localhost-certificate).
 
 For interacting with the Orchestrator REST API, a good starting point is the
-Swagger UI available at `https://api.yoursubdomain.yourdomain.com/apidocs/v1/`.
+Swagger UI available at `https://api.yoursubdomain.yourdomain.com/swagger/v1/ui/`.
 
 If desired, you can also visit the AWS endpoints directly. The relevant
 services are `nginx-proxy` for NMS and `orc8r-nginx-proxy` for Orchestrator
@@ -333,7 +334,7 @@ API. Remember to include `https://`, as well as the port number for
 non-standard TLS ports.
 
 ```bash
-$ kubectl get services
+$ kubectl --namespace orc8r get services
 
 # NOTE: values will differ, e.g. the EXTERNAL-IP column
 NAME                            TYPE           CLUSTER-IP       EXTERNAL-IP                       PORT(S)                                                     AGE

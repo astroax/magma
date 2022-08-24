@@ -27,14 +27,16 @@ import (
 )
 
 const (
+	SQLDialectEnv   = "SQL_DIALECT"
 	PostgresDialect = "psql"
 	MariaDialect    = "maria"
+	SQLiteDialect   = "sqlite"
 )
 
 // GetSqlBuilder returns a squirrel Builder for the configured SQL dialect as
 // found in the SQL_DIALECT env var.
 func GetSqlBuilder() StatementBuilder {
-	dialect, envFound := os.LookupEnv("SQL_DIALECT")
+	dialect, envFound := os.LookupEnv(SQLDialectEnv)
 	// Default to postgresql
 	if !envFound {
 		return NewPostgresStatementBuilder()
@@ -316,6 +318,30 @@ func ClearStatementCacheLogOnError(cache *squirrel.StmtCache, callsite string) {
 	if err != nil {
 		glog.Errorf("error clearing statement cache in %s: %s", callsite, err)
 	}
+}
+
+// FmtConflictUpdateTarget generates the string used to refer to target column
+// used in an on-conflict upsert operation; the specific syntax depends on the
+// SQL dialect. Currently supported syntax includes
+// 1. MariaDB: "c1=t2.c1"
+// 2. Postgres: "c1=excluded.c1"
+func FmtConflictUpdateTarget(tableName string, colName string) string {
+	dialect, envFound := os.LookupEnv("SQL_DIALECT")
+	if !envFound {
+		dialect = PostgresDialect
+	}
+
+	var upsertColumnPrefix string
+	switch strings.ToLower(dialect) {
+	case PostgresDialect:
+		upsertColumnPrefix = "excluded"
+	case MariaDialect:
+		upsertColumnPrefix = tableName
+	default:
+		// By default, return Postgres syntax
+		upsertColumnPrefix = "excluded"
+	}
+	return fmt.Sprintf("%s.%s", upsertColumnPrefix, colName)
 }
 
 func setValuesToUpsertClause(setValues []UpsertValue, writeSet bool) (string, []interface{}) {

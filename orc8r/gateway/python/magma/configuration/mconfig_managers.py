@@ -10,19 +10,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import abc
 import contextlib
 import json
-from typing import Any, Generic, TypeVar
-
-import abc
+import logging
 import os
+from typing import Any, Generic, TypeVar
 
 import magma.configuration.events as magma_configuration_events
 from google.protobuf import json_format
 from magma.common import serialization_utils
 from magma.configuration.exceptions import LoadConfigError
-from magma.configuration.mconfigs import filter_configs_by_key, \
-    unpack_mconfig_any
+from magma.configuration.mconfigs import (
+    SHARED_MCONFIG,
+    filter_configs_by_key,
+    unpack_mconfig_any,
+)
+from orc8r.protos.mconfig import mconfigs_pb2
 from orc8r.protos.mconfig_pb2 import GatewayConfigs, GatewayConfigsMetadata
 
 T = TypeVar('T')
@@ -80,7 +84,10 @@ class MconfigManager(Generic[T]):
         pass
 
     @abc.abstractmethod
-    def load_service_mconfig(self, service_name: str, mconfig_struct: Any) -> Any:
+    def load_service_mconfig(
+        self, service_name: str,
+        mconfig_struct: Any,
+    ) -> Any:
         """
         Load a specific service's managed configuration.
 
@@ -90,6 +97,22 @@ class MconfigManager(Generic[T]):
             for the service
 
         Returns: Loaded config value for the service
+        """
+        pass
+
+    @abc.abstractmethod
+    def load_shared_mconfig(
+        self,
+        shared_mconfig_struct: mconfigs_pb2.SharedMconfig,
+    ) -> mconfigs_pb2.SharedMconfig:
+        """
+        Load the shared managed configuration.
+
+        Args:
+            shared_mconfig_struct (SharedMconfig): protobuf message struct of
+            the shared managed config
+
+        Returns: Loaded shared config value
         """
         pass
 
@@ -113,8 +136,10 @@ class MconfigManager(Generic[T]):
         pass
 
     @abc.abstractmethod
-    def deserialize_mconfig(self, serialized_value: str,
-                            allow_unknown_fields: bool = True) -> T:
+    def deserialize_mconfig(
+        self, serialized_value: str,
+        allow_unknown_fields: bool = True,
+    ) -> T:
         """
         Deserialize the given string to the managed mconfig.
 
@@ -136,7 +161,7 @@ class MconfigManager(Generic[T]):
         pass
 
 
-class MconfigManagerImpl(MconfigManager[GatewayConfigs]):
+class MconfigManagerImpl(MconfigManager[GatewayConfigs]):  # pylint: disable=missing-docstring
     """
     Legacy mconfig manager for non-offset mconfigs
     """
@@ -147,14 +172,18 @@ class MconfigManagerImpl(MconfigManager[GatewayConfigs]):
     def load_mconfig(self) -> GatewayConfigs:
         cfg_file_name = self._get_mconfig_file_path()
         try:
-            with open(cfg_file_name, 'r') as cfg_file:
+            with open(cfg_file_name, 'r', encoding='utf-8') as cfg_file:
                 mconfig_str = cfg_file.read()
             return self.deserialize_mconfig(mconfig_str)
         except (OSError, json.JSONDecodeError, json_format.ParseError) as e:
             raise LoadConfigError('Error loading mconfig') from e
 
-    def load_service_mconfig(self, service_name: str, mconfig_struct: Any) -> Any:
+    def load_service_mconfig(
+        self, service_name: str,
+        mconfig_struct: Any,
+    ) -> Any:
         mconfig = self.load_mconfig()
+
         if service_name not in mconfig.configs_by_key:
             raise LoadConfigError(
                 "Service ({}) missing in mconfig".format(service_name),
@@ -163,9 +192,26 @@ class MconfigManagerImpl(MconfigManager[GatewayConfigs]):
         service_mconfig = mconfig.configs_by_key[service_name]
         return unpack_mconfig_any(service_mconfig, mconfig_struct)
 
+    def load_shared_mconfig(
+        self, shared_mconfig_struct: mconfigs_pb2.SharedMconfig,
+    ) -> mconfigs_pb2.SharedMconfig:
+        """Documented in base class.
+        """
+        mconfig = self.load_mconfig()
+
+        service_mconfig = mconfig.configs_by_key.get(SHARED_MCONFIG)
+        if service_mconfig is None:
+            logging.warning(
+                "Shared Mconfig is missing in "
+                "mconfig.configs_by_key. Returning configs unchanged.",
+            )
+            return shared_mconfig_struct
+
+        return unpack_mconfig_any(service_mconfig, shared_mconfig_struct)
+
     def load_service_mconfig_as_json(self, service_name) -> Any:
         cfg_file_name = self._get_mconfig_file_path()
-        with open(cfg_file_name, 'r') as f:
+        with open(cfg_file_name, 'r', encoding='utf-8') as f:
             json_mconfig = json.load(f)
             service_configs = json_mconfig.get('configsByKey', {})
             service_configs.update(json_mconfig.get('configs_by_key', {}))
@@ -180,9 +226,10 @@ class MconfigManagerImpl(MconfigManager[GatewayConfigs]):
         mconfig = self.load_mconfig()
         return mconfig.metadata
 
-    def deserialize_mconfig(self, serialized_value: str,
-                            allow_unknown_fields: bool = True,
-                            ) -> GatewayConfigs:
+    def deserialize_mconfig(
+        self, serialized_value: str,
+        allow_unknown_fields: bool = True,
+    ) -> GatewayConfigs:
         # First parse as JSON in case there are types unrecognized by
         # protobuf symbol database
         json_mconfig = json.loads(serialized_value)
@@ -212,8 +259,9 @@ class MconfigManagerImpl(MconfigManager[GatewayConfigs]):
         magma_configuration_events.deleted_stored_mconfig()
 
     def update_stored_mconfig(self, updated_value: str) -> GatewayConfigs:
+        parsed = json.loads(updated_value)
         serialization_utils.write_to_file_atomically(
-            self.MCONFIG_PATH, updated_value,
+            self.MCONFIG_PATH, json.dumps(parsed, indent=4, sort_keys=True),
         )
         magma_configuration_events.updated_stored_mconfig()
 

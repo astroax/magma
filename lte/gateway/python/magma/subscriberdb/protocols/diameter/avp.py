@@ -10,11 +10,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+# pylint: disable=too-many-function-args
 
 import abc
-from enum import IntEnum, unique
 import socket
 import struct
+from enum import IntEnum, unique
 
 from . import exception
 
@@ -62,8 +63,10 @@ class BaseAVP(metaclass=abc.ABCMeta):
 
     """
 
-    def __init__(self, code, value=None, flags=0, name='',
-                 vendor=VendorId.DEFAULT):
+    def __init__(
+        self, code, value=None, flags=0, name='',
+        vendor=VendorId.DEFAULT,
+    ):
         self.code = code
         self.vendor = vendor
         self.name = name
@@ -130,17 +133,21 @@ class BaseAVP(metaclass=abc.ABCMeta):
         flags_str += 'M' if self.mandatory else ''
         flags_str += 'P' if self.protected else ''
         flags_str += 'V' if self.vendor_specific else ''
-        return ("%s: type=%s vendor=%s, code=%s, "
-                "flags=%s(0x%x) length=%d payload_len=%d: %s" %
-                (self.name,
-                 self.__class__.__name__,
-                 self.vendor,
-                 self.code,
-                 flags_str,
-                 self.flags,
-                 self.length,
-                 self._payload_length(),
-                 self.value))
+        return (
+            "%s: type=%s vendor=%s, code=%s, "
+            "flags=%s(0x%x) length=%d payload_len=%d: %s" %
+            (
+                self.name,
+                self.__class__.__name__,
+                self.vendor,
+                self.code,
+                flags_str,
+                self.flags,
+                self.length,
+                self._payload_length(),
+                self.value,
+            )
+        )
 
     def __eq__(self, other):
         """
@@ -208,10 +215,11 @@ class BaseAVP(metaclass=abc.ABCMeta):
         offset = begin
 
         # Write the header
-        struct.pack_into("!II", buf, offset,
-                         self.code,
-                         self.flags << 24 | self._encoded_length(),
-                         )
+        struct.pack_into(
+            "!II", buf, offset,
+            self.code,
+            self.flags << 24 | self._encoded_length(),
+        )
         offset += HEADER_LEN
 
         # Do we need to add a vendor?
@@ -232,7 +240,7 @@ class BaseAVP(metaclass=abc.ABCMeta):
         return offset - begin
 
     # pylint:disable=no-self-argument
-    def flag_getter(mask):
+    def flag_getter(mask: int):  # type: ignore[misc]
         """Convenience getter for reading AVP flags"""
 
         def getter(self):
@@ -241,7 +249,7 @@ class BaseAVP(metaclass=abc.ABCMeta):
         return getter
 
     # pylint:disable=no-self-argument
-    def flag_setter(mask):
+    def flag_setter(mask: int):  # type: ignore[misc]
         """Convenience setter for reading AVP flags"""
 
         def setter(self, value):
@@ -253,15 +261,21 @@ class BaseAVP(metaclass=abc.ABCMeta):
 
     # Convenience flag properties
     # If an AVP is mandatory the responder must handle it to return success
-    mandatory = property(flag_getter(FLAG_MANDATORY),
-                         flag_setter(FLAG_MANDATORY))
+    mandatory = property(
+        flag_getter(FLAG_MANDATORY),
+        flag_setter(FLAG_MANDATORY),
+    )
     # This bit indicated the data has been end to end encrypted
-    protected = property(flag_getter(FLAG_PROTECTED),
-                         flag_setter(FLAG_PROTECTED))
+    protected = property(
+        flag_getter(FLAG_PROTECTED),
+        flag_setter(FLAG_PROTECTED),
+    )
     # This bit inidicated that there are four bytes of vendor ID before the
     # payload
-    vendor_specific = property(flag_getter(FLAG_VENDOR),
-                               flag_setter(FLAG_VENDOR))
+    vendor_specific = property(
+        flag_getter(FLAG_VENDOR),
+        flag_setter(FLAG_VENDOR),
+    )
 
 
 class OctetStringAVP(BaseAVP):
@@ -343,8 +357,10 @@ class GroupedAVP(BaseAVP):
         Return:
             an iterator on all AVPs that match
         """
-        return filter(lambda element: element.vendor == vendor \
-                                      and element.code == code, self.value)
+        return filter(
+            lambda element: element.vendor == vendor
+            and element.code == code, self.value,
+        )
 
     def find_avp(self, vendor, code):
         """
@@ -388,6 +404,7 @@ class AddressAVP(BaseAVP):
 
         raise exception.CodecException("Not a valid address")
 
+
 class EnumAVP(Unsigned32AVP):
     """
     Decode Enum AVPs given a Enum type
@@ -402,6 +419,7 @@ class EnumAVP(Unsigned32AVP):
         except ValueError:
             return val
 
+
 @unique
 class ResultCode(IntEnum):
     """
@@ -415,6 +433,7 @@ class ResultCode(IntEnum):
     DIAMETER_AUTHORIZATION_REJECTED = 5003
     DIAMETER_AUTHENTICATION_REJECTED = 4001
     DIAMETER_UNABLE_TO_COMPLY = 5012
+    DIAMETER_ERROR_UNAUTHORIZED_SERVICE = 5511
 
 
 class ResultCodeAVP(EnumAVP):
@@ -422,6 +441,7 @@ class ResultCodeAVP(EnumAVP):
     Decode Result-Code AVP as ResultCode Enums
     """
     enum = ResultCode
+
 
 @unique
 class DisconnectCause(IntEnum):
@@ -431,6 +451,7 @@ class DisconnectCause(IntEnum):
     REBOOTING = 0
     BUSY = 1
     DO_NOT_WANT_TO_TALK_TO_YOU = 2
+
 
 class DisconnectCauseAVP(EnumAVP):
     """
@@ -476,13 +497,13 @@ def AVP(ident, value=None, **kwargs):
     avp_unknown = ('Unknown-AVP', UnknownAVP, 0)
     vendor = None
     code = None
-    if type(ident) == int:
+    if isinstance(ident, int):
         vendor = VendorId.DEFAULT
         code = ident
-    elif type(ident) == tuple:
+    elif isinstance(ident, tuple):
         vendor = ident[0]
         code = ident[1]
-    elif type(ident) == str:
+    elif isinstance(ident, str):
         vendor, code = resolve(ident)
     else:
         raise TypeError('Invalid key type')
@@ -490,8 +511,10 @@ def AVP(ident, value=None, **kwargs):
     name = avp_def[0]
     avp_type = avp_def[1]
     flags = kwargs.pop('flags', avp_def[2])
-    return avp_type(code, value=value,
-                    vendor=vendor, flags=flags, name=name, **kwargs)
+    return avp_type(
+        code, value=value,
+        vendor=vendor, flags=flags, name=name, **kwargs,
+    )
 
 
 def resolve(name):
@@ -580,71 +603,127 @@ AVPDict = {
         299: ('Inband-Security-Id', Unsigned32AVP, FLAG_MANDATORY),
     },
     VendorId.TGPP: {
-        493: ('Service-Selection', UTF8StringAVP,
-              FLAG_MANDATORY | FLAG_VENDOR),
+        493: (
+            'Service-Selection', UTF8StringAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
         # 3GPP 29.214-b80 (11.8.0 2013.03.15) Section 5.3
-        515: ('Max-Requested-Bandwidth-DL', Unsigned32AVP,
-              FLAG_MANDATORY | FLAG_VENDOR),
-        516: ('Max-Requested-Bandwidth-UL', Unsigned32AVP,
-              FLAG_MANDATORY | FLAG_VENDOR),
+        515: (
+            'Max-Requested-Bandwidth-DL', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        516: (
+            'Max-Requested-Bandwidth-UL', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
         # 3GPP 29.140-700 (7.0.0 2007.07.05) Section 6.3
         701: ('MSISDN', OctetStringAVP, FLAG_MANDATORY | FLAG_VENDOR),
         # 3GPP 29.212-c00 (12.0.0 2013.03.15) Section 5.3
-        1028: ('QoS-Class-Identifier', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1032: ('RAT-Type', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1034: ('Allocation-Retention-Priority', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1046: ('Priority-Level', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1047: ('Pre-emption-Capability', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1048: ('Pre-emption-Vulnerability', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
+        1028: (
+            'QoS-Class-Identifier', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1032: (
+            'RAT-Type', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1034: (
+            'Allocation-Retention-Priority', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1046: (
+            'Priority-Level', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1047: (
+            'Pre-emption-Capability', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1048: (
+            'Pre-emption-Vulnerability', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
         # 3GPP 29.272-c00 (12.0.0 2013.03.13) Section 7.3
-        1400: ('Subscription-Data', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1405: ('ULR-Flags', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1406: ('ULA-Flags', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1407: ('Visited-PLMN-Id', OctetStringAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1408: ('Requested-EUTRAN-Authentication-Info', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1410: ('Number-Of-Requested-Vectors', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1411: ('Re-Synchronization-Info', OctetStringAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1412: ('Immediate-Response-Preferred', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1413: ('Authentication-Info', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1414: ('E-UTRAN-Vector', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1417: ('Network-Access-Mode', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1423: ('Context-Identifier', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1424: ('Subscriber-Status', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1426: ('Access-Restriction-Data', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1428: ('All-APN-Configurations-Included-Indicator', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1429: ('APN-Configuration-Profile', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1430: ('APN-Configuration', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-        1431: ('EPS-Subscribed-QoS-Profile', GroupedAVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
+        1400: (
+            'Subscription-Data', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1405: (
+            'ULR-Flags', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1406: (
+            'ULA-Flags', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1407: (
+            'Visited-PLMN-Id', OctetStringAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1408: (
+            'Requested-EUTRAN-Authentication-Info', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1410: (
+            'Number-Of-Requested-Vectors', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1411: (
+            'Re-Synchronization-Info', OctetStringAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1412: (
+            'Immediate-Response-Preferred', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1413: (
+            'Authentication-Info', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1414: (
+            'E-UTRAN-Vector', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1417: (
+            'Network-Access-Mode', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1423: (
+            'Context-Identifier', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1424: (
+            'Subscriber-Status', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1426: (
+            'Access-Restriction-Data', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1428: (
+            'All-APN-Configurations-Included-Indicator', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1429: (
+            'APN-Configuration-Profile', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1430: (
+            'APN-Configuration', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+        1431: (
+            'EPS-Subscribed-QoS-Profile', GroupedAVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
         1435: ('AMBR', GroupedAVP, FLAG_MANDATORY | FLAG_VENDOR),
         1447: ('RAND', OctetStringAVP, FLAG_MANDATORY | FLAG_VENDOR),
         1448: ('XRES', OctetStringAVP, FLAG_MANDATORY | FLAG_VENDOR),
         1449: ('AUTN', OctetStringAVP, FLAG_MANDATORY | FLAG_VENDOR),
         1450: ('KASME', OctetStringAVP, FLAG_MANDATORY | FLAG_VENDOR),
-        1456: ('PDN-Type', Unsigned32AVP,
-               FLAG_MANDATORY | FLAG_VENDOR),
-    }
+        1456: (
+            'PDN-Type', Unsigned32AVP,
+            FLAG_MANDATORY | FLAG_VENDOR,
+        ),
+    },
 }

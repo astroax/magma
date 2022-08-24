@@ -14,20 +14,21 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
-	"magma/orc8r/cloud/go/obsidian"
+	"github.com/labstack/echo/v4"
+
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/serdes"
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/ctraced/obsidian/models"
 	"magma/orc8r/cloud/go/services/ctraced/storage"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/cloud/go/services/obsidian"
+	"magma/orc8r/lib/go/merrors"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/labstack/echo"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -62,13 +63,14 @@ func listCallTraces(c echo.Context) error {
 		return nerr
 	}
 
-	callTraces, err := configurator.LoadAllEntitiesOfType(
+	callTraces, _, err := configurator.LoadAllEntitiesOfType(
+		c.Request().Context(),
 		networkID, orc8r.CallTraceEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	ret := map[string]*models.CallTrace{}
@@ -86,7 +88,7 @@ func getCreateCallTraceHandlerFunc(client GwCtracedClient) echo.HandlerFunc {
 		}
 		cfg := &models.CallTraceConfig{}
 		if err := c.Bind(cfg); err != nil {
-			return obsidian.HttpError(err, http.StatusBadRequest)
+			return echo.NewHTTPError(http.StatusBadRequest, err)
 		}
 		ctr := &models.CallTrace{
 			Config: cfg,
@@ -95,34 +97,36 @@ func getCreateCallTraceHandlerFunc(client GwCtracedClient) echo.HandlerFunc {
 				CallTraceEnding:    false,
 			},
 		}
-		exists, err := configurator.DoesEntityExist(networkID, orc8r.CallTraceEntityType, cfg.TraceID)
+		reqCtx := c.Request().Context()
+
+		exists, err := configurator.DoesEntityExist(reqCtx, networkID, orc8r.CallTraceEntityType, cfg.TraceID)
 		if exists {
-			return obsidian.HttpError(errors.New(fmt.Sprintf("Call trace id: %s already exists", cfg.TraceID)))
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Call trace id: %s already exists", cfg.TraceID))
 		}
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
-		if err := ctr.ValidateModel(); err != nil {
-			return obsidian.HttpError(err, http.StatusBadRequest)
+		if err := ctr.ValidateModel(context.Background()); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err)
 		}
 
 		req, err := buildStartTraceRequest(cfg)
 		if err != nil {
-			return obsidian.HttpError(errors.Wrap(err, "failed to build call trace request"), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to build call trace request: %w", err))
 		}
 
-		resp, err := client.StartCallTrace(networkID, cfg.GatewayID, req)
+		resp, err := client.StartCallTrace(reqCtx, networkID, cfg.GatewayID, req)
 		if err != nil {
-			return obsidian.HttpError(errors.Wrap(err, "failed to start call trace"), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to start call trace: %w", err))
 		}
 		if !resp.Success {
-			return obsidian.HttpError(errors.New("failed to start call trace"), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, errors.New("failed to start call trace"))
 		}
 
 		createdEntity := ctr.ToEntity()
-		_, err = configurator.CreateEntity(networkID, createdEntity, serdes.Entity)
+		_, err = configurator.CreateEntity(reqCtx, networkID, createdEntity, serdes.Entity)
 		if err != nil {
-			return obsidian.HttpError(errors.Wrap(err, "failed to create call trace"), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to create call trace: %w", err))
 		}
 		return c.JSON(http.StatusCreated, cfg.TraceID)
 	}
@@ -142,12 +146,14 @@ func getUpdateCallTraceHandlerFunc(client GwCtracedClient, storage storage.Ctrac
 		if nerr != nil {
 			return nerr
 		}
+		reqCtx := c.Request().Context()
+
 		mutableCallTrace := &models.MutableCallTrace{}
 		if err := c.Bind(mutableCallTrace); err != nil {
-			return obsidian.HttpError(err, http.StatusBadRequest)
+			return echo.NewHTTPError(http.StatusBadRequest, err)
 		}
-		if err := mutableCallTrace.ValidateModel(); err != nil {
-			return obsidian.HttpError(err, http.StatusBadRequest)
+		if err := mutableCallTrace.ValidateModel(reqCtx); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err)
 		}
 
 		callTrace, err := getCallTraceModel(c)
@@ -155,26 +161,28 @@ func getUpdateCallTraceHandlerFunc(client GwCtracedClient, storage storage.Ctrac
 			return err
 		}
 		if !shouldEndTraceBeTriggered(callTrace, mutableCallTrace) {
-			return obsidian.HttpError(errors.New("Error: call trace end already triggered earlier"), http.StatusBadRequest)
+			return echo.NewHTTPError(http.StatusBadRequest, errors.New("Error: call trace end already triggered earlier"))
 		}
 
-		req := &protos.EndTraceRequest{}
-		resp, err := client.EndCallTrace(networkID, callTrace.Config.GatewayID, req)
+		req := &protos.EndTraceRequest{
+			TraceId: callTraceID,
+		}
+		resp, err := client.EndCallTrace(reqCtx, networkID, callTrace.Config.GatewayID, req)
 		if err != nil {
 			return err
 		}
 		if !resp.Success {
-			return obsidian.HttpError(errors.New("Failed to end call trace"), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, errors.New("Failed to end call trace"))
 		}
 
 		err = storage.StoreCallTrace(networkID, callTraceID, resp.TraceContent)
 		if err != nil {
-			return obsidian.HttpError(errors.Wrap(err, fmt.Sprintf("failed to save call trace data, network-id: %s, gateway-id: %s, calltrace-id: %s", networkID, callTrace.Config.GatewayID, callTraceID)), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to save call trace data, network-id: %s, gateway-id: %s, calltrace-id: %s: %w", networkID, callTrace.Config.GatewayID, callTraceID, err))
 		}
 
-		_, err = configurator.UpdateEntity(networkID, mutableCallTrace.ToEntityUpdateCriteria(callTraceID, *callTrace), serdes.Entity)
+		_, err = configurator.UpdateEntity(reqCtx, networkID, mutableCallTrace.ToEntityUpdateCriteria(callTraceID, *callTrace), serdes.Entity)
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -189,12 +197,12 @@ func getDeleteCallTraceHandlerFunc(client GwCtracedClient, storage storage.Ctrac
 
 		err := storage.DeleteCallTrace(networkID, callTraceID)
 		if err != nil {
-			return obsidian.HttpError(errors.Wrap(err, "failed to delete call trace data"), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to delete call trace data: %w", err))
 		}
 
-		err = configurator.DeleteEntity(networkID, orc8r.CallTraceEntityType, callTraceID)
+		err = configurator.DeleteEntity(c.Request().Context(), networkID, orc8r.CallTraceEntityType, callTraceID)
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -209,7 +217,7 @@ func getDownloadCallTraceHandlerFunc(storage storage.CtracedStorage) echo.Handle
 
 		callTrace, err := storage.GetCallTrace(networkID, callTraceID)
 		if err != nil {
-			return obsidian.HttpError(errors.Wrap(err, "failed to retrieve call trace data"), http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to retrieve call trace data: %w", err))
 		}
 
 		res := c.Response()
@@ -228,20 +236,21 @@ func getCallTraceModel(c echo.Context) (*models.CallTrace, error) {
 		return nil, nerr
 	}
 	ent, err := configurator.LoadEntity(
+		c.Request().Context(),
 		networkID, orc8r.CallTraceEntityType, callTraceID,
 		configurator.EntityLoadCriteria{LoadConfig: true},
 		serdes.Entity,
 	)
 	if err == merrors.ErrNotFound {
-		return nil, obsidian.HttpError(err, http.StatusNotFound)
+		return nil, echo.NewHTTPError(http.StatusNotFound, err)
 	}
 	if err != nil {
-		return nil, obsidian.HttpError(err, http.StatusInternalServerError)
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	callTrace := &models.CallTrace{}
 	err = callTrace.FromBackendModels(ent)
 	if err != nil {
-		return nil, obsidian.HttpError(err, http.StatusInternalServerError)
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return callTrace, nil
 }
@@ -256,7 +265,11 @@ func getNetworkIDAndCallTraceID(c echo.Context) (string, string, *echo.HTTPError
 
 func buildStartTraceRequest(cfg *models.CallTraceConfig) (*protos.StartTraceRequest, error) {
 	req := &protos.StartTraceRequest{
-		TraceType: protos.StartTraceRequest_ALL,
+		TraceId:        cfg.TraceID,
+		TraceType:      protos.StartTraceRequest_ALL,
+		Timeout:        cfg.Timeout,
+		CaptureFilters: cfg.CaptureFilters,
+		DisplayFilters: cfg.DisplayFilters,
 	}
 	return req, nil
 }

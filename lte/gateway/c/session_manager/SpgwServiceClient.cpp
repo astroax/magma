@@ -11,9 +11,22 @@
  * limitations under the License.
  */
 
-#include "SpgwServiceClient.h"
-#include "ServiceRegistrySingleton.h"
-#include "magma_logging.h"
+#include "lte/gateway/c/session_manager/SpgwServiceClient.hpp"
+
+#include <glog/logging.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/impl/codegen/status.h>
+#include <lte/protos/policydb.pb.h>
+#include <lte/protos/spgw_service.grpc.pb.h>
+#include <lte/protos/spgw_service.pb.h>
+#include <lte/protos/subscriberdb.pb.h>
+#include <algorithm>
+#include <cstdint>
+#include <ostream>
+#include <utility>
+
+#include "orc8r/gateway/c/common/logging/magma_logging.hpp"
+#include "orc8r/gateway/c/common/service_registry/ServiceRegistrySingleton.hpp"
 
 using grpc::Status;
 
@@ -31,23 +44,6 @@ magma::DeleteBearerRequest create_delete_bearer_req(
   auto ebis = req.mutable_eps_bearer_ids();
   for (const auto& eps_bearer_id : eps_bearer_ids) {
     ebis->Add(eps_bearer_id);
-  }
-
-  return req;
-}
-
-magma::CreateBearerRequest create_add_bearer_req(
-    const std::string& imsi, const std::string& apn_ip_addr,
-    const uint32_t linked_bearer_id,
-    const std::vector<magma::PolicyRule>& flows) {
-  magma::CreateBearerRequest req;
-  req.mutable_sid()->set_id(imsi);
-  req.set_ip_addr(apn_ip_addr);
-  req.set_link_bearer_id(linked_bearer_id);
-
-  auto req_policy_rules = req.mutable_policy_rules();
-  for (const auto& flow : flows) {
-    req_policy_rules->Add()->CopyFrom(flow);
   }
 
   return req;
@@ -122,8 +118,8 @@ bool AsyncSpgwServiceClient::delete_bearer(
     const std::string& imsi, const std::string& apn_ip_addr,
     const uint32_t linked_bearer_id,
     const std::vector<uint32_t>& eps_bearer_ids) {
-  auto req = create_delete_bearer_req(
-      imsi, apn_ip_addr, linked_bearer_id, eps_bearer_ids);
+  auto req = create_delete_bearer_req(imsi, apn_ip_addr, linked_bearer_id,
+                                      eps_bearer_ids);
   delete_bearer_rpc(
       req, [imsi, apn_ip_addr](Status status, DeleteBearerResult resp) {
         if (!status.ok()) {
@@ -140,8 +136,8 @@ void AsyncSpgwServiceClient::delete_bearer_rpc(
     std::function<void(Status, DeleteBearerResult)> callback) {
   auto local_resp = new AsyncLocalResponse<DeleteBearerResult>(
       std::move(callback), RESPONSE_TIMEOUT);
-  local_resp->set_response_reader(std::move(
-      stub_->AsyncDeleteBearer(local_resp->get_context(), request, &queue_)));
+  local_resp->set_response_reader(
+      stub_->AsyncDeleteBearer(local_resp->get_context(), request, &queue_));
 }
 
 void AsyncSpgwServiceClient::create_dedicated_bearer_rpc(
@@ -149,8 +145,8 @@ void AsyncSpgwServiceClient::create_dedicated_bearer_rpc(
     std::function<void(Status, CreateBearerResult)> callback) {
   auto local_resp = new AsyncLocalResponse<CreateBearerResult>(
       std::move(callback), RESPONSE_TIMEOUT);
-  local_resp->set_response_reader(std::move(
-      stub_->AsyncCreateBearer(local_resp->get_context(), request, &queue_)));
+  local_resp->set_response_reader(
+      stub_->AsyncCreateBearer(local_resp->get_context(), request, &queue_));
 }
 
 }  // namespace magma

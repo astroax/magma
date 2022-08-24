@@ -16,8 +16,6 @@ package handlers
 import (
 	"time"
 
-	"magma/feg/gateway/services/eap/providers/sim"
-
 	"github.com/golang/glog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,6 +25,7 @@ import (
 	"magma/feg/gateway/services/eap/providers/aka"
 	"magma/feg/gateway/services/eap/providers/aka/metrics"
 	"magma/feg/gateway/services/eap/providers/aka/servicers"
+	"magma/feg/gateway/services/eap/providers/sim"
 	"magma/feg/gateway/services/swx_proxy"
 )
 
@@ -103,13 +102,13 @@ func getSwxVector(s *servicers.EapAkaSrv, imsi string, resyncInfo []byte) (*tgpp
 		return nil, status.Error(codes.Internal, "Error: Nil SWx Response")
 	}
 	if len(ans.SipAuthVectors) == 0 {
-		return nil, status.Errorf(codes.Internal, "Error: Missing/empty SWx Auth Vector: %+v", *ans)
+		return nil, status.Errorf(codes.Internal, "Error: Missing/empty SWx Auth Vector: %+v", ans)
 	}
 	av := ans.SipAuthVectors[0] // Use first vector for now
 	ra := av.GetRandAutn()
 	if len(ra) < aka.RandAutnLen {
 		return nil, status.Errorf(codes.Internal,
-			"Invalid SWx RandAutn len (%d, expected: %d) in Response: %+v", len(ra), aka.RandAutnLen, *ans)
+			"Invalid SWx RandAutn len (%d, expected: %d) in Response: %+v", len(ra), aka.RandAutnLen, ans)
 	}
 	return &tgppAuthResult{
 		rand:    ra[:aka.RAND_LEN],

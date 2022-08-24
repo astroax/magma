@@ -10,10 +10,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+
 from magma.common.health.service_state_wrapper import ServiceStateWrapper
+from magma.common.sentry import sentry_init
 from magma.common.service import MagmaService
 from magma.configuration.service_configs import load_service_config
-
 from magma.health.state_recovery import StateRecoveryJob
 
 
@@ -22,6 +23,9 @@ def main():
     Top-level function for health service
     """
     service = MagmaService('health', None)
+
+    # Optionally pipe errors to Sentry
+    sentry_init(service_name=service.name, sentry_mconfig=service.shared_mconfig.sentry_config)
 
     # Service state wrapper obj
     service_state = ServiceStateWrapper()
@@ -35,13 +39,15 @@ def main():
 
     redis_dump_src = load_service_config("redis").get("dir", "/var/opt/magma")
 
-    state_recovery_job = StateRecoveryJob(service_state=service_state,
-                                          polling_interval=polling_interval,
-                                          services_check=services_check,
-                                          restart_threshold=restart_threshold,
-                                          redis_dump_src=redis_dump_src,
-                                          snapshots_dir=snapshots_dir,
-                                          service_loop=service.loop)
+    state_recovery_job = StateRecoveryJob(
+        service_state=service_state,
+        polling_interval=polling_interval,
+        services_check=services_check,
+        restart_threshold=restart_threshold,
+        redis_dump_src=redis_dump_src,
+        snapshots_dir=snapshots_dir,
+        service_loop=service.loop,
+    )
     state_recovery_job.start()
 
     # Run the service loop

@@ -11,22 +11,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import ipaddress
+from typing import Dict
 
-from lte.protos.policydb_pb2 import FlowMatch
 from lte.protos.mobilityd_pb2 import IPAddress
+from lte.protos.policydb_pb2 import FlowMatch
+from magma.pipelined.ipv6_prefix_store import IPV6_PREFIX_LEN, get_ipv6_prefix
 from magma.pipelined.openflow.magma_match import MagmaMatch
-from magma.pipelined.openflow.registers import Direction, load_direction, \
-    DPI_REG
+from magma.pipelined.openflow.registers import (
+    DPI_REG,
+    Direction,
+    load_direction,
+)
 from ryu.lib.packet import ether_types
 
-
-MATCH_ATTRIBUTES = ['metadata', 'reg0', 'reg1', 'reg2', 'reg3', 'reg4', 'reg5',
-                    'reg6', 'reg8', 'reg9', 'reg10',
-                    'in_port', 'dl_vlan', 'vlan_tci',
-                    'eth_type', 'dl_dst', 'dl_src',
-                    'arp_tpa', 'arp_spa', 'arp_op',
-                    'ipv4_dst', 'ipv4_src', 'ipv6_src', 'ipv6_dst',
-                    'ip_proto', 'tcp_src', 'tcp_dst', 'udp_src', 'udp_dst']
+MATCH_ATTRIBUTES = [
+    'metadata', 'reg0', 'reg1', 'reg2', 'reg3', 'reg4', 'reg5',
+    'reg6', 'reg8', 'reg9', 'reg10', 'reg12',
+    'in_port', 'dl_vlan', 'vlan_tci',
+    'eth_type', 'dl_dst', 'dl_src',
+    'arp_tpa', 'arp_spa', 'arp_op',
+    'ipv4_dst', 'ipv4_src', 'ipv6_src', 'ipv6_dst',
+    'ip_proto', 'tcp_src', 'tcp_dst', 'udp_src', 'udp_dst',
+]
 
 
 class FlowMatchError(Exception):
@@ -40,13 +46,35 @@ def _check_pkt_protocol(match):
     Args:
         match: FlowMatch
     '''
-    if (match.tcp_dst or match.tcp_src) and (match.ip_proto !=
-                                             match.IPPROTO_TCP):
+    if (match.tcp_dst or match.tcp_src) and (
+        match.ip_proto !=
+        match.IPPROTO_TCP
+    ):
         raise FlowMatchError("To use tcp rules set ip_proto to IPPROTO_TCP")
-    if (match.udp_dst or match.udp_src) and (match.ip_proto !=
-                                             match.IPPROTO_UDP):
+    if (match.udp_dst or match.udp_src) and (
+        match.ip_proto !=
+        match.IPPROTO_UDP
+    ):
         raise FlowMatchError("To use udp rules set ip_proto to IPPROTO_UDP")
     return True
+
+
+def get_ipv6_match_value(ip_addr) -> str:
+    return get_ipv6_prefix(str(ip_addr.address.decode('utf-8'))) + "/" + IPV6_PREFIX_LEN
+
+
+def is_flow_match_set(match):
+
+    attributes = [
+        'ip_dst', 'ip_src',
+        'ip_proto', 'tcp_src', 'tcp_dst',
+        'udp_src', 'udp_dst', 'app_name',
+    ]
+    for attrib in attributes:
+        value = getattr(match, attrib, None)
+        if value:
+            return True
+    return False
 
 
 def flow_match_to_magma_match(match, ip_addr=None):
@@ -58,9 +86,11 @@ def flow_match_to_magma_match(match, ip_addr=None):
     '''
     _check_pkt_protocol(match)
     match_kwargs = {'eth_type': ether_types.ETH_TYPE_IP}
-    attributes = ['ip_dst', 'ip_src',
-                  'ip_proto', 'tcp_src', 'tcp_dst',
-                  'udp_src', 'udp_dst', 'app_name']
+    attributes = [
+        'ip_dst', 'ip_src',
+        'ip_proto', 'tcp_src', 'tcp_dst',
+        'udp_src', 'udp_dst', 'app_name',
+    ]
     for attrib in attributes:
         value = getattr(match, attrib, None)
         if not value:
@@ -94,19 +124,23 @@ def flow_match_to_magma_match(match, ip_addr=None):
         if ip_addr.version == IPAddress.IPV4:
             ip_src_reg = 'ipv4_src'
             ip_dst_reg = 'ipv4_dst'
+            ip_addr_str = ip_addr.address.decode('utf-8')
         else:
             match_kwargs['eth_type'] = ether_types.ETH_TYPE_IPV6
             ip_src_reg = 'ipv6_src'
             ip_dst_reg = 'ipv6_dst'
+            ip_addr_str = get_ipv6_match_value(ip_addr)
 
-        if ip_addr.address.decode('utf-8'):
+        if ip_addr_str:
             if get_direction_for_match(match) == Direction.OUT:
-                match_kwargs[ip_src_reg] = ip_addr.address.decode('utf-8')
+                match_kwargs[ip_src_reg] = ip_addr_str
             else:
-                match_kwargs[ip_dst_reg] = ip_addr.address.decode('utf-8')
+                match_kwargs[ip_dst_reg] = ip_addr_str
 
-    return MagmaMatch(direction=get_direction_for_match(match),
-                      **match_kwargs)
+    return MagmaMatch(
+        direction=get_direction_for_match(match),
+        **match_kwargs,
+    )
 
 
 def flow_match_to_actions(datapath, match):
@@ -128,12 +162,12 @@ def flow_match_to_actions(datapath, match):
     if match.ip_proto == FlowMatch.IPPROTO_TCP:
         actions.extend([
             parser.OFPActionSetField(tcp_src=getattr(match, 'tcp_src', 0)),
-            parser.OFPActionSetField(tcp_dst=getattr(match, 'tcp_dst', 0))
+            parser.OFPActionSetField(tcp_dst=getattr(match, 'tcp_dst', 0)),
         ])
     elif match.ip_proto == FlowMatch.IPPROTO_UDP:
         actions.extend([
             parser.OFPActionSetField(udp_src=getattr(match, 'udp_src', 0)),
-            parser.OFPActionSetField(udp_dst=getattr(match, 'udp_dst', 0))
+            parser.OFPActionSetField(udp_dst=getattr(match, 'udp_dst', 0)),
         ])
     return actions
 
@@ -159,7 +193,7 @@ def flip_flow_match(match):
         udp_dst=getattr(match, 'udp_src', None),
         ip_proto=getattr(match, 'ip_proto', None),
         direction=direction,
-        app_name=getattr(match, 'app_name', None)
+        app_name=getattr(match, 'app_name', None),
     )
 
 
@@ -186,23 +220,25 @@ def ipv4_address_to_str(ipaddr: IPAddress):
 
 
 def get_ue_ip_match_args(ip_addr: IPAddress, direction: Direction):
-    ip_match = {}
+    ip_match: Dict = {}
 
     if ip_addr:
         if ip_addr.version == ip_addr.IPV4:
             ip_src_reg = 'ipv4_src'
             ip_dst_reg = 'ipv4_dst'
+            ip_addr_str = ip_addr.address.decode('utf-8')
         else:
             ip_src_reg = 'ipv6_src'
             ip_dst_reg = 'ipv6_dst'
+            ip_addr_str = get_ipv6_match_value(ip_addr)
 
-        if not ip_addr.address.decode('utf-8'):
+        if not ip_addr_str:
             return ip_match
 
         if direction == Direction.OUT:
-            ip_match = {ip_src_reg: ip_addr.address.decode('utf-8')}
+            ip_match = {ip_src_reg: ip_addr_str}
         else:
-            ip_match = {ip_dst_reg: ip_addr.address.decode('utf-8')}
+            ip_match = {ip_dst_reg: ip_addr_str}
     return ip_match
 
 
@@ -238,13 +274,24 @@ def get_direction_for_match(flow_match):
 
 
 def convert_ipv4_str_to_ip_proto(ipv4_str):
-    return IPAddress(version=IPAddress.IPV4,
-                     address=ipv4_str.encode('utf-8'))
+    return IPAddress(
+        version=IPAddress.IPV4,
+        address=ipv4_str.encode('utf-8'),
+    )
+
+
+def convert_ipv6_str_to_ip_proto(ipv6_str):
+    return IPAddress(
+        version=IPAddress.IPV6,
+        address=ipv6_str.encode('utf-8'),
+    )
 
 
 def convert_ipv6_bytes_to_ip_proto(ipv6_bytes):
-    return IPAddress(version=IPAddress.IPV6,
-                     address=ipv6_bytes)
+    return IPAddress(
+        version=IPAddress.IPV6,
+        address=ipv6_bytes,
+    )
 
 
 def convert_ip_str_to_ip_proto(ip_str: str):

@@ -17,6 +17,12 @@ import argparse
 
 import grpc
 from feg.protos.mock_core_pb2_grpc import MockOCSStub, MockPCRFStub
+from google.protobuf.timestamp_pb2 import (  # pylint: disable=no-name-in-module
+    Timestamp,
+)
+from lte.protos.abort_session_pb2 import AbortSessionRequest
+from lte.protos.abort_session_pb2_grpc import AbortSessionResponderStub
+from lte.protos.mobilityd_pb2 import IPAddress
 from lte.protos.policydb_pb2 import (
     FlowDescription,
     FlowMatch,
@@ -33,12 +39,6 @@ from lte.protos.session_manager_pb2 import (
 from lte.protos.session_manager_pb2_grpc import (
     LocalSessionManagerStub,
     SessionProxyResponderStub,
-)
-from lte.protos.abort_session_pb2 import (
-    AbortSessionRequest,
-)
-from lte.protos.abort_session_pb2_grpc import (
-    AbortSessionResponderStub,
 )
 from lte.protos.subscriberdb_pb2 import SubscriberID
 from magma.common.rpc_utils import grpc_wrapper
@@ -115,7 +115,7 @@ def send_policy_rar(client, args):
             print("%s is not valid" % flow_fields[0])
             raise ValueError(
                 "UL or DL are the only valid"
-                " values for first parameter of flow match"
+                " values for first parameter of flow match",
             )
         ip_protocol = int(flow_fields[1])
         if flow_fields[1] == FlowMatch.IPPROTO_TCP:
@@ -151,15 +151,15 @@ def send_policy_rar(client, args):
                 match=FlowMatch(
                     direction=flow_direction,
                     ip_proto=ip_protocol,
-                    ipv4_src=flow_fields[2],
-                    ipv4_dst=flow_fields[4],
+                    ip_src=IPAddress(version=IPAddress.IPV4, address=flow_fields[2].encode('utf-8')),
+                    ip_dst=IPAddress(version=IPAddress.IPV4, address=flow_fields[4].encode('utf-8')),
                     tcp_src=tcp_src_port,
                     tcp_dst=tcp_dst_port,
                     udp_src=udp_src_port,
                     udp_dst=udp_dst_port,
                 ),
                 action=FlowDescription.PERMIT,
-            )
+            ),
         )
 
     qos_parameter_list = args.qos.split(",")
@@ -198,19 +198,38 @@ def send_policy_rar(client, args):
 
     qos = QoSInformation(qci=int(args.qci))
 
-    reauth_result = sessiond_client.PolicyReAuth(
-        PolicyReAuthRequest(
-            session_id=args.session_id,
-            imsi=args.imsi,
-            rules_to_remove=[],
-            rules_to_install=[],
-            dynamic_rules_to_install=[DynamicRuleInstall(policy_rule=policy_rule)],
-            event_triggers=[],
-            revalidation_time=None,
-            usage_monitoring_credits=[],
-            qos_info=qos,
+    rules_to_remove_list = args.policy_id.split(',')
+    policy_action = args.policy_action
+    if policy_action == "ADD" or policy_action == "MOD":
+        reauth_result = sessiond_client.PolicyReAuth(
+            PolicyReAuthRequest(
+                session_id=args.session_id,
+                imsi=args.imsi,
+                rules_to_remove=[],
+                rules_to_install=[],
+                dynamic_rules_to_install=[DynamicRuleInstall(policy_rule=policy_rule)],
+                event_triggers=[],
+                revalidation_time=None,
+                usage_monitoring_credits=[],
+                qos_info=qos,
+            ),
         )
-    )
+    elif policy_action == "DEL":
+        active_time_stamp = Timestamp(seconds=1, nanos=1)
+        deactive_time_stamp = Timestamp(seconds=1, nanos=1)
+        reauth_result = sessiond_client.PolicyReAuth(
+            PolicyReAuthRequest(
+                session_id=args.session_id,
+                imsi=args.imsi,
+                rules_to_remove=[policy_id for policy_id in rules_to_remove_list if policy_action == "DEL"],
+                rules_to_install=[],
+                dynamic_rules_to_install=[DynamicRuleInstall(policy_rule=policy_rule, activation_time=active_time_stamp, deactivation_time=deactive_time_stamp)] if policy_action == "ADD" else None,
+                event_triggers=[],
+                revalidation_time=None,
+                usage_monitoring_credits=[],
+                qos_info=qos,
+            ),
+        )
     print(reauth_result)
 
 
@@ -250,18 +269,19 @@ def create_parser():
 
     # PolicyReAuth
     create_session_parser = subparsers.add_parser(
-        "policy_rar", help="Send Policy Reauthorization Request to sessiond"
+        "policy_rar", help="Send Policy Reauthorization Request to sessiond",
     )
     create_session_parser.add_argument("imsi", help="e.g., IMSI001010000088888")
     create_session_parser.add_argument(
-        "session_id", help="e.g., IMSI001010000088888-910385"
+        "session_id", help="e.g., IMSI001010000088888-910385",
     )
     create_session_parser.add_argument("policy_id", help="e.g., ims-voice")
+    create_session_parser.add_argument("policy_action", help="e.g., ADD/DEL/MOD")
     create_session_parser.add_argument(
-        "priority", help="e.g., precedence value in the range [0-255]"
+        "priority", help="e.g., precedence value in the range [0-255]",
     )
     create_session_parser.add_argument(
-        "qci", help="e.g., 9 for default, 1 for VoIP data, 5 for IMS signaling"
+        "qci", help="e.g., 9 for default, 1 for VoIP data, 5 for IMS signaling",
     )
     create_session_parser.add_argument(
         "flow_rules",

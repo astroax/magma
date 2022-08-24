@@ -18,7 +18,7 @@ from setuptools import setup
 # We can use an environment variable to pass in the package version during
 # build. Since we don't distribute this on its own, we don't really care what
 # version this represents. 'None' defaults to 0.0.0.
-VERSION = os.environ.get('PKG_VERSION', None)
+VERSION = os.environ.get('PKG_VERSION', '0.0.0')
 
 setup(
     name='lte',
@@ -39,7 +39,7 @@ setup(
         'magma.pipelined.ng_manager',
         'magma.pipelined.openflow',
         'magma.pipelined.qos',
-        'magma.pkt_tester',
+        'magma.pipelined.ebpf',
         'magma.policydb',
         'magma.policydb.servicers',
         'magma.redirectd',
@@ -52,6 +52,9 @@ setup(
         'magma.subscriberdb.protocols.diameter',
         'magma.subscriberdb.protocols.diameter.application',
         'magma.subscriberdb.store',
+        'magma.subscriberdb.subscription',
+        'magma.kernsnoopd',
+        'load_tests',
     ],
     scripts=[
         'scripts/agw_health_cli.py',
@@ -81,6 +84,13 @@ setup(
         'scripts/spgw_service_cli.py',
         'scripts/cpe_monitoring_cli.py',
         'scripts/state_cli.py',
+        'scripts/dp_probe_cli.py',
+        'scripts/user_trace_cli.py',
+        'scripts/icmpv6.py',
+        'load_tests/loadtest_sessiond.py',
+        'load_tests/loadtest_pipelined.py',
+        'load_tests/loadtest_mobilityd.py',
+        'load_tests/loadtest_subscriberdb.py',
     ],
     package_data={'magma.redirectd.templates': ['*.html']},
     install_requires=[
@@ -90,12 +100,12 @@ setup(
         'envoy>=0.0.3',
         'glob2>=0.7',
         # lxml required by spyne.
-        'lxml==4.6.2',
-        'ryu>=4.30',
-        'spyne>=2.12.16',
+        'lxml==4.7.1',
+        'ryu>=4.34',
+        'spyne>=2.13.15',
         'scapy==2.4.4',
         'flask>=1.0.2',
-        'aioeventlet>=0.4',
+        'sentry_sdk>=1.5.0,<1.9',
         'aiodns>=1.1.1',
         'pymemoize>=1.0.2',
         'wsgiserver>=1.3',
@@ -103,17 +113,24 @@ setup(
         'chardet==3.0.4',
         'docker==4.0.2',
         'urllib3>=1.25.3',
-        'websocket-client==0.56.0',
+        'websocket-client',
         'requests>=2.22.0',
         'certifi>=2019.6.16',
         'idna==2.8',
         'python-dateutil==2.8.1',
         'six>=1.12.0',
-        'eventlet>=0.24',
+        'eventlet==0.30.2',
         'h2>=3.2.0',
         'hpack>=3.0',
         'freezegun>=0.3.15',
-        'pycryptodome>=3.9.9'
+        'pycryptodome>=3.9.9',
+        'pyroute2==0.5.14',
+        'aiohttp',
+        'jsonpointer>=1.14',
+        # TODO: (GH #12601) make magma compatible with ovs>=2.17.0
+        'ovs>=2.13,<2.17.0',
+        'prometheus-client>=0.3.1',
+        'aioeventlet @ git+https://github.com/magma/deb-python-aioeventlet@86130360db113430370ed6c64d42aee3b47cd619',
     ],
     extras_require={
         'dev': [
@@ -121,9 +138,11 @@ setup(
             # If you update this version here, you probably also want to
             # update it in lte/gateway/python/Makefile
             'grpcio-tools>=1.16.1',
-            'nose==1.3.7',
-            'pyroute2',
+            'coverage==6.4.1',
             'iperf3',
-        ]
+            'parameterized==0.8.1',
+            'pytest==7.1.2',
+            'pytest-cov==3.0.0',
+        ],
     },
 )

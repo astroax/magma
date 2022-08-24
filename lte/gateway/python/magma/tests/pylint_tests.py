@@ -24,8 +24,8 @@ class MagmaPyLintTest(unittest.TestCase):
             self.skipTest(
                 'Pylint not available, probably because this test is running '
                 'under @mode/opt: {}'.format(
-                    pylint_wrapper.PYLINT_IMPORT_PROBLEM
-                )
+                    pylint_wrapper.PYLINT_IMPORT_PROBLEM,
+                ),
             )
 
         py_wrap = pylint_wrapper.PyLintWrapper(
@@ -38,20 +38,16 @@ class MagmaPyLintTest(unittest.TestCase):
                 'fixme',  # allow todos
                 'unnecessary-pass',  # triggers when pass is ok
                 'raise-missing-from',
+                'redundant-u-string-prefix',
             ],
             show_categories=["warning", "error", "fatal"],
         )
-
-        directories = [
-            'enodebd',
-            # 'mobilityd',
-            'pipelined',
-            # 'pkt_tester',
-            'policydb',
-            # 'redirectd',
-            'subscriberdb',
-        ]
+        excluded_directories = []
         parent_path = os.path.dirname(os.path.dirname(__file__))
+        directories = [
+            d.name for d in os.scandir(parent_path)
+            if d.is_dir() and d.name not in excluded_directories
+        ]
         for directory in directories:
             path = os.path.join(parent_path, directory)
             py_wrap.assertNoLintErrors(path)

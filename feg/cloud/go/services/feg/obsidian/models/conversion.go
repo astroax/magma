@@ -14,9 +14,16 @@
 package models
 
 import (
+	"context"
+
+	"github.com/go-openapi/strfmt"
+	"github.com/go-openapi/swag"
+
 	"magma/feg/cloud/go/feg"
+	feg_protos "magma/feg/cloud/go/protos"
 	"magma/feg/cloud/go/protos/mconfig"
 	"magma/lte/cloud/go/lte"
+	lte_mconfig "magma/lte/cloud/go/protos/mconfig"
 	lteModels "magma/lte/cloud/go/services/lte/obsidian/models"
 	policyModels "magma/lte/cloud/go/services/policydb/obsidian/models"
 	"magma/orc8r/cloud/go/models"
@@ -25,14 +32,11 @@ import (
 	"magma/orc8r/cloud/go/services/orchestrator/obsidian/handlers"
 	orc8rModels "magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
 	"magma/orc8r/cloud/go/storage"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/lib/go/merrors"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/go-openapi/strfmt"
-	"github.com/go-openapi/swag"
 )
 
-func (m *FegNetwork) ValidateModel() error {
+func (m *FegNetwork) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
@@ -94,7 +98,7 @@ func (m *FegNetwork) FromConfiguratorNetwork(n configurator.Network) interface{}
 	return m
 }
 
-func (m *FegLteNetwork) ValidateModel() error {
+func (m *FegLteNetwork) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
@@ -158,7 +162,7 @@ func (m *NetworkFederationConfigs) ToUpdateCriteria(network configurator.Network
 	return orc8rModels.GetNetworkConfigUpdateCriteria(network.ID, feg.FegNetworkType, m), nil
 }
 
-func (m *FederationGateway) ValidateModel() error {
+func (m *FederationGateway) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
@@ -170,12 +174,12 @@ func (m *FederationGateway) FromBackendModels(
 	// delegate most of the fillin to magmad gateway struct
 	mdGW := (&orc8rModels.MagmadGateway{}).FromBackendModels(magmadGateway, device, status)
 	// TODO: we should change this to a reflection based shallow copy
-	m.ID, m.Name, m.Description, m.Magmad, m.Tier, m.Device, m.Status = mdGW.ID, mdGW.Name, mdGW.Description, mdGW.Magmad, mdGW.Tier, mdGW.Device, mdGW.Status
+	m.ID, m.Name, m.Description, m.Magmad, m.Tier, m.Device, m.Status, m.RegistrationInfo = mdGW.ID, mdGW.Name, mdGW.Description, mdGW.Magmad, mdGW.Tier, mdGW.Device, mdGW.Status, mdGW.RegistrationInfo
 	m.Federation = federationGateway.Config.(*GatewayFederationConfigs)
 	return m
 }
 
-func (m *MutableFederationGateway) ValidateModel() error {
+func (m *MutableFederationGateway) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
@@ -202,7 +206,7 @@ func (m *MutableFederationGateway) GetAdditionalWritesOnCreate() []configurator.
 		configurator.EntityUpdateCriteria{
 			Type:              orc8r.MagmadGatewayType,
 			Key:               string(m.ID),
-			AssociationsToAdd: []storage.TypeAndKey{{Type: feg.FegGatewayType, Key: string(m.ID)}},
+			AssociationsToAdd: storage.TKs{{Type: feg.FegGatewayType, Key: string(m.ID)}},
 		},
 	}
 }
@@ -216,14 +220,12 @@ func (m *MutableFederationGateway) GetAdditionalLoadsOnLoad(gateway configurator
 }
 
 func (m *MutableFederationGateway) GetAdditionalLoadsOnUpdate() storage.TKs {
-	return []storage.TypeAndKey{{Type: feg.FegGatewayType, Key: string(m.ID)}}
+	return storage.TKs{{Type: feg.FegGatewayType, Key: string(m.ID)}}
 }
 
-func (m *MutableFederationGateway) GetAdditionalWritesOnUpdate(
-	loadedEntities map[storage.TypeAndKey]configurator.NetworkEntity,
-) ([]configurator.EntityWriteOperation, error) {
+func (m *MutableFederationGateway) GetAdditionalWritesOnUpdate(ctx context.Context, loadedEntities map[storage.TK]configurator.NetworkEntity) ([]configurator.EntityWriteOperation, error) {
 	var ret []configurator.EntityWriteOperation
-	existingEnt, ok := loadedEntities[storage.TypeAndKey{Type: feg.FegGatewayType, Key: string(m.ID)}]
+	existingEnt, ok := loadedEntities[storage.TK{Type: feg.FegGatewayType, Key: string(m.ID)}]
 	if !ok {
 		return ret, merrors.ErrNotFound
 	}
@@ -252,8 +254,8 @@ func (m *FederatedNetworkConfigs) ToUpdateCriteria(network configurator.Network)
 	return orc8rModels.GetNetworkConfigUpdateCriteria(network.ID, feg.FederatedNetworkType, m), nil
 }
 
-func (m *GatewayFederationConfigs) FromBackendModels(networkID string, gatewayID string) error {
-	federationConfig, err := configurator.LoadEntityConfig(networkID, feg.FegGatewayType, gatewayID, EntitySerdes)
+func (m *GatewayFederationConfigs) FromBackendModels(ctx context.Context, networkID string, gatewayID string) error {
+	federationConfig, err := configurator.LoadEntityConfig(ctx, networkID, feg.FegGatewayType, gatewayID, EntitySerdes)
 	if err != nil {
 		return err
 	}
@@ -261,7 +263,7 @@ func (m *GatewayFederationConfigs) FromBackendModels(networkID string, gatewayID
 	return nil
 }
 
-func (m *GatewayFederationConfigs) ToUpdateCriteria(networkID string, gatewayID string) ([]configurator.EntityUpdateCriteria, error) {
+func (m *GatewayFederationConfigs) ToUpdateCriteria(ctx context.Context, networkID string, gatewayID string) ([]configurator.EntityUpdateCriteria, error) {
 	return []configurator.EntityUpdateCriteria{
 		{
 			Type: feg.FegGatewayType, Key: gatewayID,
@@ -312,4 +314,58 @@ func ToVirtualApnRuleMconfig(rules []*VirtualApnRule) []*mconfig.VirtualApnRule 
 		virtualApnRuleConfigs = append(virtualApnRuleConfigs, apnConf)
 	}
 	return virtualApnRuleConfigs
+}
+
+func ToFederatedModesMap(modesMap *FederatedModeMap) *lte_mconfig.FederatedModeMap {
+	if modesMap == nil {
+		return &lte_mconfig.FederatedModeMap{}
+	}
+	res := &lte_mconfig.FederatedModeMap{}
+	protos.FillIn(modesMap, res)
+	res.Mapping = ToModesMap(modesMap.Mapping)
+	return res
+}
+
+func ToModesMap(model_modes []*ModeMapItem) []*lte_mconfig.ModeMapItem {
+	if model_modes == nil {
+		return []*lte_mconfig.ModeMapItem{}
+	}
+	proto_modes := make([]*lte_mconfig.ModeMapItem, len(model_modes))
+	for i, model_mode := range model_modes {
+		proto_mode := &lte_mconfig.ModeMapItem{}
+		protos.FillIn(model_mode, proto_mode)
+		proto_modes[i] = proto_mode
+		// translate the mode
+		proto_modes[i].Mode = ToFederatedMode(model_mode.Mode)
+	}
+	return proto_modes
+}
+
+func ToFederatedMode(mode string) lte_mconfig.ModeMapItem_FederatedMode {
+	switch mode {
+	case "local_subscriber":
+		return lte_mconfig.ModeMapItem_LOCAL_SUBSCRIBER
+	case "s8_subscriber":
+		return lte_mconfig.ModeMapItem_S8_SUBSCRIBER
+	}
+	// default case
+	return lte_mconfig.ModeMapItem_SPGW_SUBSCRIBER
+}
+
+func ToFederationGatewayHealthStatusModel(res *feg_protos.HealthStats) *FederationGatewayHealthStatus {
+	serviceHealths := make(map[string]ServiceStatusHealth)
+	for serviceName, val := range res.GetServiceStatus() {
+		serviceHealths[serviceName] = ServiceStatusHealth{
+			HealthStatus: val.GetServiceHealthStatus().GetHealth().String(),
+			ServiceState: val.GetServiceState().String(),
+		}
+	}
+
+	ret := &FederationGatewayHealthStatus{
+		Status:        res.GetHealth().GetHealth().String(),
+		Description:   res.GetHealth().GetHealthMessage(),
+		ServiceStatus: serviceHealths,
+	}
+	return ret
+
 }

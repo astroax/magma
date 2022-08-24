@@ -14,22 +14,23 @@
 package handlers_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
+
+	"github.com/go-openapi/swag"
+	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
 
 	"magma/lte/cloud/go/lte"
 	"magma/lte/cloud/go/serdes"
 	"magma/lte/cloud/go/services/policydb/obsidian/handlers"
 	policyModels "magma/lte/cloud/go/services/policydb/obsidian/models"
-	"magma/orc8r/cloud/go/obsidian"
-	"magma/orc8r/cloud/go/obsidian/tests"
 	"magma/orc8r/cloud/go/services/configurator"
 	configurator_test_init "magma/orc8r/cloud/go/services/configurator/test_init"
+	"magma/orc8r/cloud/go/services/obsidian"
+	"magma/orc8r/cloud/go/services/obsidian/tests"
 	"magma/orc8r/cloud/go/storage"
-
-	"github.com/go-openapi/swag"
-	"github.com/labstack/echo"
-	"github.com/stretchr/testify/assert"
 )
 
 // Basic API workflow tests
@@ -38,7 +39,7 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	e := echo.New()
 
 	obsidianHandlers := handlers.GetHandlers()
-	err := configurator.CreateNetwork(configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
+	err := configurator.CreateNetwork(context.Background(), configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
 	assert.NoError(t, err)
 
 	listPolicies := tests.GetHandlerByPathAndMethod(t, obsidianHandlers, "/magma/v1/networks/:network_id/policies/rules", obsidian.GET).HandlerFunc
@@ -70,8 +71,9 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Test add policy rule
+	id := policyModels.PolicyID("PolicyRule1")
 	testRule := &policyModels.PolicyRule{
-		ID: "PolicyRule1",
+		ID: &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),
@@ -223,8 +225,9 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Test add invalid policy rule
+	id = "PolicyRule_invalid"
 	testRule_invalid_rule := &policyModels.PolicyRule{
-		ID: "PolicyRule_invalid",
+		ID: &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),
@@ -262,8 +265,9 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Test old ip(ipv4_src/ipvr_dst) is properly converted to new ip_src/ip_dst
+	id = "test_old_ip_policy"
 	test_old_ip_policy := &policyModels.PolicyRule{
-		ID: "test_old_ip_policy",
+		ID: &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),
@@ -292,7 +296,7 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	test_modified_policy := &policyModels.PolicyRule{
-		ID: "test_old_ip_policy",
+		ID: &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),
@@ -330,8 +334,9 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Test Multi Match Add Rule
+	id = "Test_mult"
 	testRule = &policyModels.PolicyRule{
-		ID: "Test_mult",
+		ID: &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("DENY"),
@@ -391,8 +396,9 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Test adding a rule with QoS
+	id = "Test_qos"
 	testRule = &policyModels.PolicyRule{
-		ID:           "Test_qos",
+		ID:           &id,
 		FlowList:     []*policyModels.FlowDescription{},
 		Priority:     swag.Uint32(5),
 		RatingGroup:  *swag.Uint32(2),
@@ -423,8 +429,9 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Test adding rule with redirect information
+	id = "Test_redirect"
 	testRule = &policyModels.PolicyRule{
-		ID:           "Test_redirect",
+		ID:           &id,
 		FlowList:     []*policyModels.FlowDescription{},
 		Priority:     swag.Uint32(5),
 		RatingGroup:  *swag.Uint32(2),
@@ -460,8 +467,9 @@ func TestPolicyDBHandlersBasic(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Test add rule with app name match
+	id = "test_app_policy"
 	testRule = &policyModels.PolicyRule{
-		ID: "test_app_policy",
+		ID: &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),
@@ -650,7 +658,7 @@ func TestPolicyHandlersAssociations(t *testing.T) {
 	e := echo.New()
 
 	obsidianHandlers := handlers.GetHandlers()
-	err := configurator.CreateNetwork(configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
+	err := configurator.CreateNetwork(context.Background(), configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
 	assert.NoError(t, err)
 
 	createPolicy := tests.GetHandlerByPathAndMethod(t, obsidianHandlers, "/magma/v1/networks/:network_id/policies/rules", obsidian.POST).HandlerFunc
@@ -663,21 +671,18 @@ func TestPolicyHandlersAssociations(t *testing.T) {
 
 	// preseed 3 subscribers
 	imsi1, imsi2, imsi3 := "IMSI1234567890", "IMSI0987654321", "IMSI1111111111"
-	_, err = configurator.CreateEntities(
-		"n1",
-		[]configurator.NetworkEntity{
-			{Type: lte.SubscriberEntityType, Key: imsi1},
-			{Type: lte.SubscriberEntityType, Key: imsi2},
-			{Type: lte.SubscriberEntityType, Key: imsi3},
-		},
-		serdes.Entity,
-	)
+	_, err = configurator.CreateEntities(context.Background(), "n1", []configurator.NetworkEntity{
+		{Type: lte.SubscriberEntityType, Key: imsi1},
+		{Type: lte.SubscriberEntityType, Key: imsi2},
+		{Type: lte.SubscriberEntityType, Key: imsi3},
+	}, serdes.Entity)
 	assert.NoError(t, err)
 
 	// Create rule assigned to s1, s2
+	id := policyModels.PolicyID("p1")
 	expectedP1 := &policyModels.PolicyRule{
 		AssignedSubscribers: []policyModels.SubscriberID{policyModels.SubscriberID(imsi2), policyModels.SubscriberID(imsi1)},
-		ID:                  "p1",
+		ID:                  &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),
@@ -707,7 +712,7 @@ func TestPolicyHandlersAssociations(t *testing.T) {
 			Type:               lte.PolicyRuleEntityType,
 			Key:                "p1",
 			GraphID:            "2",
-			ParentAssociations: []storage.TypeAndKey{{Type: lte.SubscriberEntityType, Key: imsi2}, {Type: lte.SubscriberEntityType, Key: imsi1}},
+			ParentAssociations: storage.TKs{{Type: lte.SubscriberEntityType, Key: imsi2}, {Type: lte.SubscriberEntityType, Key: imsi1}},
 			Version:            0,
 		},
 	)
@@ -732,14 +737,15 @@ func TestPolicyHandlersAssociations(t *testing.T) {
 			Type:               lte.PolicyRuleEntityType,
 			Key:                "p1",
 			GraphID:            "2",
-			ParentAssociations: []storage.TypeAndKey{{Type: lte.SubscriberEntityType, Key: imsi3}},
+			ParentAssociations: storage.TKs{{Type: lte.SubscriberEntityType, Key: imsi3}},
 			Version:            1,
 		},
 	)
 
 	// Create another policy p2 unbound to subs
+	id = "p2"
 	expectedP2 := &policyModels.PolicyRule{
-		ID: "p2",
+		ID: &id,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),
@@ -873,7 +879,7 @@ func TestQoSProfile(t *testing.T) {
 	e := echo.New()
 
 	policydbHandlers := handlers.GetHandlers()
-	err := configurator.CreateNetwork(configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
+	err := configurator.CreateNetwork(context.Background(), configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
 	assert.NoError(t, err)
 
 	getAllProfiles := tests.GetHandlerByPathAndMethod(t, policydbHandlers, "/magma/v1/lte/:network_id/policy_qos_profiles", obsidian.GET).HandlerFunc
@@ -1000,8 +1006,9 @@ func TestQoSProfile(t *testing.T) {
 	tests.RunUnitTest(t, e, tc)
 
 	// Put existing profile
+	classID := policyModels.QosClassID(5)
 	profile0a := newTestQoSProfile()
-	profile0a.ClassID = 5
+	profile0a.ClassID = &classID
 	tc = tests.Test{
 		Method:         "PUT",
 		URL:            "/magma/v1/lte/n1/policy_qos_profiles/profile0",
@@ -1093,7 +1100,7 @@ func TestPolicyWithQoSProfile(t *testing.T) {
 	e := echo.New()
 
 	policydbHandlers := handlers.GetHandlers()
-	err := configurator.CreateNetwork(configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
+	err := configurator.CreateNetwork(context.Background(), configurator.Network{ID: "n1", Type: lte.NetworkType}, serdes.Network)
 	assert.NoError(t, err)
 
 	postProfile := tests.GetHandlerByPathAndMethod(t, policydbHandlers, "/magma/v1/lte/:network_id/policy_qos_profiles", obsidian.POST).HandlerFunc
@@ -1108,7 +1115,19 @@ func TestPolicyWithQoSProfile(t *testing.T) {
 	tc := tests.Test{
 		Method:         "POST",
 		URL:            "/magma/v1/lte/n1/policy_qos_profiles",
-		Payload:        newTestQoSProfile(),
+		Payload:        newTestQoSProfileNamed("profile0"),
+		ParamNames:     []string{"network_id"},
+		ParamValues:    []string{"n1"},
+		Handler:        postProfile,
+		ExpectedStatus: 201,
+	}
+	tests.RunUnitTest(t, e, tc)
+
+	// Post other profile
+	tc = tests.Test{
+		Method:         "POST",
+		URL:            "/magma/v1/lte/n1/policy_qos_profiles",
+		Payload:        newTestQoSProfileNamed("profile1"),
 		ParamNames:     []string{"network_id"},
 		ParamValues:    []string{"n1"},
 		Handler:        postProfile,
@@ -1181,6 +1200,32 @@ func TestPolicyWithQoSProfile(t *testing.T) {
 	}
 	tests.RunUnitTest(t, e, tc)
 
+	// Put rule, associate with other profile
+	rule.QosProfile = "profile1"
+	tc = tests.Test{
+		Method:         "PUT",
+		URL:            "/magma/v1/networks/n1/policies/rules/profile1",
+		Payload:        rule,
+		ParamNames:     []string{"network_id", "rule_id"},
+		ParamValues:    []string{"n1", "rule0"},
+		Handler:        putRule,
+		ExpectedStatus: 204,
+	}
+	tests.RunUnitTest(t, e, tc)
+
+	// Get rule, other profile found
+	tc = tests.Test{
+		Method:         "GET",
+		URL:            "/magma/v1/networks/n1/policies/rules/rule0",
+		Payload:        nil,
+		ParamNames:     []string{"network_id", "rule_id"},
+		ParamValues:    []string{"n1", "rule0"},
+		Handler:        getRule,
+		ExpectedStatus: 200,
+		ExpectedResult: rule,
+	}
+	tests.RunUnitTest(t, e, tc)
+
 	// Get all rules, profile found
 	tc = tests.Test{
 		Method:         "GET",
@@ -1197,9 +1242,9 @@ func TestPolicyWithQoSProfile(t *testing.T) {
 	// Delete profile
 	tc = tests.Test{
 		Method:         "DELETE",
-		URL:            "/magma/v1/lte/n1/policy_qos_profiles/profile0",
+		URL:            "/magma/v1/lte/n1/policy_qos_profiles/profile1",
 		ParamNames:     []string{"network_id", "profile_id"},
-		ParamValues:    []string{"n1", "profile0"},
+		ParamValues:    []string{"n1", "profile1"},
 		Handler:        deleteProfile,
 		ExpectedStatus: 204,
 	}
@@ -1224,19 +1269,15 @@ func TestPolicyWithQoSProfile(t *testing.T) {
 func validatePolicy(t *testing.T, e *echo.Echo, getRule echo.HandlerFunc, expectedModel *policyModels.PolicyRule, expectedEnt configurator.NetworkEntity) {
 	expectedEnt.Config = getExpectedRuleConfig(expectedModel)
 
-	actual, err := configurator.LoadEntity(
-		"n1", lte.PolicyRuleEntityType, string(expectedModel.ID),
-		configurator.FullEntityLoadCriteria(),
-		serdes.Entity,
-	)
+	actual, err := configurator.LoadEntity(context.Background(), "n1", lte.PolicyRuleEntityType, string(*expectedModel.ID), configurator.FullEntityLoadCriteria(), serdes.Entity)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedEnt, actual)
 	tc := tests.Test{
 		Method:         "GET",
-		URL:            fmt.Sprintf("/magma/v1/networks/n1/policies/rules/%s", expectedModel.ID),
+		URL:            fmt.Sprintf("/magma/v1/networks/n1/policies/rules/%s", *expectedModel.ID),
 		Payload:        expectedModel,
 		ParamNames:     []string{"network_id", "rule_id"},
-		ParamValues:    []string{"n1", string(expectedModel.ID)},
+		ParamValues:    []string{"n1", string(*expectedModel.ID)},
 		Handler:        getRule,
 		ExpectedStatus: 200,
 	}
@@ -1255,11 +1296,7 @@ func getExpectedRuleConfig(m *policyModels.PolicyRule) *policyModels.PolicyRuleC
 }
 
 func validateBaseName(t *testing.T, e *echo.Echo, getName echo.HandlerFunc, expectedModel *policyModels.BaseNameRecord, expectedEnt configurator.NetworkEntity) {
-	actual, err := configurator.LoadEntity(
-		"n1", lte.BaseNameEntityType, string(expectedModel.Name),
-		configurator.FullEntityLoadCriteria(),
-		serdes.Entity,
-	)
+	actual, err := configurator.LoadEntity(context.Background(), "n1", lte.BaseNameEntityType, string(expectedModel.Name), configurator.FullEntityLoadCriteria(), serdes.Entity)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedEnt, actual)
 	tc := tests.Test{
@@ -1275,18 +1312,23 @@ func validateBaseName(t *testing.T, e *echo.Echo, getName echo.HandlerFunc, expe
 }
 
 func newTestQoSProfile() *policyModels.PolicyQosProfile {
+	return newTestQoSProfileNamed("profile0")
+}
+
+func newTestQoSProfileNamed(id string) *policyModels.PolicyQosProfile {
+	classID := policyModels.QosClassID(3)
 	profile := &policyModels.PolicyQosProfile{
 		Arp: &policyModels.Arp{
 			PreemptionCapability:    swag.Bool(true),
 			PreemptionVulnerability: swag.Bool(false),
 			PriorityLevel:           swag.Uint32(5),
 		},
-		ClassID: 3,
+		ClassID: &classID,
 		Gbr: &policyModels.Gbr{
 			Downlink: swag.Uint32(42),
 			Uplink:   swag.Uint32(420),
 		},
-		ID:         "profile0",
+		ID:         id,
 		MaxReqBwDl: swag.Uint32(42),
 		MaxReqBwUl: swag.Uint32(420),
 	}
@@ -1294,8 +1336,9 @@ func newTestQoSProfile() *policyModels.PolicyQosProfile {
 }
 
 func newTestPolicy(id string) *policyModels.PolicyRule {
+	policyID := policyModels.PolicyID(id)
 	policy := &policyModels.PolicyRule{
-		ID: policyModels.PolicyID(id),
+		ID: &policyID,
 		FlowList: []*policyModels.FlowDescription{
 			{
 				Action: swag.String("PERMIT"),

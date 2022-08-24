@@ -14,16 +14,11 @@ limitations under the License.
 package mock_ocs
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
-
-	"magma/feg/cloud/go/protos"
-	"magma/feg/gateway/diameter"
-	"magma/feg/gateway/services/session_proxy/credit_control/gy"
-	"magma/feg/gateway/services/testcore/mock_driver"
-	lteprotos "magma/lte/cloud/go/protos"
-	orcprotos "magma/orc8r/lib/go/protos"
 
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
@@ -31,8 +26,13 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 	"github.com/golang/glog"
-	"github.com/pkg/errors"
-	"golang.org/x/net/context"
+
+	"magma/feg/cloud/go/protos"
+	"magma/feg/gateway/diameter"
+	"magma/feg/gateway/services/session_proxy/credit_control/gy"
+	"magma/feg/gateway/services/testcore/mock_driver"
+	lteprotos "magma/lte/cloud/go/protos"
+	orcprotos "magma/orc8r/lib/go/protos"
 )
 
 const DiameterCreditLimitReached = 4012
@@ -66,6 +66,7 @@ type OCSConfig struct {
 	GyInitMethod        gy.InitMethod
 	UseMockDriver       bool
 	FinalUnitIndication FinalUnitIndication
+	grantTypeProcedure  protos.OCSConfig_GrantType
 }
 
 // OCSDiamServer wraps an OCS storing subscriber accounts and their credit
@@ -236,7 +237,7 @@ func (srv *OCSDiamServer) GetCredits(
 func (srv *OCSDiamServer) ClearSubscribers(_ context.Context, void *orcprotos.Void) (*orcprotos.Void, error) {
 	glog.V(2).Infof("Accounts (%d) will be deleted from OCS:", len(srv.accounts))
 	for imsi, subs := range srv.accounts {
-		glog.V(2).Infof("\tRemaing credit for IMSI: %s", imsi)
+		glog.V(2).Infof("\tRemaining credit for IMSI: %s", imsi)
 		for key, credits := range subs.ChargingCredit {
 			glog.V(2).Infof("\t - key %d, Total:%d Tx:%d Rx:%d",
 				key,
@@ -334,7 +335,7 @@ func (srv *OCSDiamServer) AbortSession(
 	srv.mux.Handle(diam.ASA, asaHandler)
 	err := sendASR(account.CurrentState, srv.mux.Settings())
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to send Gy ASR")
+		return nil, fmt.Errorf("Failed to send Gy ASR: %w", err)
 	}
 	select {
 	case asa := <-resp:

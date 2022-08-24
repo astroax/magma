@@ -14,15 +14,14 @@ limitations under the License.
 package collection
 
 import (
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 
+	"github.com/golang/glog"
+
 	"magma/feg/cloud/go/protos/mconfig"
 	gwmcfg "magma/gateway/mconfig"
-
-	"github.com/golang/glog"
 )
 
 const (
@@ -49,14 +48,14 @@ func NewMetricsRequester() (*MetricsRequester, error) {
 func (r *MetricsRequester) FetchMetrics() (string, error) {
 	resp, err := http.Get(r.metricsUrl)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("Failed GET request: %s", err))
+		return "", fmt.Errorf("Failed GET request: %s", err)
 	}
 
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", errors.New(fmt.Sprintf("Failed to read GET response body: %s", err))
+		return "", fmt.Errorf("Failed to read GET response body: %s", err)
 	}
 
 	return string(body), nil

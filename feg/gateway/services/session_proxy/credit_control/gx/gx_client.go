@@ -14,25 +14,34 @@ limitations under the License.
 package gx
 
 import (
+	"math"
 	"math/rand"
 	"net"
 	"os"
 	"time"
+
+	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/avp"
+	"github.com/fiorix/go-diameter/v4/diam/datatype"
+	"github.com/golang/glog"
 
 	"magma/feg/gateway/diameter"
 	"magma/feg/gateway/services/session_proxy/credit_control"
 	"magma/gateway/service_registry"
 	"magma/lte/cloud/go/protos"
 	"magma/orc8r/lib/go/util"
-
-	"github.com/fiorix/go-diameter/v4/diam"
-	"github.com/fiorix/go-diameter/v4/diam/avp"
-	"github.com/fiorix/go-diameter/v4/diam/datatype"
-	"github.com/golang/glog"
 )
 
 const (
 	defaultFramedIpv4Addr = "10.10.10.10"
+)
+
+// Flag definitions
+type FlagBit int
+
+const (
+	EmptyFlagBit FlagBit = 0
+	FlagBit7     FlagBit = 1 << 7
 )
 
 // PolicyClient is an interface to define something that sends requests over Gx.
@@ -103,7 +112,7 @@ func NewGxClient(
 	cloudRegistry service_registry.GatewayRegistry,
 	globalConfig *GxGlobalConfig,
 ) *GxClient {
-	diamClient := diameter.NewClient(clientCfg)
+	diamClient := diameter.NewClient(clientCfg, serverCfg.LocalAddr)
 	diamClient.BeginConnection(serverCfg)
 	return NewConnectedGxClient(diamClient, serverCfg, reAuthHandler, cloudRegistry, globalConfig)
 }
@@ -130,7 +139,7 @@ func (gxClient *GxClient) SendCreditControlRequest(
 		return err
 	}
 
-	glog.V(2).Infof("Sending Gx CCR message\n%s\n", message)
+	glog.V(3).Infof("Sending Gx CCR message\n%s\n", message)
 	key := credit_control.GetRequestKey(credit_control.Gx, request.SessionID, request.RequestNumber)
 	return gxClient.diamClient.SendRequest(server, done, message, key)
 }
@@ -263,7 +272,7 @@ func (gxClient *GxClient) createCreditControlMessage(
 
 	apn := getAPNFromConfig(globalConfig, request.Apn, request.ChargingCharacteristics)
 	if len(apn) > 0 {
-		m.NewAVP(avp.CalledStationID, avp.Mbit, 0, datatype.UTF8String(apn))
+		m.NewAVP(avp.CalledStationID, avp.Mbit, 0, apn)
 	}
 
 	if request.Type == credit_control.CRTInit {
@@ -275,8 +284,8 @@ func (gxClient *GxClient) createCreditControlMessage(
 		m.NewAVP(avp.TerminationCause, avp.Mbit, 0, datatype.Enumerated(1))
 	}
 
-	for _, avp := range additionalAVPs {
-		m.InsertAVP(avp)
+	for _, additionalAvp := range additionalAVPs {
+		m.InsertAVP(additionalAvp)
 	}
 
 	// SessionID must be the first AVP
@@ -291,6 +300,7 @@ func (gxClient *GxClient) createCreditControlMessage(
 
 // init message
 func (gxClient *GxClient) getInitAvps(m *diam.Message, request *CreditControlRequest) {
+	// Feature-List-ID 1
 	m.NewAVP(avp.SupportedFeatures, avp.Vbit, diameter.Vendor3GPP, &diam.GroupedAVP{
 		AVP: []*diam.AVP{
 			diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(10415)),
@@ -299,6 +309,18 @@ func (gxClient *GxClient) getInitAvps(m *diam.Message, request *CreditControlReq
 			diam.NewAVP(avp.FeatureList, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(3)),
 		},
 	})
+
+	addFeatureListId2IfNeeded(m, request)
+
+	m.NewAVP(avp.SupportedFeatures, avp.Vbit, diameter.Vendor3GPP, &diam.GroupedAVP{
+		AVP: []*diam.AVP{
+			diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(10415)),
+			diam.NewAVP(avp.FeatureListID, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(2)),
+			// Set Bit 0 and Bit 1
+			diam.NewAVP(avp.FeatureList, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(3)),
+		},
+	})
+
 	// NETWORK_REQUEST_NOT_SUPPORTED(0)
 	m.NewAVP(avp.NetworkRequestSupport, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Enumerated(0))
 	// DISABLE_OFFLINE(0)
@@ -331,7 +353,7 @@ func (gxClient *GxClient) getInitAvps(m *diam.Message, request *CreditControlReq
 		m.NewAVP(avp.TGPPSGSNMCCMNC, avp.Vbit, diameter.Vendor3GPP, datatype.UTF8String(request.PlmnID))
 	}
 	if len(request.UserLocation) > 0 {
-		m.NewAVP(avp.TGPPUserLocationInfo, avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(string(request.UserLocation)))
+		m.NewAVP(avp.TGPPUserLocationInfo, avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(request.UserLocation))
 	}
 	if len(request.GcID) > 0 {
 		m.NewAVP(avp.AccessNetworkChargingIdentifierGx, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, &diam.GroupedAVP{
@@ -341,12 +363,7 @@ func (gxClient *GxClient) getInitAvps(m *diam.Message, request *CreditControlReq
 		})
 	}
 	if request.Qos != nil {
-		m.NewAVP(avp.QoSInformation, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, &diam.GroupedAVP{
-			AVP: []*diam.AVP{
-				diam.NewAVP(avp.APNAggregateMaxBitrateDL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(request.Qos.ApnAggMaxBitRateDL)),
-				diam.NewAVP(avp.APNAggregateMaxBitrateUL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(request.Qos.ApnAggMaxBitRateUL)),
-			},
-		})
+		m.NewAVP(avp.QoSInformation, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, &diam.GroupedAVP{AVP: getQoSInformation(request.Qos)})
 
 		var arpAVP *diam.AVP
 		if gxClient.pcrf91Compliant {
@@ -377,7 +394,38 @@ func (gxClient *GxClient) getInitAvps(m *diam.Message, request *CreditControlReq
 	}
 	if request.AccessTimezone != nil {
 		timezone := GetTimezoneByte(request.AccessTimezone)
-		m.NewAVP(avp.TGPPMSTimeZone, avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(datatype.OctetString(string([]byte{timezone, 0}))))
+		m.NewAVP(avp.TGPPMSTimeZone, avp.Vbit, diameter.Vendor3GPP, datatype.OctetString([]byte{timezone, 0}))
+	}
+}
+
+func addFeatureListId2IfNeeded(m *diam.Message, request *CreditControlRequest) {
+	if request.Qos != nil && request.Qos.ApnExtendedAggMaxBitRateUL != 0 &&
+		request.Qos.ApnExtendedAggMaxBitRateDL != 0 {
+
+		m.NewAVP(avp.SupportedFeatures, avp.Vbit, diameter.Vendor3GPP, &diam.GroupedAVP{
+			AVP: []*diam.AVP{
+				diam.NewAVP(avp.VendorID, avp.Mbit, 0, datatype.Unsigned32(10415)),
+				diam.NewAVP(avp.FeatureListID, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(2)),
+				// Set Bit 7 Extended-BW-NR -> 3GPP 29.212 4.5.30
+				diam.NewAVP(avp.FeatureList, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(FlagBit7)),
+			},
+		})
+	}
+}
+
+// 3GPP 29.212 4.5.30
+func getQoSInformation(qos *QosRequestInfo) []*diam.AVP {
+	if qos.ApnExtendedAggMaxBitRateDL != 0 || qos.ApnExtendedAggMaxBitRateUL != 0 {
+		return []*diam.AVP{
+			diam.NewAVP(avp.APNAggregateMaxBitrateDL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(math.MaxUint32)),
+			diam.NewAVP(avp.APNAggregateMaxBitrateUL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(math.MaxUint32)),
+			diam.NewAVP(avp.ExtendedAPNAMBRDL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(qos.ApnExtendedAggMaxBitRateDL)),
+			diam.NewAVP(avp.ExtendedAPNAMBRUL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(qos.ApnExtendedAggMaxBitRateUL)),
+		}
+	}
+	return []*diam.AVP{
+		diam.NewAVP(avp.APNAggregateMaxBitrateDL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(qos.ApnAggMaxBitRateDL)),
+		diam.NewAVP(avp.APNAggregateMaxBitrateUL, avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(qos.ApnAggMaxBitRateUL)),
 	}
 }
 
@@ -501,7 +549,7 @@ func getDefaultFramedIpv4Addr() net.IP {
 	return ipV4V6
 }
 
-// TS 23.040 Section 9.2.3.11
+// GetTimezoneByte TS 23.040 Section 9.2.3.11
 // https://osqa-ask.wireshark.org/questions/26682/3gpp-timezone-decoding-logic
 func GetTimezoneByte(timezone *protos.Timezone) byte {
 	// AVP expects time difference from UTC in increments of 15 minutes
@@ -520,5 +568,5 @@ func GetTimezoneByte(timezone *protos.Timezone) byte {
 	}
 	ones := (increments % 10) & 0x0F // range 0-9
 	encodedTimezone := byte(ones<<4 + tens)
-	return byte(encodedTimezone)
+	return encodedTimezone
 }

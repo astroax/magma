@@ -19,16 +19,15 @@ import sys
 import threading
 import time
 import unittest
+
 from freezegun import freeze_time
-
-from magma.pipelined.bridge_util import BridgeTools
-
 from magma.mobilityd.dhcp_client import DHCPClient
+from magma.mobilityd.dhcp_desc import DHCPDescriptor, DHCPState
 from magma.mobilityd.mac import MacAddress
-from magma.mobilityd.dhcp_desc import DHCPState, DHCPDescriptor
 from magma.mobilityd.uplink_gw import UplinkGatewayInfo
+from magma.pipelined.bridge_util import BridgeTools
 from scapy.layers.dhcp import DHCP
-from scapy.layers.l2 import Ether, Dot1Q
+from scapy.layers.l2 import Dot1Q, Ether
 from scapy.sendrecv import AsyncSniffer
 
 LOG = logging.getLogger('mobilityd.dhcp.test')
@@ -91,7 +90,7 @@ class DhcpClient(unittest.TestCase):
 
     @unittest.skipIf(os.getuid(), reason="needs root user")
     def test_dhcp_vlan(self):
-        vlan1 = "2"
+        vlan1: int = 2
         mac1 = MacAddress("11:22:33:44:55:66")
 
         self._setup_vlan_network()
@@ -105,11 +104,11 @@ class DhcpClient(unittest.TestCase):
     def test_dhcp_vlan_multi(self):
         self._setup_vlan_network()
 
-        vlan1 = "51"
+        vlan1 = 51
         mac1 = MacAddress("11:22:33:44:55:66")
-        vlan2 = "52"
+        vlan2 = 52
         mac2 = MacAddress("22:22:33:44:55:66")
-        vlan3 = "53"
+        vlan3 = 53
         mac3 = MacAddress("11:22:33:44:55:66")
 
         self._setup_dhcp_on_vlan(vlan1)
@@ -128,7 +127,7 @@ class DhcpClient(unittest.TestCase):
         self._release_ip(mac2, vlan2)
         self._release_ip(mac3, vlan3)
 
-    def _validate_dhcp_alloc_renew(self, mac1: MacAddress, vlan: str):
+    def _validate_dhcp_alloc_renew(self, mac1: MacAddress, vlan: int):
         self._alloc_ip_address_from_dhcp(mac1, vlan)
         self._validate_req_state(mac1, DHCPState.REQUEST, vlan)
         self._validate_state_as_current(mac1, vlan)
@@ -148,7 +147,10 @@ class DhcpClient(unittest.TestCase):
             self._last_xid = self._get_state_xid(mac1, vlan)
             time2 = datetime.datetime.now() + datetime.timedelta(seconds=2000)
             self._start_sniffer()
-            LOG.debug("check discover packets time: %s", datetime.datetime.now())
+            LOG.debug(
+                "check discover packets time: %s",
+                datetime.datetime.now(),
+            )
             with freeze_time(time2):
                 LOG.debug("check discover after lease loss")
                 self._stop_sniffer_and_check(DHCPState.DISCOVER, mac1, vlan)
@@ -160,10 +162,12 @@ class DhcpClient(unittest.TestCase):
         setup_dhcp_server = SCRIPT_PATH + "scripts/setup-test-dhcp-srv.sh"
         subprocess.check_call([setup_dhcp_server, "cl1"])
 
-        setup_uplink_br = [SCRIPT_PATH + "scripts/setup-uplink-br.sh",
-                           self._br,
-                           self.up_link_port,
-                           DHCP_IFACE]
+        setup_uplink_br = [
+            SCRIPT_PATH + "scripts/setup-uplink-br.sh",
+            self._br,
+            self.up_link_port,
+            DHCP_IFACE,
+        ]
         subprocess.check_call(setup_uplink_br)
         self._setup_dhclp_client()
 
@@ -172,26 +176,33 @@ class DhcpClient(unittest.TestCase):
         setup_vlan_switch = SCRIPT_PATH + "scripts/setup-uplink-vlan-sw.sh"
         subprocess.check_call([setup_vlan_switch, self.vlan_sw, "v"])
 
-        setup_uplink_br = [SCRIPT_PATH + "scripts/setup-uplink-br.sh",
-                           self._br,
-                           self.up_link_port,
-                           DHCP_IFACE]
+        setup_uplink_br = [
+            SCRIPT_PATH + "scripts/setup-uplink-br.sh",
+            self._br,
+            self.up_link_port,
+            DHCP_IFACE,
+        ]
         subprocess.check_call(setup_uplink_br)
         self._setup_dhclp_client()
 
     def _setup_dhclp_client(self):
-        self._dhcp_client = DHCPClient(dhcp_wait=self.dhcp_wait,
-                                       dhcp_store=self.dhcp_store,
-                                       gw_info=self.gw_info,
-                                       iface=DHCP_IFACE,
-                                       lease_renew_wait_min=1)
+        self._dhcp_client = DHCPClient(
+            dhcp_wait=self.dhcp_wait,
+            dhcp_store=self.dhcp_store,
+            gw_info=self.gw_info,
+            iface=DHCP_IFACE,
+            lease_renew_wait_min=1,
+        )
         self._dhcp_client.run()
 
-    def _setup_dhcp_on_vlan(self, vlan: str):
+    def _setup_dhcp_on_vlan(self, vlan: int):
         setup_vlan_switch = SCRIPT_PATH + "scripts/setup-uplink-vlan-srv.sh"
-        subprocess.check_call([setup_vlan_switch, self.vlan_sw, vlan])
+        subprocess.check_call([setup_vlan_switch, self.vlan_sw, str(vlan)])
 
-    def _validate_req_state(self, mac: MacAddress, state: DHCPState, vlan: str):
+    def _validate_req_state(
+        self, mac: MacAddress,
+        state: DHCPState, vlan: int,
+    ):
         for x in range(RETRY_LIMIT):
             LOG.debug("wait for state: %d" % x)
             with self.dhcp_wait:
@@ -204,25 +215,35 @@ class DhcpClient(unittest.TestCase):
 
         assert 0
 
-    def _get_state_xid(self, mac: MacAddress, vlan: str):
+    def _get_state_xid(self, mac: MacAddress, vlan: int):
         with self.dhcp_wait:
             dhcp1 = self.dhcp_store.get(mac.as_redis_key(vlan))
             return dhcp1.xid
 
-    def _validate_state_as_current(self, mac: MacAddress, vlan: str):
+    def _validate_state_as_current(self, mac: MacAddress, vlan: int):
         with self.dhcp_wait:
             dhcp1 = self.dhcp_store.get(mac.as_redis_key(vlan))
-            self.assert_(dhcp1.state == DHCPState.OFFER or dhcp1.state == DHCPState.ACK)
+            self.assertTrue(
+                dhcp1.state == DHCPState.OFFER or dhcp1.state == DHCPState.ACK,
+            )
 
-    def _alloc_ip_address_from_dhcp(self, mac: MacAddress, vlan: str) -> DHCPDescriptor:
+    def _alloc_ip_address_from_dhcp(
+            self, mac: MacAddress, vlan: int,
+    ) -> DHCPDescriptor:
         retry_count = 0
         with self.dhcp_wait:
             dhcp_desc = None
-            while (retry_count < 60 and (dhcp_desc is None or
-                                         dhcp_desc.ip_is_allocated() is not True)):
+            while (
+                retry_count < 60 and (
+                    dhcp_desc is None
+                    or dhcp_desc.ip_is_allocated() is not True
+                )
+            ):
                 if retry_count % 5 == 0:
-                    self._dhcp_client.send_dhcp_packet(mac, vlan,
-                                                       DHCPState.DISCOVER)
+                    self._dhcp_client.send_dhcp_packet(
+                        mac, vlan,
+                        DHCPState.DISCOVER,
+                    )
 
                 self.dhcp_wait.wait(timeout=1)
                 dhcp_desc = self._dhcp_client.get_dhcp_desc(mac, vlan)
@@ -230,19 +251,19 @@ class DhcpClient(unittest.TestCase):
 
             return dhcp_desc
 
-    def _validate_ip_subnet(self, mac: MacAddress, vlan: str):
+    def _validate_ip_subnet(self, mac: MacAddress, vlan: int):
         # vlan is configured with subnet : 10.200.x.1
         # router IP is 10.200.x.211
         # x is vlan id
-        exptected_subnet = ipaddress.ip_network("10.200.%s.0/24" % vlan)
-        exptected_router_ip = ipaddress.ip_address("10.200.%s.211" % vlan)
+        exptected_subnet = ipaddress.ip_network(f"10.200.{vlan}.0/24")
+        exptected_router_ip = ipaddress.ip_address(f"10.200.{vlan}.211")
         with self.dhcp_wait:
             dhcp1 = self.dhcp_store.get(mac.as_redis_key(vlan))
             self.assertEqual(dhcp1.subnet, str(exptected_subnet))
             self.assertEqual(dhcp1.router_ip, exptected_router_ip)
-            self.assert_(ipaddress.ip_address(dhcp1.ip) in exptected_subnet)
+            self.assertTrue(ipaddress.ip_address(dhcp1.ip) in exptected_subnet)
 
-    def _release_ip(self, mac: MacAddress, vlan: str):
+    def _release_ip(self, mac: MacAddress, vlan: int):
         self._dhcp_client.release_ip_address(mac, vlan)
         time.sleep(PKT_CAPTURE_WAIT)
         self._validate_req_state(mac, DHCPState.RELEASE, vlan)
@@ -256,24 +277,30 @@ class DhcpClient(unittest.TestCase):
     def _start_sniffer(self):
         # drop dhclient requests, this would avoid lease
         # renewal after freezing time.
-        subprocess.check_call(["ovs-ofctl", "add-flow", self._br,
-                               "priority=100,in_port=" + self.up_link_port + ",action=drop"])
+        subprocess.check_call([
+            "ovs-ofctl", "add-flow", self._br,
+            "priority=100,in_port=" + self.up_link_port + ",action=drop",
+        ])
         time.sleep(PKT_CAPTURE_WAIT)
 
-        self._sniffer = AsyncSniffer(iface=self._br,
-                                     filter="udp and (port 67 or 68)",
-                                     store=False,
-                                     prn=self._handle_dhcp_req_packet)
+        self._sniffer = AsyncSniffer(
+            iface=self._br,
+            filter="udp and (port 67 or 68)",
+            store=False,
+            prn=self._handle_dhcp_req_packet,
+        )
 
         self.pkt_list = []
         self._sniffer.start()
         LOG.debug("sniffer started")
         time.sleep(PKT_CAPTURE_WAIT)
 
-    def _stop_sniffer_and_check(self, state: DHCPState, mac: MacAddress, vlan):
+    def _stop_sniffer_and_check(self, state: DHCPState, mac: MacAddress, vlan: int):
         LOG.debug("delete drop flow")
-        subprocess.check_call(["ovs-ofctl", "del-flows", self._br,
-                               "in_port=" + self.up_link_port])
+        subprocess.check_call([
+            "ovs-ofctl", "del-flows", self._br,
+            "in_port=" + self.up_link_port,
+        ])
 
         for x in range(RETRY_LIMIT):
             LOG.debug("wait for pkt: %d" % x)
@@ -282,8 +309,10 @@ class DhcpClient(unittest.TestCase):
             with self.pkt_list_lock:
                 for pkt in self.pkt_list:
                     if DHCP in pkt:
-                        if vlan and (Dot1Q not in pkt or
-                                     vlan != str(pkt[Dot1Q].vlan)):
+                        if vlan and (
+                            Dot1Q not in pkt
+                            or vlan != pkt[Dot1Q].vlan
+                        ):
                             continue
 
                         if pkt[DHCP].options[0][1] == int(state) and \
@@ -298,5 +327,7 @@ class DhcpClient(unittest.TestCase):
 
         # validate if any dhcp packet was sent.
         if state == DHCPState.DISCOVER:
-            self.assertNotEqual(self._last_xid,
-                                self._get_state_xid(mac, vlan))
+            self.assertNotEqual(
+                self._last_xid,
+                self._get_state_xid(mac, vlan),
+            )

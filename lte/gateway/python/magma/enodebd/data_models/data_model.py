@@ -13,10 +13,19 @@ limitations under the License.
 
 from abc import ABC, abstractmethod
 from collections import namedtuple
-from typing import List, Dict, Any, Callable, Optional
+from typing import Any, Callable, Dict, List, Optional
+
 from magma.enodebd.data_models.data_model_parameters import ParameterName
 
 TrParam = namedtuple('TrParam', ['path', 'is_invasive', 'type', 'is_optional'])
+
+# We may want to model nodes in the datamodel that are derived from other fields
+# in the datamodel and thus maynot have a representation in tr69.
+# e.g PTP_STATUS in FreedomFiOne is True iff GPS is in sync and SyncStatus is
+# True.
+# Explicitly map these params to invalid paths so setters and getters know they
+# should not try to read or write these nodes on the eNB side.
+InvalidTrParamPath = "INVALID_TR_PATH"
 
 
 class DataModel(ABC):
@@ -52,8 +61,10 @@ class DataModel(ABC):
         if not param_info.is_optional:
             return True
         if param_name not in self._presence_by_param:
-            raise KeyError('Parameter presence not yet marked in data '
-                           'model: %s' % param_name)
+            raise KeyError(
+                'Parameter presence not yet marked in data '
+                'model: %s' % param_name,
+            )
         return self._presence_by_param[param_name]
 
     def set_parameter_presence(
@@ -91,7 +102,8 @@ class DataModel(ABC):
     def get_names_of_optional_params(cls) -> List[ParameterName]:
         all_optional_params = []
         for name in cls.get_parameter_names():
-            if cls.get_parameter(name).is_optional:
+            parameter = cls.get_parameter(name)
+            if parameter and parameter.is_optional:
                 all_optional_params.append(name)
         return all_optional_params
 

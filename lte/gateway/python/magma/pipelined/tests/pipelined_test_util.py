@@ -15,35 +15,43 @@ import logging
 import os
 import re
 import subprocess
-import netifaces
-
 from collections import namedtuple
 from concurrent.futures import Future
+from datetime import datetime
 from difflib import unified_diff
-from typing import Dict, List, Optional
-from unittest import TestCase
+from typing import List, NamedTuple, Optional, Tuple
+from unittest import TestCase, mock
 from unittest.mock import MagicMock
-from ryu.lib import hub
 
+import fakeredis
+import netifaces
 from lte.protos.mconfig.mconfigs_pb2 import PipelineD
-from lte.protos.pipelined_pb2 import SetupFlowsResult, SetupPolicyRequest, \
-    UpdateSubscriberQuotaStateRequest, SetupUEMacRequest
+from lte.protos.pipelined_pb2 import (
+    SetupFlowsResult,
+    SetupPolicyRequest,
+    SetupUEMacRequest,
+    UpdateSubscriberQuotaStateRequest,
+)
+from magma.pipelined.app.base import global_epoch
 from magma.pipelined.bridge_util import BridgeTools
+from magma.pipelined.openflow import flows
 from magma.pipelined.service_manager import ServiceManager
-from magma.pipelined.tests.app.exceptions import BadConfigError, \
-    ServiceRunningError
+from magma.pipelined.tests.app.exceptions import (
+    BadConfigError,
+    ServiceRunningError,
+)
 from magma.pipelined.tests.app.flow_query import RyuDirectFlowQuery
 from magma.pipelined.tests.app.start_pipelined import StartThread
-from magma.pipelined.app.base import global_epoch
-from magma.pipelined.openflow import flows
+from magma.pipelined.tests.app.subscriber import RyuDirectSubscriberContext
+from magma.pipelined.tests.app.table_isolation import RyuDirectTableIsolator
+from ryu.lib import hub
 
 """
 Pipelined test util functions can be used for testing pipelined, the usage of
 these functions can be seen in pipelined/tests/test_*.py files
 """
 
-SubTest = namedtuple('SubTest', ['context', 'isolator', 'flowtest_list'])
-PktsToSend = namedtuple('PacketToSend', ['pkt', 'num'])
+PktsToSend = namedtuple('PktsToSend', ['pkt', 'num'])
 QueryMatch = namedtuple('QueryMatch', ['pkts', 'flow_count'])
 
 SNAPSHOT_DIR = 'snapshots/'
@@ -52,10 +60,18 @@ SNAPSHOT_EXTENSION = '.snapshot'
 
 # Tuple for FlowVerifier, class wrapper needed becuse of optional flow_count
 class FlowTest(namedtuple('FlowTest', ['query', 'match_num', 'flow_count'])):
+    __test__ = False
     __slots__ = ()
 
     def __new__(cls, query, match_num, flow_count=None):
         return super(FlowTest, cls).__new__(cls, query, match_num, flow_count)
+
+
+class SubTest(NamedTuple):
+    __test__ = False
+    context: RyuDirectSubscriberContext
+    isolator: RyuDirectTableIsolator
+    flowtest_list: FlowTest
 
 
 class WaitTimeExceeded(Exception):
@@ -145,8 +161,10 @@ class FlowVerifier:
             logging.error("Test didn't finish, can't access final pkt stats")
             return None
 
-        return [(f.pkts - i.pkts, f.flow_count - i.flow_count)
-                for f, i in zip(self._final, self._initial)]
+        return [
+            (f.pkts - i.pkts, f.flow_count - i.flow_count)
+            for f, i in zip(self._final, self._initial)
+        ]
 
 
 def start_ryu_app_thread(test_setup):
@@ -207,7 +225,6 @@ def wait_after_send(test_controller, wait_time=1, max_sleep_time=20):
     sleep_time = 0
     pkt_cnt_old = -1
     while True:
-        hub.sleep(wait_time)
 
         pkt_cnt_new = sum(
             table.matched_count for table in
@@ -222,12 +239,15 @@ def wait_after_send(test_controller, wait_time=1, max_sleep_time=20):
         if (sleep_time >= max_sleep_time):
             raise WaitTimeExceeded(
                 "Waiting on pkts exceeded the max({}) sleep time".
-                    format(max_sleep_time)
+                format(max_sleep_time),
             )
+        hub.sleep(wait_time)
 
 
-def setup_controller(controller, setup_req, sleep_time: float = 1,
-                     retries: int = 5):
+def setup_controller(
+    controller, setup_req, sleep_time: float = 1,
+    retries: int = 5,
+):
     for _ in range(0, retries):
         ret = controller.check_setup_request_epoch(setup_req.epoch)
         if ret == SetupFlowsResult.SUCCESS:
@@ -240,18 +260,23 @@ def setup_controller(controller, setup_req, sleep_time: float = 1,
     return res.result
 
 
-def fake_inout_setup(inout_controller):
-    TestCase().assertEqual(setup_controller(
-        inout_controller, SetupPolicyRequest(requests=[], epoch=global_epoch)),
-        SetupFlowsResult.SUCCESS)
+def fake_mandatory_controller_setup(controller):
+    TestCase().assertEqual(
+        setup_controller(
+            controller, SetupPolicyRequest(requests=[], epoch=global_epoch),
+        ),
+        SetupFlowsResult.SUCCESS,
+    )
 
 
-def fake_controller_setup(enf_controller=None,
-                          enf_stats_controller=None,
-                          startup_flow_controller=None,
-                          check_quota_controller=None,
-                          setup_flows_request=None,
-                          check_quota_request=None):
+def fake_controller_setup(
+    enf_controller=None,
+    enf_stats_controller=None,
+    startup_flow_controller=None,
+    check_quota_controller=None,
+    setup_flows_request=None,
+    check_quota_request=None,
+):
     """
     Immitate contoller restart. This is done by manually setting contoller init
     fields back to False, and restarting the startup stats controller(optional)
@@ -272,23 +297,33 @@ def fake_controller_setup(enf_controller=None,
         if enf_stats_controller:
             TestCase().assertEqual(enf_stats_controller._clean_restart, True)
     enf_controller.init_finished = False
-    TestCase().assertEqual(setup_controller(
-        enf_controller, setup_flows_request),
-        SetupFlowsResult.SUCCESS)
+    TestCase().assertEqual(
+        setup_controller(
+            enf_controller, setup_flows_request,
+        ),
+        SetupFlowsResult.SUCCESS,
+    )
     if enf_stats_controller:
         enf_stats_controller.init_finished = False
-        TestCase().assertEqual(setup_controller(
-            enf_stats_controller, setup_flows_request),
-            SetupFlowsResult.SUCCESS)
+        enf_stats_controller.cleanup_state()
+        TestCase().assertEqual(
+            setup_controller(
+                enf_stats_controller, setup_flows_request,
+            ),
+            SetupFlowsResult.SUCCESS,
+        )
     if check_quota_controller:
         check_quota_controller.init_finished = False
         if check_quota_request is None:
             check_quota_request = UpdateSubscriberQuotaStateRequest(
                 requests=[], epoch=global_epoch,
             )
-        TestCase().assertEqual(setup_controller(
-            check_quota_controller, check_quota_request),
-            SetupFlowsResult.SUCCESS)
+        TestCase().assertEqual(
+            setup_controller(
+                check_quota_controller, check_quota_request,
+            ),
+            SetupFlowsResult.SUCCESS,
+        )
 
 
 def fake_cwf_setup(ue_mac_controller, setup_ue_mac_request=None):
@@ -297,13 +332,18 @@ def fake_cwf_setup(ue_mac_controller, setup_ue_mac_request=None):
             requests=[], epoch=global_epoch,
         )
     ue_mac_controller.init_finished = False
-    TestCase().assertEqual(setup_controller(
-        ue_mac_controller, setup_ue_mac_request),
-        SetupFlowsResult.SUCCESS)
+    TestCase().assertEqual(
+        setup_controller(
+            ue_mac_controller, setup_ue_mac_request,
+        ),
+        SetupFlowsResult.SUCCESS,
+    )
 
 
-def wait_for_enforcement_stats(controller, rule_list, wait_time=1,
-                               max_sleep_time=25):
+def wait_for_enforcement_stats(
+    controller, rule_list, wait_time=1,
+    max_sleep_time=25,
+):
     """
     Wait until all rules from rule_list appear in reports from
     enforcement_controller to sessiond. This is done by checking the mocked
@@ -321,8 +361,15 @@ def wait_for_enforcement_stats(controller, rule_list, wait_time=1,
     """
     sleep_time = 0
     stats_reported = {rule: False for rule in rule_list}
+    times_called = len(controller._report_usage.call_args_list)
+    controller._last_report_timestamp = datetime.now()
     while not all(stats_reported[rule] for rule in rule_list):
         hub.sleep(wait_time)
+
+        # There is no sessiond report callback in testing so manually reset var
+        if times_called != len(controller._report_usage.call_args_list):
+            times_called = len(controller._report_usage.call_args_list)
+            controller._last_report_timestamp = datetime.now()
         for reported_stats in controller._report_usage.call_args_list:
             stats = reported_stats[0][0]
             for rule in rule_list:
@@ -333,7 +380,7 @@ def wait_for_enforcement_stats(controller, rule_list, wait_time=1,
         if (sleep_time >= max_sleep_time):
             raise WaitTimeExceeded(
                 "Waiting on enforcement stats exceeded the max({}) sleep time".
-                    format(max_sleep_time)
+                format(max_sleep_time),
             )
 
 
@@ -358,8 +405,10 @@ def get_enforcement_stats(enforcement_stats):
     return stats
 
 
-def create_service_manager(services: List[int],
-                           static_services: List[str] = None):
+def create_service_manager(
+    services: List[int],
+    static_services: List[str] = None,
+):
     """
     Creates a service manager from the given list of services.
     Args:
@@ -374,73 +423,97 @@ def create_service_manager(services: List[int],
         static_services = []
     magma_service.config = {
         'static_services': static_services,
-        '5G_feature_set': {'enable': False}
+        'enable5g_features': False,
     }
-    service_manager = ServiceManager(magma_service)
+    # mock the get_default_client function used to return a fakeredis object
+    func_mock = MagicMock(return_value=fakeredis.FakeStrictRedis())
+    with mock.patch(
+            'magma.pipelined.rule_mappers.get_default_client',
+            func_mock,
+    ):
+        service_manager = ServiceManager(magma_service)
 
     # Workaround as we don't use redis in unit tests
     service_manager.rule_id_mapper._rule_nums_by_rule = {}
     service_manager.rule_id_mapper._rules_by_rule_num = {}
     service_manager.session_rule_version_mapper._version_by_imsi_and_rule = {}
     service_manager.interface_to_prefix_mapper._prefix_by_interface = {}
-    service_manager.tunnel_id_mapper._tunnel_map = {}
 
     return service_manager
 
 
-def _parse_flow(flow):
+def _parse_flow(flow, ipv6_prefix_only=False):
     fields_to_remove = [
         r'duration=[\d\w\.]*, ',
         r'idle_age=[\d]*, ',
     ]
     for field in fields_to_remove:
         flow = re.sub(field, '', flow)
+    if ipv6_prefix_only:
+        flow = re.sub(r'ipv6_dst=fe80::[0-9,a-f,:]+ ', 'ipv6_dst=fe80::linkLocalSuffix ', flow)
     return flow
 
 
-def _get_current_bridge_snapshot(bridge_name, service_manager,
-                                 include_stats=True) -> List[str]:
+def _get_current_bridge_snapshot(
+    bridge_name, service_manager,
+    include_stats=True,
+    ipv6_prefix_only=False,
+) -> List[str]:
     table_assignments = service_manager.get_all_table_assignments()
     # Currently, the unit test setup library does not set up the ryu api app.
     # For now, snapshots are created from the flow dump output using ovs and
     # parsed using regex. Once the ryu api works for unit tests, we can
     # directly parse the api response and avoid the regex.
-    flows = BridgeTools.get_annotated_flows_for_bridge(bridge_name,
-                                                       table_assignments,
-                                                       include_stats=include_stats)
-    return [_parse_flow(flow) for flow in flows]
+    flows = BridgeTools.get_annotated_flows_for_bridge(
+        bridge_name,
+        table_assignments,
+        include_stats=include_stats,
+    )
+    return [_parse_flow(flow, ipv6_prefix_only) for flow in flows]
 
 
-def fail(test_case: TestCase, err_msg: str, _bridge_name: str,
-         snapshot_file, current_snapshot):
+def fail(
+    test_case: TestCase, err_msg: str, _bridge_name: str,
+    snapshot_file, current_snapshot,
+):
     ofctl_cmd = "sudo ovs-ofctl dump-flows %s" % _bridge_name
-    p = subprocess.Popen([ofctl_cmd],
-                         stdout=subprocess.PIPE,
-                         shell=True)
-    ofctl_dump = p.stdout.read().decode("utf-8").strip()
+    p = subprocess.Popen(
+        [ofctl_cmd],
+        stdout=subprocess.PIPE,
+        shell=True,
+    )
+    assert p.stdout is not None
+    ofctl_dump = p.stdout.read().decode("utf-8", 'ignore').strip()
     logging.error("cmd ofctl_dump: %s", ofctl_dump)
 
     msg = 'Snapshot mismatch with error:\n' \
           '{}\n' \
           'To fix the error, update "{}" to the current snapshot:\n' \
-          '{}'.format(err_msg, snapshot_file,
-                      '\n'.join(current_snapshot))
+          '{}'.format(
+              err_msg, snapshot_file,
+              '\n'.join(current_snapshot),
+          )
     return test_case.fail(msg)
 
 
-def expected_snapshot(test_case: TestCase,
-                      bridge_name: str,
-                      current_snapshot,
-                      snapshot_name: Optional[str] = None) -> bool:
+def expected_snapshot(
+    test_case: TestCase,
+    bridge_name: str,
+    current_snapshot,
+    snapshot_name: Optional[str] = None,
+) -> Tuple[str, List[str]]:
     if snapshot_name is not None:
-        combined_name = '{}.{}{}'.format(test_case.id(), snapshot_name,
-                                         SNAPSHOT_EXTENSION)
+        combined_name = '{}.{}{}'.format(
+            test_case.id(), snapshot_name,
+            SNAPSHOT_EXTENSION,
+        )
     else:
         combined_name = '{}{}'.format(test_case.id(), SNAPSHOT_EXTENSION)
     snapshot_file = os.path.join(
         os.path.dirname(os.path.realpath(__file__)),
         SNAPSHOT_DIR,
-        combined_name)
+        combined_name,
+    )
 
     try:
         with open(snapshot_file, 'r') as file:
@@ -453,10 +526,13 @@ def expected_snapshot(test_case: TestCase,
     return snapshot_file, prev_snapshot
 
 
-def assert_bridge_snapshot_match(test_case: TestCase, bridge_name: str,
-                                 service_manager: ServiceManager,
-                                 snapshot_name: Optional[str] = None,
-                                 include_stats: bool = True):
+def assert_bridge_snapshot_match(
+    test_case: TestCase, bridge_name: str,
+    service_manager: ServiceManager,
+    snapshot_name: Optional[str] = None,
+    include_stats: bool = True,
+    ipv6_prefix_only: bool = False,
+):
     """
     Verifies the current bridge snapshot matches the snapshot saved in file for
     the given test case. Fails the test case if the snapshots differ.
@@ -470,31 +546,46 @@ def assert_bridge_snapshot_match(test_case: TestCase, bridge_name: str,
             this is used to distinguish the snapshots
     """
 
-    current_snapshot = _get_current_bridge_snapshot(bridge_name,
-                                                    service_manager,
-                                                    include_stats)
+    current_snapshot = _get_current_bridge_snapshot(
+        bridge_name,
+        service_manager,
+        include_stats,
+        ipv6_prefix_only,
+    )
 
-    snapshot_file, expected = expected_snapshot(test_case,
-                                                bridge_name,
-                                                current_snapshot,
-                                                snapshot_name)
+    snapshot_file, expected = expected_snapshot(
+        test_case,
+        bridge_name,
+        current_snapshot,
+        snapshot_name,
+    )
     if set(current_snapshot) != set(expected):
-        fail(test_case,
-             '\n'.join(list(unified_diff(expected, current_snapshot,
-                                         fromfile='previous snapshot',
-                                         tofile='current snapshot'))),
-             bridge_name,
-             snapshot_file,
-             current_snapshot)
+        fail(
+            test_case,
+            '\n'.join(
+                list(
+                    unified_diff(
+                        expected, current_snapshot,
+                        fromfile='previous snapshot',
+                        tofile='current snapshot',
+                    ),
+                ),
+            ),
+            bridge_name,
+            snapshot_file,
+            current_snapshot,
+        )
 
 
-def wait_for_snapshots(test_case: TestCase,
-                       bridge_name: str,
-                       service_manager: ServiceManager,
-                       snapshot_name: Optional[str] = None,
-                       wait_time: int = 1, max_sleep_time: int = 20,
-                       datapath=None,
-                       try_snapshot=False):
+def wait_for_snapshots(
+    test_case: TestCase,
+    bridge_name: str,
+    service_manager: ServiceManager,
+    snapshot_name: Optional[str] = None,
+    wait_time: int = 1, max_sleep_time: int = 20,
+    datapath=None,
+    try_snapshot=False, include_stats=True,
+):
     """
     Wait after checking ovs snapshot as new changes might still come in,
 
@@ -507,17 +598,25 @@ def wait_for_snapshots(test_case: TestCase,
     Throws a WaitTimeExceeded Exception if max_sleep_time exceeded
     """
     sleep_time = 0
-    old_snapshot = _get_current_bridge_snapshot(bridge_name, service_manager)
+    old_snapshot = _get_current_bridge_snapshot(
+        bridge_name, service_manager,
+        include_stats=include_stats,
+    )
     while True:
         if datapath:
             flows.set_barrier(datapath)
         hub.sleep(wait_time)
 
-        new_snapshot = _get_current_bridge_snapshot(bridge_name, service_manager)
+        new_snapshot = _get_current_bridge_snapshot(
+            bridge_name, service_manager,
+            include_stats=include_stats,
+        )
         if try_snapshot:
-            snapshot_file, expected_ = expected_snapshot(test_case,
-                                                         bridge_name,
-                                                         snapshot_name)
+            _, expected_ = expected_snapshot(
+                test_case,
+                bridge_name,
+                snapshot_name,
+            )
             if new_snapshot == expected_:
                 return
         else:
@@ -530,7 +629,7 @@ def wait_for_snapshots(test_case: TestCase,
         if sleep_time >= max_sleep_time:
             raise WaitTimeExceeded(
                 "Waiting on pkts exceeded the max({}) sleep time".
-                    format(max_sleep_time)
+                format(max_sleep_time),
             )
 
 
@@ -539,13 +638,15 @@ class SnapshotVerifier:
     SnapshotVerifier is a context wrapper for verifying bridge snapshots.
     """
 
-    def __init__(self, test_case: TestCase, bridge_name: str,
-                 service_manager: ServiceManager,
-                 snapshot_name: Optional[str] = None,
-                 include_stats: bool = True,
-                 max_sleep_time: int = 20,
-                 datapath=None,
-                 try_snapshot=False):
+    def __init__(
+        self, test_case: TestCase, bridge_name: str,
+        service_manager: ServiceManager,
+        snapshot_name: Optional[str] = None,
+        include_stats: bool = True,
+        max_sleep_time: int = 20,
+        datapath=None,
+        try_snapshot=False,
+    ):
         """
         These arguments are used to call assert_bridge_snapshot_match on exit.
 
@@ -574,30 +675,40 @@ class SnapshotVerifier:
         Runs after finishing 'with' (Verify snapshot)
         """
         try:
-            wait_for_snapshots(self._test_case,
-                               self._bridge_name,
-                               self._service_manager,
-                               self._snapshot_name,
-                               max_sleep_time=self._max_sleep_time,
-                               datapath=self._datapath,
-                               try_snapshot=self._try_snapshot)
+            wait_for_snapshots(
+                self._test_case,
+                self._bridge_name,
+                self._service_manager,
+                self._snapshot_name,
+                max_sleep_time=self._max_sleep_time,
+                datapath=self._datapath,
+                try_snapshot=self._try_snapshot,
+                include_stats=self._include_stats,
+            )
         except WaitTimeExceeded as e:
-            ofctl_cmd = "sudo ovs-ofctl dump-flows %s".format(self._bridge_name)
-            p = subprocess.Popen([ofctl_cmd],
-                                 stdout=subprocess.PIPE,
-                                 shell=True)
+            ofctl_cmd = f"sudo ovs-ofctl dump-flows {self._bridge_name}"
+            p = subprocess.Popen(
+                [ofctl_cmd],
+                stdout=subprocess.PIPE,
+                shell=True,
+            )
             ofctl_dump = p.stdout.read().decode("utf-8").strip()
             logging.error("ofctl_dump: [%s]", ofctl_dump)
             TestCase().fail(e)
 
-        assert_bridge_snapshot_match(self._test_case, self._bridge_name,
-                                     self._service_manager,
-                                     self._snapshot_name, self._include_stats)
+        assert_bridge_snapshot_match(
+            self._test_case, self._bridge_name,
+            self._service_manager,
+            self._snapshot_name, self._include_stats,
+        )
 
 
-def get_ovsdb_port_tag(port_name: str) -> str:
-    dump1 = subprocess.Popen(["ovsdb-client", "dump", "Port", "name", "tag"],
-                             stdout=subprocess.PIPE)
+def get_ovsdb_port_tag(port_name: str) -> Optional[str]:
+    dump1 = subprocess.Popen(
+        ["ovsdb-client", "dump", "Port", "name", "tag"],
+        stdout=subprocess.PIPE,
+    )
+    assert dump1.stdout is not None
     for port in dump1.stdout.readlines():
         if port_name not in str(port):
             continue
@@ -606,6 +717,7 @@ def get_ovsdb_port_tag(port_name: str) -> str:
             return tokens[1]
         except ValueError:
             pass
+    return None
 
 
 def get_iface_ipv4(iface: str) -> List[str]:
@@ -617,10 +729,34 @@ def get_iface_ipv4(iface: str) -> List[str]:
     return ip_addr_list
 
 
+def get_iface_ipv6(iface: str) -> List[str]:
+    virt_ifaddresses = netifaces.ifaddresses(iface)
+    ip_addr_list = []
+    for ip_rec in virt_ifaddresses[netifaces.AF_INET6]:
+        ip_rec_tok = ip_rec['addr'].split('%')[0]
+        ip_addr_list.append(ip_rec_tok)
+
+    print("ipv6-list: %s " % ip_addr_list)
+    return ip_addr_list
+
+
 def get_iface_gw_ipv4(iface: str) -> List[str]:
     gateways = netifaces.gateways()
     gateway_ip_addr_list = []
     for gw_ip, gw_iface, _ in gateways[netifaces.AF_INET]:
+        print("pbs: gw_ip %s gw_iface %s " % (gw_ip, gw_iface))
+        if gw_iface != iface:
+            continue
+        gateway_ip_addr_list.append(gw_ip)
+
+    return gateway_ip_addr_list
+
+
+def get_iface_gw_ipv6(iface: str) -> List[str]:
+    gateways = netifaces.gateways()
+    gateway_ip_addr_list = []
+    for gw_ip, gw_iface, _ in gateways[netifaces.AF_INET6]:
+        print("pbs: gw_ipv6 %s gw_iface %s " % (gw_ip, gw_iface))
         if gw_iface != iface:
             continue
         gateway_ip_addr_list.append(gw_ip)

@@ -10,14 +10,20 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from typing import List, Dict
+from __future__ import annotations
+
 from abc import ABCMeta, abstractmethod
+from asyncio import Future
+from logging import Logger
+from typing import Callable, Dict, List, Optional
 
 from lte.protos.pipelined_pb2 import SetupFlowsResult
 from magma.pipelined.app.base import ControllerNotReadyException
+from magma.pipelined.app.startup_flows import StartupFlows
 from magma.pipelined.openflow import flows
+from magma.pipelined.openflow.messages import MessageHub
 from magma.pipelined.policy_converters import ovs_flow_match_to_magma_match
-
+from ryu.controller.controller import Datapath
 from ryu.ofproto.ofproto_v1_4_parser import OFPFlowStats
 
 DefaultMsgsMap = Dict[int, List[OFPFlowStats]]
@@ -29,6 +35,17 @@ class RestartMixin(metaclass=ABCMeta):
 
     Mixin class for controller restart handling
     """
+    logger: Logger
+    tbl_num: int
+    cleanup_state: Callable
+    delete_all_flows: Callable
+    finish_init: Callable
+    _msg_hub: MessageHub
+    _datapath: Datapath
+    _startup_flow_controller: Optional[StartupFlows]
+    _startup_flows_fut: Future[StartupFlows]
+    _clean_restart: bool
+    _wait_for_responses: Callable
 
     def handle_restart(self, requests) -> SetupFlowsResult:
         """
@@ -48,8 +65,10 @@ class RestartMixin(metaclass=ABCMeta):
         if self._clean_restart:
             self.delete_all_flows(dp)
             self.cleanup_state()
-            self.logger.info('Controller is in clean restart mode, remaining '
-                             'flows were removed, continuing with setup.')
+            self.logger.info(
+                'Controller is in clean restart mode, remaining '
+                'flows were removed, continuing with setup.',
+            )
 
         if self._startup_flow_controller is None:
             if (self._startup_flows_fut.done()):
@@ -62,22 +81,28 @@ class RestartMixin(metaclass=ABCMeta):
             self._tbls = [self.tbl_num]
         try:
             startup_flows_map = \
-                {i: self._startup_flow_controller.get_flows(i) for i
-                 in self._tbls}
+                {
+                    i: self._startup_flow_controller.get_flows(i) for i
+                    in self._tbls
+                }
         except ControllerNotReadyException as err:
             self.logger.error('Setup failed: %s', err)
             return SetupFlowsResult(result=SetupFlowsResult.FAILURE)
 
         for tbl in startup_flows_map:
-            self.logger.debug('Startup flows before filtering: tbl %d-> %s',
-                              tbl,
-                              [flow.match for flow in startup_flows_map[tbl]])
+            self.logger.debug(
+                'Startup flows before filtering: tbl %d-> %s',
+                tbl,
+                [flow.match for flow in startup_flows_map[tbl]],
+            )
 
         default_msgs = self._get_default_flow_msgs(dp)
         for table, msgs_to_install in default_msgs.items():
             msgs, remaining_flows = self._msg_hub \
-                .filter_msgs_if_not_in_flow_list(dp, msgs_to_install,
-                                                 startup_flows_map[table])
+                .filter_msgs_if_not_in_flow_list(
+                    dp, msgs_to_install,
+                    startup_flows_map[table],
+                )
             if msgs:
                 chan = self._msg_hub.send(msgs, dp)
                 self._wait_for_responses(chan, len(msgs))
@@ -86,17 +111,21 @@ class RestartMixin(metaclass=ABCMeta):
         ue_msgs = self._get_ue_specific_flow_msgs(requests)
         for table, msgs_to_install in ue_msgs.items():
             msgs, remaining_flows = self._msg_hub \
-                .filter_msgs_if_not_in_flow_list(dp, msgs_to_install,
-                                                 startup_flows_map[table])
+                .filter_msgs_if_not_in_flow_list(
+                    dp, msgs_to_install,
+                    startup_flows_map[table],
+                )
             if msgs:
                 chan = self._msg_hub.send(msgs, dp)
                 self._wait_for_responses(chan, len(msgs))
             startup_flows_map[table] = remaining_flows
 
         for tbl in startup_flows_map:
-            self.logger.debug('Startup flows to be deleted: tbl %d -> %s',
-                              tbl,
-                              [flow.match for flow in startup_flows_map[tbl]])
+            self.logger.debug(
+                'Startup flows to be deleted: tbl %d -> %s',
+                tbl,
+                [flow.match for flow in startup_flows_map[tbl]],
+            )
         self._remove_extra_flows(startup_flows_map)
 
         self.finish_init(requests)
@@ -109,11 +138,16 @@ class RestartMixin(metaclass=ABCMeta):
         for tbl in extra_flows:
             for flow in extra_flows[tbl]:
                 match = ovs_flow_match_to_magma_match(flow)
-                self.logger.debug('Sending msg for deletion -> %s',
-                                  match.ryu_match)
-                msg_list.append(flows.get_delete_flow_msg(
-                    self._datapath, tbl, match, cookie=flow.cookie,
-                    cookie_mask=flows.OVS_COOKIE_MATCH_ALL))
+                self.logger.debug(
+                    'Sending msg for deletion -> %s',
+                    match.ryu_match,
+                )
+                msg_list.append(
+                    flows.get_delete_flow_msg(
+                        self._datapath, tbl, match, cookie=flow.cookie,
+                        cookie_mask=flows.OVS_COOKIE_MATCH_ALL,
+                    ),
+                )
         if msg_list:
             chan = self._msg_hub.send(msg_list, self._datapath)
             self._wait_for_responses(chan, len(msg_list))

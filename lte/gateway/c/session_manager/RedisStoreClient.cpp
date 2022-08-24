@@ -11,23 +11,46 @@
  * limitations under the License.
  */
 
-#include "SessionState.h"
-#include "RedisStoreClient.h"
-#include "magma_logging.h"
+#include "lte/gateway/c/session_manager/RedisStoreClient.hpp"
+
+#include <cpp_redis/core/client.hpp>
+#include <cpp_redis/core/reply.hpp>
+#include <cpp_redis/misc/error.hpp>
+#include <folly/Range.h>
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#include <glog/logging.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <yaml-cpp/yaml.h>  // IWYU pragma: keep
+#include <future>
+#include <ostream>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "lte/gateway/c/session_manager/SessionState.hpp"
+#include "lte/gateway/c/session_manager/StoredState.hpp"
+#include "orc8r/gateway/c/common/config/ServiceConfigLoader.hpp"
+#include "orc8r/gateway/c/common/logging/magma_logging.hpp"
+
+namespace magma {
+class StaticRuleStore;
+}
 
 namespace magma {
 namespace lte {
 
-RedisStoreClient::RedisStoreClient(
-    std::shared_ptr<cpp_redis::client> client, const std::string& redis_table,
-    std::shared_ptr<StaticRuleStore> rule_store)
+RedisStoreClient::RedisStoreClient(std::shared_ptr<cpp_redis::client> client,
+                                   const std::string& redis_table,
+                                   std::shared_ptr<StaticRuleStore> rule_store)
     : client_(client), redis_table_(redis_table), rule_store_(rule_store) {}
 
 bool RedisStoreClient::try_redis_connect() {
   ServiceConfigLoader loader;
   auto config = loader.load_service_config("redis");
-  auto port   = config["port"].as<uint32_t>();
-  auto addr   = config["bind"].as<std::string>();
+  auto port = config["port"].as<uint32_t>();
+  auto addr = config["bind"].as<std::string>();
   try {
     client_->connect(
         addr, port,
@@ -67,16 +90,15 @@ SessionMap RedisStoreClient::read_sessions(
   SessionMap session_map;
   for (const std::string& key : subscriber_ids) {
     auto reply = futures[key].get();
-    if (reply.is_null()) {
-      // value just doesn't exist
-      session_map[key] = SessionVector{};
-    } else if (reply.is_error()) {
+    if (reply.is_error()) {
       MLOG(MERROR) << "RedisStoreClient: Unable to get value for key " << key;
       throw RedisReadFailed();
-    } else if (!reply.is_string()) {
+    }
+    if (reply.is_null() || !reply.is_string()) {
+      // value just doesn't exist
       session_map[key] = SessionVector{};
     } else {
-      session_map[key] = std::move(deserialize_session_vec(reply.as_string()));
+      session_map[key] = deserialize_session_vec(reply.as_string());
     }
   }
   return session_map;
@@ -105,14 +127,13 @@ SessionMap RedisStoreClient::read_all_sessions() {
       MLOG(MERROR) << "Non string key found in sessions from redis";
       continue;
     }
-    auto key         = key_reply.as_string();
+    auto key = key_reply.as_string();
     auto value_reply = array[i + 1];
     if (!value_reply.is_string()) {
       MLOG(MERROR) << "RedisStoreClient: Unable to get value for key " << key;
       session_map[key] = SessionVector{};
     } else {
-      session_map[key] =
-          std::move(deserialize_session_vec(value_reply.as_string()));
+      session_map[key] = deserialize_session_vec(value_reply.as_string());
     }
   }
   return session_map;

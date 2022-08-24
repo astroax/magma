@@ -25,6 +25,7 @@ class TCPClientProtocol(asyncio.Protocol):
     Implementation of TCP Protocol to create and immediately close the
     connection
     """
+
     def connection_made(self, transport):
         transport.close()
 
@@ -84,12 +85,13 @@ def cert_is_invalid(host, port, certfile, keyfile, loop):
     ssl_coro = create_ssl_connection(host, port, certfile, keyfile, loop)
 
     coros = tcp_coro, ssl_coro
-    res = yield from asyncio.gather(*coros, loop=loop, return_exceptions=True)
+    asyncio.set_event_loop(loop)
+    res = yield from asyncio.gather(*coros, return_exceptions=True)
     tcp_res, ssl_res = res
 
     if isinstance(tcp_res, Exception):
-        logging.error(
-            'Error making TCP connection: %s, %s',
+        logging.debug(
+            'Error making TCP connection: %s, %s - thus no indication of invalid SSL certificate',
             'errno==None' if tcp_res.errno is None
             else os.strerror(tcp_res.errno),
             tcp_res,
@@ -98,12 +100,13 @@ def cert_is_invalid(host, port, certfile, keyfile, loop):
 
     # Invalid cert only when tcp succeeds and ssl fails
     if isinstance(ssl_res, Exception):
-        logging.error(
-            'Error making SSL connection: %s, %s',
+        logging.debug(
+            'TCP connection succeeded but SSL connection did not: %s, %s - assuming invalid SSL certificate',
             'errno==None' if ssl_res.errno is None
             else os.strerror(ssl_res.errno),
             ssl_res,
         )
         return True
 
+    logging.debug('SSL connection succeeded - thus no indication of invalid SSL certificate')
     return False

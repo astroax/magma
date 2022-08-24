@@ -14,6 +14,11 @@
 package calculations
 
 import (
+	"context"
+
+	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"magma/lte/cloud/go/lte"
 	"magma/lte/cloud/go/serdes"
 	lte_models "magma/lte/cloud/go/services/lte/obsidian/models"
@@ -24,9 +29,6 @@ import (
 	"magma/orc8r/cloud/go/services/state"
 	"magma/orc8r/cloud/go/services/state/wrappers"
 	"magma/orc8r/lib/go/metrics"
-
-	"github.com/golang/glog"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -46,13 +48,16 @@ func (x *UserMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 	glog.V(1).Info("Calculate User Metrics")
 
 	var results []*protos.CalculationResult
-	networks, err := configurator.ListNetworkIDs()
+	networks, err := configurator.ListNetworkIDs(context.Background())
 	if err != nil || networks == nil {
 		return results, err
 	}
 
+	// TODO: maybe attach tracing params to this ctx
+	outgoingCtx := context.TODO()
 	for _, networkID := range networks {
-		subscriberEnts, err := configurator.LoadAllEntitiesOfType(
+		subscriberEnts, _, err := configurator.LoadAllEntitiesOfType(
+			context.Background(),
 			networkID,
 			lte.SubscriberEntityType,
 			configurator.EntityLoadCriteria{LoadMetadata: true, LoadConfig: true, LoadAssocsFromThis: true},
@@ -63,7 +68,7 @@ func (x *UserMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 
 		// get all subscribers state across (configured and federated subscribers)
 		subscriberStateTypes := []string{lte.SubscriberStateType}
-		states, err := state.SearchStates(networkID, subscriberStateTypes, nil, nil, serdes.State)
+		states, err := state.SearchStates(outgoingCtx, networkID, subscriberStateTypes, nil, nil, serdes.State)
 		if err != nil {
 			continue
 		}
@@ -121,7 +126,7 @@ type SiteMetricsCalculation struct {
 func (x *SiteMetricsCalculation) Calculate(prometheusClient query_api.PrometheusAPI) ([]*protos.CalculationResult, error) {
 	glog.V(1).Info("Calculate Site Metrics")
 	var results []*protos.CalculationResult
-	networks, err := configurator.ListNetworkIDs()
+	networks, err := configurator.ListNetworkIDs(context.Background())
 	if err != nil || networks == nil {
 		return results, err
 	}
@@ -129,9 +134,12 @@ func (x *SiteMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 	gatewayVersionCfg, gatewayVersionCfgOk := x.AnalyticsConfig.Metrics[metrics.GatewayMagmaVersionMetric]
 	enbConnectedCfg, enbConnectedOk := x.AnalyticsConfig.Metrics[metrics.EnodebConnectedMetric]
 
+	// TODO: you'll want to set some tracing params on this ctx
+	outgoingContext := context.TODO()
 	for _, networkID := range networks {
 		if gatewayVersionCfgOk {
-			gatewayEnts, err := configurator.LoadAllEntitiesOfType(
+			gatewayEnts, _, err := configurator.LoadAllEntitiesOfType(
+				context.Background(),
 				networkID,
 				lte.CellularGatewayEntityType,
 				configurator.EntityLoadCriteria{LoadMetadata: true, LoadConfig: true, LoadAssocsToThis: true},
@@ -141,7 +149,7 @@ func (x *SiteMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 				continue
 			}
 			for _, ent := range gatewayEnts {
-				status, err := wrappers.GetGatewayStatus(networkID, ent.PhysicalID)
+				status, err := wrappers.GetGatewayStatus(outgoingContext, networkID, ent.PhysicalID)
 				if err != nil || status == nil || status.PlatformInfo == nil || len(status.PlatformInfo.Packages) == 0 {
 					glog.V(2).Infof("gateway %s, err %v or version not available", ent.PhysicalID, err)
 					continue
@@ -171,7 +179,8 @@ func (x *SiteMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 		}
 
 		if enbConnectedOk {
-			ents, err := configurator.LoadAllEntitiesOfType(
+			ents, _, err := configurator.LoadAllEntitiesOfType(
+				context.Background(),
 				networkID,
 				lte.CellularEnodebEntityType,
 				configurator.EntityLoadCriteria{LoadMetadata: true, LoadConfig: true, LoadAssocsToThis: true},
@@ -187,12 +196,12 @@ func (x *SiteMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 					continue
 				}
 
-				st, err := state.GetState(networkID, lte.EnodebStateType, ent.Key, serdes.State)
+				st, err := state.GetState(outgoingContext, networkID, lte.EnodebStateType, ent.Key, serdes.State)
 				if err != nil {
 					continue
 				}
 				enodebState := st.ReportedState.(*lte_models.EnodebState)
-				ent, err := configurator.LoadEntityForPhysicalID(st.ReporterID, configurator.EntityLoadCriteria{}, serdes.Entity)
+				ent, err := configurator.LoadEntityForPhysicalID(context.Background(), st.ReporterID, configurator.EntityLoadCriteria{}, serdes.Entity)
 				if err != nil {
 					continue
 				}

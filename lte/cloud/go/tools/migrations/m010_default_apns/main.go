@@ -55,10 +55,19 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"sort"
+
+	"github.com/Masterminds/squirrel"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/golang/glog"
+	"github.com/google/uuid"
+	_ "github.com/lib/pq"
+	"github.com/thoas/go-funk"
 
 	"magma/lte/cloud/go/tools/migrations/m010_default_apns/types"
 	"magma/orc8r/cloud/go/serde"
@@ -67,14 +76,6 @@ import (
 	"magma/orc8r/cloud/go/storage"
 	"magma/orc8r/cloud/go/tools/migrations"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/Masterminds/squirrel"
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/golang/glog"
-	"github.com/google/uuid"
-	_ "github.com/lib/pq"
-	"github.com/pkg/errors"
-	"github.com/thoas/go-funk"
 )
 
 const (
@@ -139,7 +140,7 @@ func main() {
 	dbSource := migrations.GetEnvWithDefault("DATABASE_SOURCE", "dbname=magma_dev user=magma_dev password=magma_dev host=postgres sslmode=disable")
 	db, err := sql.Open(dbDriver, dbSource)
 	if err != nil {
-		glog.Fatal(errors.Wrap(err, "could not open db connection"))
+		glog.Fatal(fmt.Errorf("could not open db connection: %w", err))
 	}
 	builder := sqorc.GetSqlBuilder()
 
@@ -188,7 +189,7 @@ func getNetworks(tx *sql.Tx, builder sqorc.StatementBuilder) ([]string, error) {
 		Where(squirrel.NotEq{nwIDCol: internalNetworkID}).
 		RunWith(tx).Query()
 	if err != nil {
-		return nil, errors.Wrap(err, "getNetworks: select networks")
+		return nil, fmt.Errorf("getNetworks: select networks: %w", err)
 	}
 
 	var networks []string
@@ -196,13 +197,13 @@ func getNetworks(tx *sql.Tx, builder sqorc.StatementBuilder) ([]string, error) {
 		var n string
 		err = rows.Scan(&n)
 		if err != nil {
-			return nil, errors.Wrap(err, "getNetworks: scan network ID")
+			return nil, fmt.Errorf("getNetworks: scan network ID: %w", err)
 		}
 		networks = append(networks, n)
 	}
 	err = rows.Err()
 	if err != nil {
-		return nil, errors.Wrap(err, "getNetworks: SQL rows error")
+		return nil, fmt.Errorf("getNetworks: SQL rows error: %w", err)
 	}
 
 	return networks, nil
@@ -237,7 +238,7 @@ func createDefaultAPN(tx *sql.Tx, builder sqorc.StatementBuilder, network string
 	glog.Infof("[RUN] %s %v", sqlStr, args)
 	_, err = b.RunWith(tx).Exec()
 	if err != nil {
-		return ent{}, errors.Wrap(err, "createDefaultAPNIfNotExist: insert error")
+		return ent{}, fmt.Errorf("createDefaultAPNIfNotExist: insert error: %w", err)
 	}
 
 	newAPN := ent{pk: pk, typ: apnEntType, graphID: gid}
@@ -255,7 +256,7 @@ func getDefaultAPN(tx *sql.Tx, builder sqorc.StatementBuilder, network string) (
 		).
 		RunWith(tx).Query()
 	if err != nil {
-		return nil, errors.Wrap(err, "getDefaultAPN: select existing default APN")
+		return nil, fmt.Errorf("getDefaultAPN: select existing default APN: %w", err)
 	}
 
 	var apns []*ent
@@ -263,13 +264,13 @@ func getDefaultAPN(tx *sql.Tx, builder sqorc.StatementBuilder, network string) (
 		apn := &ent{}
 		err = rows.Scan(&apn.pk, &apn.graphID)
 		if err != nil {
-			return nil, errors.Wrap(err, "getDefaultAPN: scan APN")
+			return nil, fmt.Errorf("getDefaultAPN: scan APN: %w", err)
 		}
 		apns = append(apns, apn)
 	}
 	err = rows.Err()
 	if err != nil {
-		return nil, errors.Wrap(err, "getDefaultAPN: SQL rows error")
+		return nil, fmt.Errorf("getDefaultAPN: SQL rows error: %w", err)
 	}
 
 	if len(apns) > 1 {
@@ -332,7 +333,7 @@ func getSubscribersMissingAPN(tx *sql.Tx, builder sqorc.StatementBuilder, networ
 		).
 		RunWith(tx).Query()
 	if err != nil {
-		return nil, errors.Wrap(err, "getSubscribersMissingAPN: select subscribers")
+		return nil, fmt.Errorf("getSubscribersMissingAPN: select subscribers: %w", err)
 	}
 
 	assocs := map[ent][]ent{}
@@ -341,13 +342,13 @@ func getSubscribersMissingAPN(tx *sql.Tx, builder sqorc.StatementBuilder, networ
 		pkB, typeB := &sql.NullString{}, &sql.NullString{}
 		err = rows.Scan(&a.graphID, &a.pk, pkB, typeB)
 		if err != nil {
-			return nil, errors.Wrap(err, "getSubscribersMissingAPN: scan subscriber")
+			return nil, fmt.Errorf("getSubscribersMissingAPN: scan subscriber: %w", err)
 		}
 		assocs[a] = append(assocs[a], ent{pk: pkB.String, typ: typeB.String})
 	}
 	err = rows.Err()
 	if err != nil {
-		return nil, errors.Wrap(err, "getSubscribersMissingAPN: SQL rows error")
+		return nil, fmt.Errorf("getSubscribersMissingAPN: SQL rows error: %w", err)
 	}
 
 	var subsMissingAPN []ent
@@ -375,7 +376,7 @@ func mapSubscribersToAPN(tx *sql.Tx, builder sqorc.StatementBuilder, apnPK strin
 	glog.Infof("[RUN] %s %v", sqlStr, args)
 	_, err := b.RunWith(tx).Exec()
 	if err != nil {
-		return errors.Wrap(err, "mapSubscribersToAPN: insert error")
+		return fmt.Errorf("mapSubscribersToAPN: insert error: %w", err)
 	}
 
 	return nil
@@ -393,7 +394,7 @@ func mergeGraphs(tx *sql.Tx, builder sqorc.StatementBuilder, gids []string) erro
 	glog.Infof("[RUN] %s %v", sqlStr, args)
 	_, err := b.RunWith(tx).Exec()
 	if err != nil {
-		return errors.Wrap(err, "mergeGraphs: update error")
+		return fmt.Errorf("mergeGraphs: update error: %w", err)
 	}
 
 	return nil
@@ -409,7 +410,7 @@ func verifyMigration(db *sql.DB, builder sqorc.StatementBuilder) error {
 		configurator.NewNetworkEntityConfigSerde(apnEntType, &types.ApnConfiguration{}),
 	)
 
-	nids, err := configurator.ListNetworkIDs()
+	nids, err := configurator.ListNetworkIDs(context.Background())
 	if err != nil {
 		return err
 	}
@@ -418,7 +419,8 @@ func verifyMigration(db *sql.DB, builder sqorc.StatementBuilder) error {
 
 		// All subscribers have an APN
 
-		allSubs, err := configurator.LoadAllEntitiesOfType(
+		allSubs, _, err := configurator.LoadAllEntitiesOfType(
+			context.Background(),
 			nid, subscriberEntType,
 			configurator.EntityLoadCriteria{LoadAssocsFromThis: true},
 			serdes,
@@ -431,8 +433,8 @@ func verifyMigration(db *sql.DB, builder sqorc.StatementBuilder) error {
 		for _, sub := range allSubs {
 			apns := funk.
 				Chain(sub.Associations).
-				Filter(func(tk storage.TypeAndKey) bool { return tk.Type == apnEntType }).
-				Map(func(tk storage.TypeAndKey) string { return tk.Key }).
+				Filter(func(tk storage.TK) bool { return tk.Type == apnEntType }).
+				Map(func(tk storage.TK) string { return tk.Key }).
 				Value().([]string)
 
 			if len(apns) == 0 {
@@ -448,6 +450,7 @@ func verifyMigration(db *sql.DB, builder sqorc.StatementBuilder) error {
 		// Default APN and its subscribers have same graph ID
 
 		defaultAPN, err := configurator.LoadEntity(
+			context.Background(),
 			nid, apnEntType, types.DefaultAPNName,
 			configurator.EntityLoadCriteria{LoadAssocsToThis: true},
 			serdes,
@@ -493,7 +496,7 @@ func getSubscribersInDefaultAPNGraph(db *sql.DB, builder sqorc.StatementBuilder,
 			).
 			RunWith(tx).Query()
 		if err != nil {
-			return nil, errors.Wrap(err, "getSubscribersInDefaultAPNGraph: select subscribers")
+			return nil, fmt.Errorf("getSubscribersInDefaultAPNGraph: select subscribers: %w", err)
 		}
 
 		var subs []string
@@ -501,13 +504,13 @@ func getSubscribersInDefaultAPNGraph(db *sql.DB, builder sqorc.StatementBuilder,
 			key := ""
 			err = rows.Scan(&key)
 			if err != nil {
-				return nil, errors.Wrap(err, "getSubscribersInDefaultAPNGraph: scan subscriber PK")
+				return nil, fmt.Errorf("getSubscribersInDefaultAPNGraph: scan subscriber PK: %w", err)
 			}
 			subs = append(subs, key)
 		}
 		err = rows.Err()
 		if err != nil {
-			return nil, errors.Wrap(err, "getSubscribersInDefaultAPNGraph: SQL rows error")
+			return nil, fmt.Errorf("getSubscribersInDefaultAPNGraph: SQL rows error: %w", err)
 		}
 
 		return subs, nil

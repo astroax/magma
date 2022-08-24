@@ -10,12 +10,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import IntEnum
 from typing import Optional
 
 from .mac import MacAddress
+from .utils import IPAddress
 
 
 # map the enum to actual protocol values.
@@ -35,12 +35,14 @@ class DHCPState(IntEnum):
 
 
 class DHCPDescriptor:
-    def __init__(self, mac: MacAddress, ip: str,
-                 state_requested: DHCPState, vlan: str,
-                 state: DHCPState = DHCPState.UNKNOWN,
-                 subnet: str = None, server_ip: str = None,
-                 router_ip: str = None, lease_expiration_time: int = 0,
-                 xid: str = None):
+    def __init__(
+        self, mac: MacAddress, ip: str,
+        state_requested: DHCPState, vlan: int,
+        state: DHCPState = DHCPState.UNKNOWN,
+        subnet: Optional[str] = None, server_ip: Optional[IPAddress] = None,
+        router_ip: Optional[IPAddress] = None, lease_expiration_time: int = 0,
+        xid: Optional[str] = None,
+    ):
         """
         DHCP descriptor. This object maintains all information for
         given DHCP protocol transactions.
@@ -65,7 +67,8 @@ class DHCPDescriptor:
         self.state_requested = state_requested
         self.server_ip = server_ip
         self.xid = xid
-        self.lease_expiration_time = datetime.now() + timedelta(seconds=lease_expiration_time)
+        self.lease_expiration_time = datetime.now(
+        ) + timedelta(seconds=lease_expiration_time)
         self.router_ip = router_ip
         if self.state == DHCPState.ACK:
             new_deadline = datetime.now() + timedelta(seconds=(lease_expiration_time / 2))
@@ -77,10 +80,12 @@ class DHCPDescriptor:
         return "state: {:8s} requested state: {:8s} mac {} ip {} subnet {} " \
                "DHCP: {} router {} " \
                "lease time {}, renew {} xid {} vlan {}" \
-            .format(self.state.name, self.state_requested.name,
-                    str(self.mac), self.ip, self.subnet,
-                    self.server_ip, self.router_ip, self.lease_expiration_time,
-                    self.lease_renew_deadline, self.xid, self.vlan)
+            .format(
+                self.state.name, self.state_requested.name,
+                str(self.mac), self.ip, self.subnet,
+                self.server_ip, self.router_ip, self.lease_expiration_time,
+                self.lease_renew_deadline, self.xid, self.vlan,
+            )
 
     def get_ip_address(self) -> Optional[str]:
         """
@@ -90,6 +95,7 @@ class DHCPDescriptor:
         if self.state == DHCPState.OFFER or self.state == DHCPState.REQUEST \
                 or self.state == DHCPState.ACK:
             return self.ip
+        return None
 
     def ip_is_allocated(self) -> bool:
         """
@@ -97,6 +103,8 @@ class DHCPDescriptor:
 
         :return: True or False
         """
-        return (self.state == DHCPState.OFFER
-                or self.state == DHCPState.REQUEST
-                or self.state == DHCPState.ACK)
+        return (
+            self.state == DHCPState.OFFER
+            or self.state == DHCPState.REQUEST
+            or self.state == DHCPState.ACK
+        )

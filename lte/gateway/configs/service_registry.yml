@@ -65,6 +65,9 @@ services:
   s6a_service:
     ip_address: 127.0.0.1
     port: 50073
+  s6a_async_service:
+    ip_address: 127.0.0.1
+    port: 50085
   spgw_service:
     ip_address: 127.0.0.1
     port: 50073
@@ -72,6 +75,9 @@ services:
     ip_address: 127.0.0.1
     port: 50073
   ha_service:
+    ip_address: 127.0.0.1
+    port: 50073
+  s8_service:
     ip_address: 127.0.0.1
     port: 50073
   state:
@@ -101,3 +107,9 @@ services:
   connectiond:
     ip_address: 127.0.0.1
     port: 50082
+  liagentd:
+    ip_address: 127.0.0.1
+    port: 50083
+  kernsnoopd:
+    ip_address: 127.0.0.1
+    port: 50084

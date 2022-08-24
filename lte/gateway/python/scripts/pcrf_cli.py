@@ -14,11 +14,11 @@ limitations under the License.
 """
 
 import argparse
-import grpc
 
+import grpc
+from feg.protos.mock_core_pb2_grpc import MockCoreConfiguratorStub
 from magma.common.rpc_utils import cloud_grpc_wrapper
 from orc8r.protos.common_pb2 import Void
-from feg.protos.mock_core_pb2_grpc import MockCoreConfiguratorStub
 
 
 @cloud_grpc_wrapper
@@ -36,14 +36,16 @@ def create_parser():
     """
     parser = argparse.ArgumentParser(
         description='Management CLI for mock PCRF',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
     # Add subcommands
     subparsers = parser.add_subparsers(title='subcommands', dest='cmd')
 
     # Reset
     alert_ack_parser = subparsers.add_parser(
-        'reset', help='Send Reset to mock PCRF hosted in FeG')
+        'reset', help='Send Reset to mock PCRF hosted in FeG',
+    )
     alert_ack_parser.set_defaults(func=send_reset)
 
     return parser

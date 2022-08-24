@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"magma/orc8r/cloud/go/serde"
 	configurator_test_init "magma/orc8r/cloud/go/services/configurator/test_init"
 	configurator_test "magma/orc8r/cloud/go/services/configurator/test_utils"
@@ -29,8 +31,6 @@ import (
 	"magma/orc8r/cloud/go/services/state/test_utils"
 	state_types "magma/orc8r/cloud/go/services/state/types"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -44,7 +44,7 @@ var (
 )
 
 func init() {
-	//_ = flag.Set("alsologtostderr", "true") // uncomment to view logs during test
+	//_ = flag.Set("logtostderr", "true") // uncomment to view logs during test
 }
 
 func TestStateService(t *testing.T) {
@@ -68,7 +68,7 @@ func TestStateService(t *testing.T) {
 	bundle2 := makeVersionedStateBundle("test-serde", "key2", value2, 12)
 
 	// Check contract for empty network
-	states, err := state.GetStates(networkID, state_types.IDs{bundle0.ID}, stateSerdes)
+	states, err := state.GetStates(context.Background(), networkID, state_types.IDs{bundle0.ID}, stateSerdes)
 	assert.NoError(t, err)
 	assert.Empty(t, states)
 
@@ -76,7 +76,7 @@ func TestStateService(t *testing.T) {
 	repRes, err := reportStates(ctx, bundle0, bundle1)
 	assert.NoError(t, err)
 	assert.Empty(t, repRes.UnreportedStates)
-	states, err = state.GetStates(networkID, state_types.IDs{bundle0.ID, bundle1.ID}, stateSerdes)
+	states, err = state.GetStates(context.Background(), networkID, state_types.IDs{bundle0.ID, bundle1.ID}, stateSerdes)
 	assert.NoError(t, err)
 	testGetStatesResponse(t, states, bundle0, bundle1)
 	assert.Equal(t, uint64(0), states[bundle0.ID].Version)
@@ -87,7 +87,7 @@ func TestStateService(t *testing.T) {
 	repRes, err = reportStates(ctx, bundle0, bundle1)
 	assert.NoError(t, err)
 	assert.Empty(t, repRes.UnreportedStates)
-	states, err = state.GetStates(networkID, state_types.IDs{bundle0.ID, bundle1.ID}, stateSerdes)
+	states, err = state.GetStates(context.Background(), networkID, state_types.IDs{bundle0.ID, bundle1.ID}, stateSerdes)
 	assert.NoError(t, err)
 	testGetStatesResponse(t, states, bundle0, bundle1)
 	assert.Equal(t, uint64(1), states[bundle0.ID].Version)
@@ -107,15 +107,15 @@ func TestStateService(t *testing.T) {
 	repRes, err = reportStates(ctx, bundle2)
 	assert.NoError(t, err)
 	assert.Empty(t, repRes.UnreportedStates)
-	states, err = state.GetStates(networkID, state_types.IDs{bundle2.ID}, stateSerdes)
+	states, err = state.GetStates(context.Background(), networkID, state_types.IDs{bundle2.ID}, stateSerdes)
 	assert.NoError(t, err)
 	testGetStatesResponse(t, states, bundle2)
 	assert.Equal(t, uint64(12), states[bundle2.ID].Version)
 
 	// Delete and read back
-	err = state.DeleteStates(networkID, state_types.IDs{bundle0.ID, bundle2.ID})
+	err = state.DeleteStates(context.Background(), networkID, state_types.IDs{bundle0.ID, bundle2.ID})
 	assert.NoError(t, err)
-	states, err = state.GetStates(networkID, state_types.IDs{bundle0.ID, bundle1.ID, bundle2.ID}, stateSerdes)
+	states, err = state.GetStates(context.Background(), networkID, state_types.IDs{bundle0.ID, bundle1.ID, bundle2.ID}, stateSerdes)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(states))
 	testGetStatesResponse(t, states, bundle1)
@@ -131,7 +131,7 @@ func TestStateService(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, repRes.UnreportedStates) // validity is checked by the consumer
 	// Only valid state should be accessible
-	states, err = state.GetStates(networkID, state_types.IDs{bundle0.ID, bundle1.ID, bundle2.ID, unserializableBundle.ID}, stateSerdes)
+	states, err = state.GetStates(context.Background(), networkID, state_types.IDs{bundle0.ID, bundle1.ID, bundle2.ID, unserializableBundle.ID}, stateSerdes)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(states))
 	testGetStatesResponse(t, states, bundle0)
@@ -187,7 +187,7 @@ func (m *Name) UnmarshalBinary(message []byte) error {
 	return err
 }
 
-func (m *Name) ValidateModel() error {
+func (m *Name) ValidateModel(context.Context) error {
 	if m.Name == "BADNAME" {
 		return fmt.Errorf("this name: %s is not allowed", m.Name)
 	}

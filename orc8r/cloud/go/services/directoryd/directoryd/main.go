@@ -32,17 +32,18 @@ limitations under the License.
 package main
 
 import (
+	"github.com/golang/glog"
+
 	"magma/orc8r/cloud/go/blobstore"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/service"
 	"magma/orc8r/cloud/go/services/directoryd"
-	"magma/orc8r/cloud/go/services/directoryd/servicers"
+	directoryd_protos "magma/orc8r/cloud/go/services/directoryd/protos"
+	servicers "magma/orc8r/cloud/go/services/directoryd/servicers/protected"
 	dstorage "magma/orc8r/cloud/go/services/directoryd/storage"
 	"magma/orc8r/cloud/go/sqorc"
 	"magma/orc8r/cloud/go/storage"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/golang/glog"
 )
 
 func main() {
@@ -53,12 +54,12 @@ func main() {
 	}
 
 	// Init storage
-	db, err := sqorc.Open(storage.SQLDriver, storage.DatabaseSource)
+	db, err := sqorc.Open(storage.GetSQLDriver(), storage.GetDatabaseSource())
 	if err != nil {
 		glog.Fatalf("Error opening db connection: %s", err)
 	}
 
-	fact := blobstore.NewEntStorage(dstorage.DirectorydTableBlobstore, db, sqorc.GetSqlBuilder())
+	fact := blobstore.NewSQLStoreFactory(dstorage.DirectorydTableBlobstore, db, sqorc.GetSqlBuilder())
 	err = fact.InitializeFactory()
 	if err != nil {
 		glog.Fatalf("Error initializing directory storage: %s", err)
@@ -72,7 +73,7 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error creating initializing directory servicer: %s", err)
 	}
-	protos.RegisterDirectoryLookupServer(srv.GrpcServer, servicer)
+	directoryd_protos.RegisterDirectoryLookupServer(srv.ProtectedGrpcServer, servicer)
 	protos.RegisterGatewayDirectoryServiceServer(srv.GrpcServer, servicers.NewDirectoryUpdateServicer())
 
 	// Run service

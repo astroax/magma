@@ -17,10 +17,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"magma/lte/cloud/go/lte"
 	lte_service "magma/lte/cloud/go/services/lte"
 	lte_protos "magma/lte/cloud/go/services/lte/protos"
 	"magma/lte/cloud/go/services/lte/servicers"
+	protected_servicers "magma/lte/cloud/go/services/lte/servicers/protected"
 	"magma/lte/cloud/go/services/lte/storage"
 	"magma/orc8r/cloud/go/orc8r"
 	builder_protos "magma/orc8r/cloud/go/services/configurator/mconfig/protos"
@@ -28,11 +31,13 @@ import (
 	provider_protos "magma/orc8r/cloud/go/services/streamer/protos"
 	"magma/orc8r/cloud/go/sqorc"
 	"magma/orc8r/cloud/go/test_utils"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func StartTestService(t *testing.T) {
+	StartTestServiceWithConfig(t, lte_service.Config{DefaultSubscriberdbSyncInterval: 300})
+}
+
+func StartTestServiceWithConfig(t *testing.T, serviceConfig lte_service.Config) {
 	streams := []string{
 		lte.SubscriberStreamName,
 		lte.PolicyStreamName,
@@ -49,9 +54,9 @@ func StartTestService(t *testing.T) {
 		orc8r.StreamProviderStreamsAnnotation: strings.Join(streams, orc8r.AnnotationFieldSeparator),
 	}
 
-	srv, lis := test_utils.NewTestOrchestratorService(t, lte.ModuleName, lte_service.ServiceName, labels, annotations)
-	builder_protos.RegisterMconfigBuilderServer(srv.GrpcServer, servicers.NewBuilderServicer())
-	provider_protos.RegisterStreamProviderServer(srv.GrpcServer, servicers.NewProviderServicer())
+	srv, lis, plis := test_utils.NewTestOrchestratorService(t, lte.ModuleName, lte_service.ServiceName, labels, annotations)
+	builder_protos.RegisterMconfigBuilderServer(srv.ProtectedGrpcServer, protected_servicers.NewBuilderServicer(serviceConfig))
+	provider_protos.RegisterStreamProviderServer(srv.ProtectedGrpcServer, servicers.NewProviderServicer())
 
 	// Init storage
 	db, err := sqorc.Open("sqlite3", ":memory:")
@@ -60,8 +65,8 @@ func StartTestService(t *testing.T) {
 	assert.NoError(t, enbStateStore.Initialize())
 
 	// Add servicers
-	lte_protos.RegisterEnodebStateLookupServer(srv.GrpcServer, servicers.NewLookupServicer(enbStateStore))
-	state_protos.RegisterIndexerServer(srv.GrpcServer, servicers.NewIndexerServicer())
+	lte_protos.RegisterEnodebStateLookupServer(srv.ProtectedGrpcServer, protected_servicers.NewLookupServicer(enbStateStore))
+	state_protos.RegisterIndexerServer(srv.ProtectedGrpcServer, protected_servicers.NewIndexerServicer())
 
-	go srv.RunTest(lis)
+	go srv.RunTest(lis, plis)
 }

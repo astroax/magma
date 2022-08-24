@@ -14,6 +14,7 @@ limitations under the License.
 package registry_test
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -21,14 +22,12 @@ import (
 	"testing"
 	"time"
 
-	"magma/feg/gateway/registry"
-
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"magma/feg/cloud/go/protos"
+	"magma/feg/gateway/registry"
 	"magma/gateway/service_registry"
 	platform_registry "magma/orc8r/lib/go/registry"
 	"magma/orc8r/lib/go/service/config"
@@ -72,7 +71,7 @@ func TestCloudConnection(t *testing.T) {
 	<-serverStarted
 	time.Sleep(time.Millisecond * 7)
 
-	configMap := config.NewConfigMap(map[interface{}]interface{}{
+	configMap := config.NewMap(map[interface{}]interface{}{
 		"local_port": localPort, "cloud_address": "controller.magma.test",
 		"cloud_port": 443})
 
@@ -115,7 +114,7 @@ func TestCloudConnection(t *testing.T) {
 	<-serverStarted
 	time.Sleep(time.Millisecond * 7)
 
-	configMap = config.NewConfigMap(map[interface{}]interface{}{
+	configMap = config.NewMap(map[interface{}]interface{}{
 		"local_port": localPort, "cloud_address": "controller.magma.test",
 		"cloud_port": 443})
 	conn, err = reg.GetSharedCloudConnectionFromServiceConfig(configMap, "hello")

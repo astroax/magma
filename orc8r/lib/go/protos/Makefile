@@ -1,15 +1,2 @@
-# Targets for protos submodule
-clean::
-	go clean ./...
-
-fmt::
-	go fmt ./...
-
-gen::
-	go generate ./...
-
-test::
-	go test ./...
-
-vet::
-	go vet -composites=false ./...
+MODULE_NAME=orc8r
+include $(MAGMA_ROOT)/orc8r/cloud/go/module.mk

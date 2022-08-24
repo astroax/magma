@@ -1,3 +1,4 @@
+//go:build !link_local_service
 // +build !link_local_service
 
 /*
@@ -17,19 +18,18 @@ limitations under the License.
 package provider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
-	"magma/feg/gateway/services/eap/providers"
-	"magma/feg/gateway/services/eap/providers/sim/servicers"
-
 	"github.com/golang/glog"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/aaa/protos"
 	eapp "magma/feg/gateway/services/eap/protos"
+	"magma/feg/gateway/services/eap/providers"
+	"magma/feg/gateway/services/eap/providers/sim/servicers"
 	_ "magma/feg/gateway/services/eap/providers/sim/servicers/handlers"
 )
 

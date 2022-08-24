@@ -18,17 +18,17 @@ import (
 	"testing"
 	"time"
 
-	"magma/feg/gateway/diameter"
-	s6a "magma/feg/gateway/services/s6a_proxy/servicers"
-	swx "magma/feg/gateway/services/swx_proxy/servicers"
-	hss "magma/feg/gateway/services/testcore/hss/servicers"
-	"magma/feg/gateway/services/testcore/hss/servicers/test_utils"
-
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/stretchr/testify/assert"
+
+	"magma/feg/gateway/diameter"
+	s6a "magma/feg/gateway/services/s6a_proxy/servicers"
+	swx "magma/feg/gateway/services/swx_proxy/servicers"
+	hss "magma/feg/gateway/services/testcore/hss/servicers"
+	"magma/feg/gateway/services/testcore/hss/servicers/test_utils"
 )
 
 func TestHomeSubscriberServer_handleAIR(t *testing.T) {
@@ -164,10 +164,10 @@ func getConnectionToTestHSS(t *testing.T, clientHandler diam.HandlerFunc) (diam.
 
 	// Create a client to receive the server's messages.
 	clientMux := sm.New(&sm.Settings{
-		OriginHost:       datatype.DiameterIdentity("magma.com"),
-		OriginRealm:      datatype.DiameterIdentity("magma.com"),
+		OriginHost:       "magma.com",
+		OriginRealm:      "magma.com",
 		VendorID:         datatype.Unsigned32(diameter.Vendor3GPP),
-		ProductName:      datatype.UTF8String("magma"),
+		ProductName:      "magma",
 		OriginStateID:    datatype.Unsigned32(time.Now().Unix()),
 		FirmwareRevision: 1,
 	})

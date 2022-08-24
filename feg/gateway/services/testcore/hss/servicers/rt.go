@@ -18,10 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"magma/feg/gateway/diameter"
-	swx "magma/feg/gateway/services/swx_proxy/servicers"
-	"magma/lte/cloud/go/protos"
-
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
@@ -29,9 +25,13 @@ import (
 	"github.com/golang/glog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"magma/feg/gateway/diameter"
+	swx "magma/feg/gateway/services/swx_proxy/servicers"
+	"magma/lte/cloud/go/protos"
 )
 
-//Permanently terminate the non-3gpp subscription
+// Permanently terminate the non-3gpp subscription
 const PermanentTermination = 0
 
 func (srv *HomeSubscriberServer) TerminateRegistration(sub *protos.SubscriberData) error {
@@ -57,7 +57,7 @@ func (srv *HomeSubscriberServer) TerminateRegistration(sub *protos.SubscriberDat
 	select {
 	case resp, open := <-ch:
 		if !open {
-			err = status.Errorf(codes.Aborted, "RTA for Session ID: %s is cancelled", sid)
+			err = status.Errorf(codes.Aborted, "RTA for Session ID: %s is canceled", sid)
 			glog.Error(err)
 			return err
 		}
@@ -124,7 +124,7 @@ func (srv *HomeSubscriberServer) createRTR(sessionID string, username string) *d
 func (srv *HomeSubscriberServer) deregisterSubscriber(subscriber *protos.SubscriberData) error {
 	subscriber.State.TgppAaaServerRegistered = false
 	subscriber.State.TgppAaaServerName = ""
-	return srv.store.UpdateSubscriber(subscriber)
+	return srv.store.UpdateSubscriber(&protos.SubscriberUpdate{Data: subscriber})
 }
 
 func (srv *HomeSubscriberServer) genAAAServerConfig(serverName string) (*diameter.DiameterServerConfig, error) {

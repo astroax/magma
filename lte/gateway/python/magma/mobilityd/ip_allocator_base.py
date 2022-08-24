@@ -11,15 +11,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from __future__ import absolute_import, division, print_function, \
-    unicode_literals
+from __future__ import (
+    absolute_import,
+    division,
+    print_function,
+    unicode_literals,
+)
 
 from abc import ABC, abstractmethod
-
-from ipaddress import ip_address, ip_network
 from typing import List
 
-from magma.mobilityd.ip_descriptor import IPDesc, IPType
+from magma.mobilityd.ip_descriptor import IPDesc
+from magma.mobilityd.utils import IPAddress, IPNetwork
 
 DEFAULT_IP_RECYCLE_INTERVAL = 15
 
@@ -27,20 +30,23 @@ DEFAULT_IP_RECYCLE_INTERVAL = 15
 class IPAllocator(ABC):
 
     @abstractmethod
-    def add_ip_block(self, ipblock: ip_network):
+    def add_ip_block(self, ipblock: IPNetwork):
         ...
 
     @abstractmethod
-    def remove_ip_blocks(self, *ipblocks: List[ip_network],
-                         force: bool) -> List[ip_network]:
+    def remove_ip_blocks(
+        self,
+        ipblocks: List[IPNetwork],
+        force: bool,
+    ) -> List[IPNetwork]:
         ...
 
     @abstractmethod
-    def list_added_ip_blocks(self) -> List[ip_network]:
+    def list_added_ip_blocks(self) -> List[IPNetwork]:
         ...
 
     @abstractmethod
-    def list_allocated_ips(self, ipblock: ip_network) -> List[ip_address]:
+    def list_allocated_ips(self, ipblock: IPNetwork) -> List[IPAddress]:
         ...
 
     @abstractmethod

@@ -17,12 +17,12 @@ import (
 	"strings"
 	"testing"
 
-	"magma/feg/gateway/services/radiusd/collection"
-
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/assert"
+
+	"magma/feg/gateway/services/radiusd/collection"
 )
 
 const GAUGE_METRIC = `
@@ -105,12 +105,12 @@ func newSummaryFamily() *dto.MetricFamily {
 func TestCreateMetricAggregate(t *testing.T) {
 	metricName := "radius_go_gc_duration_seconds"
 	metricFamily := newSummaryFamily()
-	metricAggregate, err := collection.CreateMetricAggregate(metricName, metricFamily)
+	_, err := collection.CreateMetricAggregate(metricName, metricFamily)
 	assert.EqualError(t, err, "Not building MetricAggregate for metric type SUMMARY")
 
 	metricName = "radius_go_goroutines"
 	metricFamily = newGaugeFamily()
-	metricAggregate, err = collection.CreateMetricAggregate(metricName, metricFamily)
+	metricAggregate, err := collection.CreateMetricAggregate(metricName, metricFamily)
 	assert.NoError(t, err)
 	collector := metricAggregate.GetCollector()
 	_, ok := collector.(prometheus.Gauge)

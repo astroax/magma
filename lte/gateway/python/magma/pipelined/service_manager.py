@@ -32,11 +32,11 @@ should not be accessible to apps from other services.
 # pylint does not play well with aioeventlet, as it uses asyncio.async which
 # produces a parse error
 
-import time
 import asyncio
 import logging
+import time
+from collections import OrderedDict, namedtuple
 from concurrent.futures import Future
-from collections import namedtuple, OrderedDict
 from typing import List
 
 import aioeventlet
@@ -44,43 +44,47 @@ from lte.protos.mconfig.mconfigs_pb2 import PipelineD
 from lte.protos.mobilityd_pb2_grpc import MobilityServiceStub
 from lte.protos.session_manager_pb2_grpc import (
     LocalSessionManagerStub,
-    SetInterfaceForUserPlaneStub)
-from magma.pipelined.app.base import ControllerType
-from magma.pipelined.app import of_rest_server
-from magma.pipelined.app.access_control import AccessControlController
-from magma.pipelined.app.conntrack import ConntrackController
-from magma.pipelined.app.tunnel_learn import TunnelLearnController
-from magma.pipelined.app.vlan_learn import VlanLearnController
-from magma.pipelined.app.arp import ArpController
-from magma.pipelined.app.ipv6_solicitation import \
-    IPV6SolicitationController
-from magma.pipelined.app.dpi import DPIController
-from magma.pipelined.app.gy import GYController
-from magma.pipelined.app.enforcement import EnforcementController
-from magma.pipelined.app.ipfix import IPFIXController
-from magma.pipelined.app.li_mirror import LIMirrorController
-from magma.pipelined.app.enforcement_stats import EnforcementStatsController
-from magma.pipelined.app.inout import EGRESS, INGRESS, PHYSICAL_TO_LOGICAL, \
-    InOutController
-from magma.pipelined.app.ue_mac import UEMacAddressController
-from magma.pipelined.app.xwf_passthru import XWFPassthruController
-from magma.pipelined.app.startup_flows import StartupFlows
-from magma.pipelined.app.check_quota import CheckQuotaController
-from magma.pipelined.app.uplink_bridge import UplinkBridgeController
-from magma.pipelined.app.ng_services import NGServiceController
-
-from magma.pipelined.rule_mappers import RuleIDToNumMapper, \
-    SessionRuleToVersionMapper
-from magma.pipelined.ipv6_prefix_store import InterfaceIDToPrefixMapper
-from magma.pipelined.tunnel_id_store import TunnelToTunnelMapper
-from magma.pipelined.internal_ip_allocator import InternalIPAllocator
-from ryu.base.app_manager import AppManager
-
+    SetInterfaceForUserPlaneStub,
+)
+from magma.common.sentry import EXCLUDE_FROM_ERROR_MONITORING
 from magma.common.service import MagmaService
 from magma.common.service_registry import ServiceRegistry
 from magma.configuration import environment
+from magma.pipelined.app import of_rest_server
+from magma.pipelined.app.access_control import AccessControlController
+from magma.pipelined.app.arp import ArpController
+from magma.pipelined.app.base import ControllerType
+from magma.pipelined.app.check_quota import CheckQuotaController
 from magma.pipelined.app.classifier import Classifier
-from magma.pipelined.app.he import HeaderEnrichmentController, PROXY_TABLE
+from magma.pipelined.app.conntrack import ConntrackController
+from magma.pipelined.app.dpi import DPIController
+from magma.pipelined.app.egress import EGRESS, EgressController
+from magma.pipelined.app.enforcement import EnforcementController
+from magma.pipelined.app.enforcement_stats import EnforcementStatsController
+from magma.pipelined.app.gy import GYController
+from magma.pipelined.app.he import HeaderEnrichmentController
+from magma.pipelined.app.ingress import INGRESS, IngressController
+from magma.pipelined.app.ipfix import IPFIXController
+from magma.pipelined.app.ipv6_solicitation import IPV6SolicitationController
+from magma.pipelined.app.li_mirror import LIMirrorController
+from magma.pipelined.app.middle import PHYSICAL_TO_LOGICAL, MiddleController
+from magma.pipelined.app.ng_services import NGServiceController
+from magma.pipelined.app.startup_flows import StartupFlows
+from magma.pipelined.app.tunnel_learn import TunnelLearnController
+from magma.pipelined.app.ue_mac import UEMacAddressController
+from magma.pipelined.app.uplink_bridge import UplinkBridgeController
+from magma.pipelined.app.vlan_learn import VlanLearnController
+from magma.pipelined.ebpf.ebpf_manager import get_ebpf_manager
+from magma.pipelined.internal_ip_allocator import InternalIPAllocator
+from magma.pipelined.ipv6_prefix_store import InterfaceIDToPrefixMapper
+from magma.pipelined.qos.common import QosManager
+from magma.pipelined.rule_mappers import (
+    RestartInfoStore,
+    RuleIDToNumMapper,
+    SessionRuleToVersionMapper,
+)
+from redis import ConnectionError
+from ryu.base.app_manager import AppManager
 
 # Type is either Physical or Logical, highest order_priority is at zero
 App = namedtuple('App', ['name', 'module', 'type', 'order_priority'])
@@ -116,16 +120,20 @@ class TableRange:
 
     def allocate_table(self):
         if (self._next_table == self._end):
-            raise TableNumException('Cannot generate more tables. Table limit'
-                                    'of %s reached!' % self._end)
+            raise TableNumException(
+                'Cannot generate more tables. Table limit'
+                'of %s reached!' % self._end,
+            )
         table_num = self._next_table
         self._next_table += 1
         return table_num
 
     def allocate_tables(self, count: int):
         if self._next_table + count >= self._end:
-            raise TableNumException('Cannot generate more tables. Table limit'
-                                    'of %s reached!' % self._end)
+            raise TableNumException(
+                'Cannot generate more tables. Table limit'
+                'of %s reached!' % self._end,
+            )
         tables = [self.allocate_table() for i in range(0, count)]
         return tables
 
@@ -154,24 +162,36 @@ class _TableManager:
 
     def __init__(self):
         self._table_ranges = {
-            ControllerType.SPECIAL:  TableRange(self.GTP_TABLE_NUM,
-                                                self.GTP_TABLE_NUM + 1),
-            ControllerType.PHYSICAL: TableRange(self.INGRESS_TABLE_NUM + 1,
-                                                self.PHYSICAL_TO_LOGICAL_TABLE_NUM),
-            ControllerType.LOGICAL:
-                TableRange(self.PHYSICAL_TO_LOGICAL_TABLE_NUM + 1,
-                           self.EGRESS_TABLE_NUM)
+            ControllerType.SPECIAL: TableRange(
+                self.GTP_TABLE_NUM,
+                self.GTP_TABLE_NUM + 1,
+            ),
+            ControllerType.PHYSICAL: TableRange(
+                self.INGRESS_TABLE_NUM + 1,
+                self.PHYSICAL_TO_LOGICAL_TABLE_NUM,
+            ),
+            ControllerType.LOGICAL: TableRange(
+                self.PHYSICAL_TO_LOGICAL_TABLE_NUM + 1,
+                self.EGRESS_TABLE_NUM,
+            ),
         }
-        self._scratch_range = TableRange(self.SCRATCH_TABLE_START_NUM,
-                                         self.SCRATCH_TABLE_LIMIT_NUM)
+        self._scratch_range = TableRange(
+            self.SCRATCH_TABLE_START_NUM,
+            self.SCRATCH_TABLE_LIMIT_NUM,
+        )
         self._tables_by_app = {
-            INGRESS: Tables(main_table=self.INGRESS_TABLE_NUM,
-                            type=ControllerType.SPECIAL),
+            INGRESS: Tables(
+                main_table=self.INGRESS_TABLE_NUM,
+                type=ControllerType.SPECIAL,
+            ),
             PHYSICAL_TO_LOGICAL: Tables(
                 main_table=self.PHYSICAL_TO_LOGICAL_TABLE_NUM,
-                type=ControllerType.SPECIAL),
-            EGRESS: Tables(main_table=self.EGRESS_TABLE_NUM,
-                           type=ControllerType.SPECIAL),
+                type=ControllerType.SPECIAL,
+            ),
+            EGRESS: Tables(
+                main_table=self.EGRESS_TABLE_NUM,
+                type=ControllerType.SPECIAL,
+            ),
         }
 
     def _allocate_main_table(self, type: ControllerType) -> int:
@@ -185,12 +205,16 @@ class _TableManager:
         the same contoller type
         """
         if not all(apps[0].type == app.type for app in apps):
-            raise TableNumException('Cannot register apps with different'
-                                    'controller type')
+            raise TableNumException(
+                'Cannot register apps with different'
+                'controller type',
+            )
         table_num = self._allocate_main_table(apps[0].type)
         for app in apps:
-            self._tables_by_app[app.name] = Tables(main_table=table_num,
-                                                   type=app.type)
+            self._tables_by_app[app.name] = Tables(
+                main_table=table_num,
+                type=app.type,
+            )
 
     def register_apps_for_table0_service(self, apps: List[App]):
         """
@@ -224,8 +248,11 @@ class _TableManager:
         return self._table_ranges[app.type].get_next_table(app.main_table)
 
     def is_app_enabled(self, app_name: str) -> bool:
+        return app_name in self._tables_by_app
+
+    def is_ng_app_enabled(self, app_name: str) -> bool:
         return app_name in self._tables_by_app or \
-            app_name == InOutController.APP_NAME
+            app_name == NGServiceController.APP_NAME
 
     def allocate_scratch_tables(self, app_name: str, count: int) -> \
             List[int]:
@@ -240,10 +267,14 @@ class _TableManager:
         return self._tables_by_app[app_name].scratch_tables
 
     def get_all_table_assignments(self) -> 'OrderedDict[str, Tables]':
-        resp = OrderedDict(sorted(self._tables_by_app.items(),
-                                  key=lambda kv: (kv[1].main_table, kv[0])))
+        resp = OrderedDict(
+            sorted(
+                self._tables_by_app.items(),
+                key=lambda kv: (kv[1].main_table, kv[0]),
+            ),
+        )
         # Include table 0 when it is managed by the EPC, for completeness.
-        if not any(table in ['ue_mac', 'xwf_passthru', 'classifier'] for table in self._tables_by_app):
+        if not any(table in ['ue_mac', 'classifier'] for table in self._tables_by_app):
             resp['mme'] = Tables(main_table=0, type=None)
             resp.move_to_end('mme', last=False)
         return resp
@@ -276,7 +307,6 @@ class ServiceManager:
     STARTUP_FLOWS_RECIEVER_CONTROLLER = 'startup_flows'
     CHECK_QUOTA_SERVICE_NAME = 'check_quota'
     LI_MIRROR_SERVICE_NAME = 'li_mirror'
-    XWF_PASSTHRU_NAME = 'xwf_passthru'
     UPLINK_BRIDGE_NAME = 'uplink_bridge'
     CLASSIFIER_NAME = 'classifier'
     HE_CONTROLLER_NAME = 'proxy'
@@ -293,23 +323,31 @@ class ServiceManager:
     # Note that a service may require multiple apps.
     DYNAMIC_SERVICE_TO_APPS = {
         PipelineD.ENFORCEMENT: [
-            App(name=GYController.APP_NAME,
+            App(
+                name=GYController.APP_NAME,
                 module=GYController.__module__,
                 type=GYController.APP_TYPE,
-                order_priority=499),
-            App(name=EnforcementController.APP_NAME,
+                order_priority=499,
+            ),
+            App(
+                name=EnforcementController.APP_NAME,
                 module=EnforcementController.__module__,
                 type=EnforcementController.APP_TYPE,
-                order_priority=500),
-            App(name=EnforcementStatsController.APP_NAME,
+                order_priority=500,
+            ),
+            App(
+                name=EnforcementStatsController.APP_NAME,
                 module=EnforcementStatsController.__module__,
                 type=EnforcementStatsController.APP_TYPE,
-                order_priority=501),
+                order_priority=501,
+            ),
         ],
         PipelineD.DPI: [
-            App(name=DPIController.APP_NAME, module=DPIController.__module__,
+            App(
+                name=DPIController.APP_NAME, module=DPIController.__module__,
                 type=DPIController.APP_TYPE,
-                order_priority=400),
+                order_priority=400,
+            ),
         ],
     }
 
@@ -317,107 +355,133 @@ class ServiceManager:
     # modules of their corresponding Ryu apps in PipelineD.
     STATIC_SERVICE_TO_APPS = {
         UE_MAC_ADDRESS_SERVICE_NAME: [
-            App(name=UEMacAddressController.APP_NAME,
+            App(
+                name=UEMacAddressController.APP_NAME,
                 module=UEMacAddressController.__module__,
                 type=None,
-                order_priority=0),
+                order_priority=0,
+            ),
         ],
         ARP_SERVICE_NAME: [
-            App(name=ArpController.APP_NAME, module=ArpController.__module__,
+            App(
+                name=ArpController.APP_NAME, module=ArpController.__module__,
                 type=ArpController.APP_TYPE,
-                order_priority=200)
+                order_priority=200,
+            ),
         ],
         ACCESS_CONTROL_SERVICE_NAME: [
-            App(name=AccessControlController.APP_NAME,
+            App(
+                name=AccessControlController.APP_NAME,
                 module=AccessControlController.__module__,
                 type=AccessControlController.APP_TYPE,
-                order_priority=400),
+                order_priority=400,
+            ),
         ],
         HE_CONTROLLER_NAME: [
-            App(name=HeaderEnrichmentController.APP_NAME,
+            App(
+                name=HeaderEnrichmentController.APP_NAME,
                 module=HeaderEnrichmentController.__module__,
                 type=HeaderEnrichmentController.APP_TYPE,
-                order_priority=401),
+                order_priority=401,
+            ),
         ],
 
         ipv6_solicitation_SERVICE_NAME: [
-            App(name=IPV6SolicitationController.APP_NAME,
+            App(
+                name=IPV6SolicitationController.APP_NAME,
                 module=IPV6SolicitationController.__module__,
                 type=IPV6SolicitationController.APP_TYPE,
-                order_priority=210),
+                order_priority=210,
+            ),
         ],
         TUNNEL_LEARN_SERVICE_NAME: [
-            App(name=TunnelLearnController.APP_NAME,
+            App(
+                name=TunnelLearnController.APP_NAME,
                 module=TunnelLearnController.__module__,
                 type=TunnelLearnController.APP_TYPE,
-                order_priority=300),
+                order_priority=300,
+            ),
         ],
         VLAN_LEARN_SERVICE_NAME: [
-            App(name=VlanLearnController.APP_NAME,
+            App(
+                name=VlanLearnController.APP_NAME,
                 module=VlanLearnController.__module__,
                 type=VlanLearnController.APP_TYPE,
-                order_priority=500),
+                order_priority=500,
+            ),
         ],
         RYU_REST_SERVICE_NAME: [
-            App(name=RYU_REST_APP_NAME,
+            App(
+                name=RYU_REST_APP_NAME,
                 module='ryu.app.ofctl_rest',
                 type=None,
-                order_priority=0),
+                order_priority=0,
+            ),
         ],
         STARTUP_FLOWS_RECIEVER_CONTROLLER: [
-            App(name=StartupFlows.APP_NAME,
+            App(
+                name=StartupFlows.APP_NAME,
                 module=StartupFlows.__module__,
                 type=StartupFlows.APP_TYPE,
-                order_priority=0),
+                order_priority=0,
+            ),
         ],
         CHECK_QUOTA_SERVICE_NAME: [
-            App(name=CheckQuotaController.APP_NAME,
+            App(
+                name=CheckQuotaController.APP_NAME,
                 module=CheckQuotaController.__module__,
                 type=CheckQuotaController.APP_TYPE,
-                order_priority=300),
+                order_priority=300,
+            ),
         ],
         CONNTRACK_SERVICE_NAME: [
-            App(name=ConntrackController.APP_NAME,
+            App(
+                name=ConntrackController.APP_NAME,
                 module=ConntrackController.__module__,
                 type=ConntrackController.APP_TYPE,
-                order_priority=700),
+                order_priority=700,
+            ),
         ],
         IPFIX_SERVICE_NAME: [
-            App(name=IPFIXController.APP_NAME,
+            App(
+                name=IPFIXController.APP_NAME,
                 module=IPFIXController.__module__,
                 type=IPFIXController.APP_TYPE,
-                order_priority=800),
+                order_priority=800,
+            ),
         ],
         LI_MIRROR_SERVICE_NAME: [
-            App(name=LIMirrorController.APP_NAME,
+            App(
+                name=LIMirrorController.APP_NAME,
                 module=LIMirrorController.__module__,
                 type=LIMirrorController.APP_TYPE,
-                order_priority=900),
-        ],
-        XWF_PASSTHRU_NAME: [
-            App(name=XWFPassthruController.APP_NAME,
-                module=XWFPassthruController.__module__,
-                type=XWFPassthruController.APP_TYPE,
-                order_priority=0),
+                order_priority=900,
+            ),
         ],
         UPLINK_BRIDGE_NAME: [
-            App(name=UplinkBridgeController.APP_NAME,
+            App(
+                name=UplinkBridgeController.APP_NAME,
                 module=UplinkBridgeController.__module__,
                 type=UplinkBridgeController.APP_TYPE,
-                order_priority=0),
+                order_priority=0,
+            ),
         ],
         CLASSIFIER_NAME: [
-            App(name=Classifier.APP_NAME,
+            App(
+                name=Classifier.APP_NAME,
                 module=Classifier.__module__,
                 type=Classifier.APP_TYPE,
-                order_priority=0),
+                order_priority=0,
+            ),
         ],
         # 5G Related services
         NG_SERVICE_CONTROLLER_NAME: [
-            App(name=NGServiceController.APP_NAME,
+            App(
+                name=NGServiceController.APP_NAME,
                 module=NGServiceController.__module__,
                 type=None,
-                order_priority=0),
+                order_priority=0,
+            ),
         ],
     }
 
@@ -432,25 +496,42 @@ class ServiceManager:
 
     def __init__(self, magma_service: MagmaService):
         self._magma_service = magma_service
-        if '5G_feature_set' not in magma_service.config:
+        if 'enable5g_features' not in magma_service.config:
             self._5G_flag_enable = False
         else:
-          ng_flag = magma_service.config.get('5G_feature_set')
-          self._5G_flag_enable = ng_flag['enable']
-        # inout is a mandatory app and it occupies:
-        #   table 1(for ingress)
-        #   table 10(for middle)
-        #   table 20(for egress)
-        self._apps = [App(name=InOutController.APP_NAME,
-                          module=InOutController.__module__,
-                          type=None,
-                          order_priority=0)]
+            self._5G_flag_enable = magma_service.config.get('enable5g_features')
+
+        # ingress, middle and egress are mandatory apps and occupy:
+        #   table 1 (for ingress)
+        #   table 10 (for middle)
+        #   table 20 (for egress)
+        self._apps = [
+            App(
+                name=IngressController.APP_NAME,
+                module=IngressController.__module__,
+                type=None,
+                order_priority=0,
+            ),
+            App(
+                name=MiddleController.APP_NAME,
+                module=MiddleController.__module__,
+                type=None,
+                order_priority=0,
+            ),
+            App(
+                name=EgressController.APP_NAME,
+                module=EgressController.__module__,
+                type=None,
+                order_priority=0,
+            ),
+        ]
         self._table_manager = _TableManager()
 
         self.rule_id_mapper = RuleIDToNumMapper()
         self.session_rule_version_mapper = SessionRuleToVersionMapper()
         self.interface_to_prefix_mapper = InterfaceIDToPrefixMapper()
-        self.tunnel_id_mapper = TunnelToTunnelMapper()
+        self.restart_info_store = RestartInfoStore()
+        self.ebpf = get_ebpf_manager(magma_service.config)
 
         apps = self._get_static_apps()
         apps.extend(self._get_dynamic_apps())
@@ -462,7 +543,7 @@ class ServiceManager:
             if app.name in self.STATIC_APP_WITH_NO_TABLE:
                 continue
             # UE MAC service must be registered with Table 0
-            if app.name in [self.UE_MAC_ADDRESS_SERVICE_NAME, self.XWF_PASSTHRU_NAME]:
+            if app.name in [self.UE_MAC_ADDRESS_SERVICE_NAME]:
                 self._table_manager.register_apps_for_table0_service([app])
                 continue
             if self._5G_flag_enable:
@@ -488,8 +569,10 @@ class ServiceManager:
             logging.info("added classifier and ng service controller")
 
         static_apps = \
-            [app for service in static_services for app in
-             self.STATIC_SERVICE_TO_APPS[service]]
+            [
+                app for service in static_services for app in
+                self.STATIC_SERVICE_TO_APPS[service]
+            ]
 
         return static_apps
 
@@ -511,8 +594,10 @@ class ServiceManager:
                 continue
             dynamic_services.append(service)
 
-        dynamic_apps = [app for service in dynamic_services for
-                        app in self.DYNAMIC_SERVICE_TO_APPS[service]]
+        dynamic_apps = [
+            app for service in dynamic_services for
+            app in self.DYNAMIC_SERVICE_TO_APPS[service]
+        ]
         return dynamic_apps
 
     def load(self):
@@ -522,26 +607,24 @@ class ServiceManager:
         """
 
         # Some setups might not use REDIS
-        if (self._magma_service.config['redis_enabled']):
+        if self._magma_service.config['redis_enabled']:
             # Wait for redis as multiple controllers rely on it
-            while not redisAvailable(self.rule_id_mapper.redis_cli):
+            while not redis_available(self.rule_id_mapper.redis_cli):
                 logging.warning("Pipelined waiting for redis...")
                 time.sleep(1)
-        else:
-            self.rule_id_mapper._rule_nums_by_rule = {}
-            self.rule_id_mapper._rules_by_rule_num = {}
-            self.session_rule_version_mapper._version_by_imsi_and_rule = {}
-            self.interface_to_prefix_mapper._prefix_by_interface = {}
-            self.tunnel_id_mapper._tunnel_map = {}
+            self.rule_id_mapper.setup_redis()
+            self.interface_to_prefix_mapper.setup_redis()
 
         manager = AppManager.get_instance()
         manager.load_apps([app.module for app in self._apps])
         contexts = manager.create_contexts()
         contexts['rule_id_mapper'] = self.rule_id_mapper
         contexts[
-            'session_rule_version_mapper'] = self.session_rule_version_mapper
+            'session_rule_version_mapper'
+        ] = self.session_rule_version_mapper
+        contexts['ebpf_manager'] = self.ebpf
         contexts['interface_to_prefix_mapper'] = self.interface_to_prefix_mapper
-        contexts['tunnel_id_mapper'] = self.tunnel_id_mapper
+        contexts['restart_info_store'] = self.restart_info_store
         contexts['app_futures'] = {app.name: Future() for app in self._apps}
         contexts['internal_ip_allocator'] = \
             InternalIPAllocator(self._magma_service.config)
@@ -549,26 +632,33 @@ class ServiceManager:
         contexts['mconfig'] = self._magma_service.mconfig
         contexts['loop'] = self._magma_service.loop
         contexts['service_manager'] = self
+        contexts['qos_manager'] = QosManager(self._magma_service.loop, self._magma_service.config)
 
         sessiond_chan = ServiceRegistry.get_rpc_channel(
-            'sessiond', ServiceRegistry.LOCAL)
+            'sessiond', ServiceRegistry.LOCAL,
+        )
         mobilityd_chan = ServiceRegistry.get_rpc_channel(
-            'mobilityd', ServiceRegistry.LOCAL)
+            'mobilityd', ServiceRegistry.LOCAL,
+        )
         contexts['rpc_stubs'] = {
             'mobilityd': MobilityServiceStub(mobilityd_chan),
             'sessiond': LocalSessionManagerStub(sessiond_chan),
         }
 
         if self._5G_flag_enable:
-            contexts['rpc_stubs'].update({'sessiond_setinterface': \
-                                            SetInterfaceForUserPlaneStub(sessiond_chan)})
+            contexts['rpc_stubs'].update({
+                'sessiond_setinterface': \
+                SetInterfaceForUserPlaneStub(sessiond_chan),
+            })
 
         # Instantiate and schedule apps
         for app in manager.instantiate_apps(**contexts):
             # Wrap the eventlet in asyncio so it will stop when the loop is
             # stopped
-            future = aioeventlet.wrap_greenthread(app,
-                                                  self._magma_service.loop)
+            future = aioeventlet.wrap_greenthread(
+                app,
+                self._magma_service.loop,
+            )
 
             # Schedule the eventlet for evaluation in service loop
             asyncio.ensure_future(future)
@@ -576,8 +666,10 @@ class ServiceManager:
         # In development mode, run server so that
         if environment.is_dev_mode():
             server_thread = of_rest_server.start(manager)
-            future = aioeventlet.wrap_greenthread(server_thread,
-                                                  self._magma_service.loop)
+            future = aioeventlet.wrap_greenthread(
+                server_thread,
+                self._magma_service.loop,
+            )
             asyncio.ensure_future(future)
 
     def get_table_num(self, app_name: str) -> int:
@@ -609,6 +701,18 @@ class ServiceManager:
         """
         return self._table_manager.is_app_enabled(app_name)
 
+    def is_ng_app_enabled(self, app_name: str) -> bool:
+        """
+        Args:
+             app_name: Name of the app
+        Returns:
+            Whether or not the app is enabled
+        """
+        if self._5G_flag_enable == False:
+            return False
+
+        return self._table_manager.is_ng_app_enabled(app_name)
+
     def allocate_scratch_tables(self, app_name: str, count: int) -> List[int]:
         """
         Args:
@@ -637,10 +741,13 @@ class ServiceManager:
         return self._table_manager.get_all_table_assignments()
 
 
-def redisAvailable(redis_cli):
+def redis_available(redis_cli):
     try:
         redis_cli.ping()
-    except Exception as e:
-        logging.error(e)
+    except ConnectionError:
+        logging.exception("Error connecting to Redis", extra=EXCLUDE_FROM_ERROR_MONITORING)
+        return False
+    except Exception:
+        logging.exception("Unexpected error when pinging Redis")
         return False
     return True

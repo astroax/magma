@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from magma.common.service import MagmaService
 from magma.enodebd.device_config.configuration_util import is_enb_registered
@@ -19,8 +19,9 @@ from magma.enodebd.devices.device_map import get_device_handler_from_name
 from magma.enodebd.devices.device_utils import EnodebDeviceName
 from magma.enodebd.exceptions import UnrecognizedEnodebError
 from magma.enodebd.logger import EnodebdLogger as logger
-from magma.enodebd.state_machines.acs_state_utils import \
-    get_device_name_from_inform
+from magma.enodebd.state_machines.acs_state_utils import (
+    get_device_name_from_inform,
+)
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
 from magma.enodebd.tr069 import models
 from spyne import ComplexModelBase
@@ -32,13 +33,14 @@ class StateMachineManager:
     Delegates tr069 message handling to a dedicated state machine for the
     device.
     """
+
     def __init__(
         self,
         service: MagmaService,
     ):
         self._ip_serial_mapping = IpToSerialMapping()
         self._service = service
-        self._state_machine_by_ip = {}
+        self._state_machine_by_ip: Dict[str, Optional[EnodebAcsStateMachine]] = {}
 
     def handle_tr069_message(
         self,
@@ -51,16 +53,20 @@ class StateMachineManager:
             try:
                 self._update_device_mapping(client_ip, tr069_message)
             except UnrecognizedEnodebError as err:
-                logger.warning('Received TR-069 Inform message from an '
-                                'unrecognized device. '
-                                'Ending TR-069 session with empty HTTP '
-                                'response. Error: (%s)', err)
+                logger.warning(
+                    'Received TR-069 Inform message from an '
+                    'unrecognized device. '
+                    'Ending TR-069 session with empty HTTP '
+                    'response. Error: (%s)', err,
+                )
                 return models.DummyInput()
 
         handler = self._get_handler(client_ip)
         if handler is None:
-            logger.warning('Received non-Inform TR-069 message from unknown '
-                            'eNB. Ending session with empty HTTP response.')
+            logger.warning(
+                'Received non-Inform TR-069 message from unknown '
+                'eNB. Ending session with empty HTTP response.',
+            )
             return models.DummyInput()
 
         return handler.handle_tr069_message(tr069_message)
@@ -101,11 +107,15 @@ class StateMachineManager:
         """
         enb_serial = self._parse_msg_for_serial(inform)
         if enb_serial is None:
-            raise UnrecognizedEnodebError('eNB does not have serial number '
-                                          'under expected param path')
+            raise UnrecognizedEnodebError(
+                'eNB does not have serial number '
+                'under expected param path',
+            )
         if not is_enb_registered(self._service.mconfig, enb_serial):
-            raise UnrecognizedEnodebError('eNB not registered to this Access '
-                                          'Gateway (serial #%s)' % enb_serial)
+            raise UnrecognizedEnodebError(
+                'eNB not registered to this Access '
+                'Gateway (serial #%s)' % enb_serial,
+            )
         self._associate_serial_to_ip(client_ip, enb_serial)
         handler = self._get_handler(client_ip)
         if handler is None:
@@ -127,16 +137,20 @@ class StateMachineManager:
             # Same IP, different eNB connected
             prev_serial = self._ip_serial_mapping.get_serial(client_ip)
             if enb_serial != prev_serial:
-                logger.info('eNodeB change on IP <%s>, from %s to %s',
-                             client_ip, prev_serial, enb_serial)
+                logger.info(
+                    'eNodeB change on IP <%s>, from %s to %s',
+                    client_ip, prev_serial, enb_serial,
+                )
                 self._ip_serial_mapping.set_ip_and_serial(client_ip, enb_serial)
                 self._state_machine_by_ip[client_ip] = None
         elif self._ip_serial_mapping.has_serial(enb_serial):
             # Same eNB, different IP
             prev_ip = self._ip_serial_mapping.get_ip(enb_serial)
             if client_ip != prev_ip:
-                logger.info('eNodeB <%s> changed IP from %s to %s',
-                             enb_serial, prev_ip, client_ip)
+                logger.info(
+                    'eNodeB <%s> changed IP from %s to %s',
+                    enb_serial, prev_ip, client_ip,
+                )
                 self._ip_serial_mapping.set_ip_and_serial(client_ip, enb_serial)
                 handler = self._state_machine_by_ip[prev_ip]
                 self._state_machine_by_ip[client_ip] = handler
@@ -152,7 +166,7 @@ class StateMachineManager:
     def _parse_msg_for_serial(tr069_message: models.Inform) -> Optional[str]:
         """ Return the eNodeB serial ID if it's found in the message """
         if not isinstance(tr069_message, models.Inform):
-            return
+            return None
 
         # Mikrotik Intercell does not return serial in ParameterList
         if hasattr(tr069_message, 'DeviceId') and \
@@ -170,8 +184,10 @@ class StateMachineManager:
             value = param_value.Value.Data
             param_values_by_path[path] = value
 
-        possible_sn_paths = ['Device.DeviceInfo.SerialNumber',
-                             'InternetGatewayDevice.DeviceInfo.SerialNumber']
+        possible_sn_paths = [
+            'Device.DeviceInfo.SerialNumber',
+            'InternetGatewayDevice.DeviceInfo.SerialNumber',
+        ]
         for path in possible_sn_paths:
             if path in param_values_by_path:
                 return param_values_by_path[path]
@@ -195,9 +211,10 @@ class StateMachineManager:
 
 class IpToSerialMapping:
     """ Bidirectional map between <eNodeB IP> and <eNodeB serial ID> """
+
     def __init__(self) -> None:
-        self.ip_by_enb_serial = {}
-        self.enb_serial_by_ip = {}
+        self.ip_by_enb_serial: Dict[str, str] = {}
+        self.enb_serial_by_ip: Dict[str, str] = {}
 
     def del_ip(self, ip: str) -> None:
         if ip not in self.enb_serial_by_ip:

@@ -5,7 +5,6 @@ magma-gen-meta:
   go-package: magma/lte/cloud/go/services/policydb/obsidian/models
   dependencies:
     - 'orc8r/cloud/go/models/swagger-common.yml'
-    - 'orc8r/cloud/go/services/orchestrator/obsidian/models/swagger.v1.yml'
   temp-gen-filename: lte-policydb-swagger.yml
   output-dir: lte/cloud/go/services/policydb/obsidian
   types:
@@ -73,10 +72,10 @@ paths:
         - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
       responses:
         '200':
-          description: List all rating groups
+          description: Map of all rating groups by rating group ID
           schema:
-            type: array
-            items:
+            type: object
+            additionalProperties:
               $ref: '#/definitions/rating_group'
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
@@ -574,6 +573,9 @@ definitions:
         type: integer
         format: uint32
         default: 10
+      service_identifier:
+        type: integer
+        format: uint32
       rating_group:
         type: integer
         format: uint32
@@ -663,6 +665,9 @@ definitions:
         format: uint32
         default: 10
       rating_group:
+        type: integer
+        format: uint32
+      service_identifier:
         type: integer
         format: uint32
       monitoring_key:

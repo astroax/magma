@@ -17,22 +17,21 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/labstack/echo/v4"
+
 	"magma/feg/cloud/go/feg"
 	"magma/feg/cloud/go/serdes"
 	fegModels "magma/feg/cloud/go/services/feg/obsidian/models"
 	"magma/feg/cloud/go/services/health"
 	lteHandlers "magma/lte/cloud/go/services/lte/obsidian/handlers"
 	policyModels "magma/lte/cloud/go/services/policydb/obsidian/models"
-	"magma/orc8r/cloud/go/obsidian"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/configurator"
+	"magma/orc8r/cloud/go/services/obsidian"
 	"magma/orc8r/cloud/go/services/orchestrator/obsidian/handlers"
 	orc8rModels "magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
 	"magma/orc8r/cloud/go/storage"
-	merrors "magma/orc8r/lib/go/errors"
-
-	"github.com/labstack/echo"
-	"github.com/pkg/errors"
+	"magma/orc8r/lib/go/merrors"
 )
 
 const (
@@ -56,7 +55,7 @@ const (
 
 	FederatedLteNetworks              = "feg_lte"
 	ListFegLteNetworksPath            = obsidian.V1Root + FederatedLteNetworks
-	ManageFegLteNetworkPath           = ListFegLteNetworksPath + "/:network_id"
+	ManageFegLteNetworkPath           = ListFegLteNetworksPath + obsidian.UrlSep + ":network_id"
 	ManageFegLteNetworkFederationPath = ManageFegLteNetworkPath + obsidian.UrlSep + "federation"
 	ManageFegLteNetworkSubscriberPath = ManageFegLteNetworkPath + obsidian.UrlSep + "subscriber_config"
 	ManageFegLteNetworkBaseNamesPath  = ManageFegLteNetworkSubscriberPath + obsidian.UrlSep + "base_names"
@@ -116,29 +115,31 @@ func getGateway(c echo.Context) error {
 		return nerr
 	}
 
-	magmadModel, nerr := handlers.LoadMagmadGateway(nid, gid)
+	magmadModel, nerr := handlers.LoadMagmadGateway(c.Request().Context(), nid, gid)
 	if nerr != nil {
 		return nerr
 	}
 
 	ent, err := configurator.LoadEntity(
+		c.Request().Context(),
 		nid, feg.FegGatewayType, gid,
 		configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsFromThis: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "failed to load federation gateway"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to load federation gateway: %w", err))
 	}
 
 	ret := &fegModels.FederationGateway{
-		ID:          magmadModel.ID,
-		Name:        magmadModel.Name,
-		Description: magmadModel.Description,
-		Device:      magmadModel.Device,
-		Status:      magmadModel.Status,
-		Tier:        magmadModel.Tier,
-		Magmad:      magmadModel.Magmad,
-		Federation:  ent.Config.(*fegModels.GatewayFederationConfigs),
+		ID:               magmadModel.ID,
+		Name:             magmadModel.Name,
+		Description:      magmadModel.Description,
+		Device:           magmadModel.Device,
+		RegistrationInfo: magmadModel.RegistrationInfo,
+		Status:           magmadModel.Status,
+		Tier:             magmadModel.Tier,
+		Magmad:           magmadModel.Magmad,
+		Federation:       ent.Config.(*fegModels.GatewayFederationConfigs),
 	}
 	return c.JSON(http.StatusOK, ret)
 }
@@ -159,7 +160,7 @@ func deleteGateway(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	err := handlers.DeleteMagmadGateway(nid, gid, storage.TKs{{Type: feg.FegGatewayType, Key: gid}})
+	err := handlers.DeleteMagmadGateway(c.Request().Context(), nid, gid, storage.TKs{{Type: feg.FegGatewayType, Key: gid}})
 	if err != nil {
 		return makeErr(err)
 	}
@@ -209,19 +210,21 @@ func getClusterStatusHandler(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	network, err := configurator.LoadNetwork(nid, true, true, serdes.Network)
+
+	reqCtx := c.Request().Context()
+	network, err := configurator.LoadNetwork(reqCtx, nid, true, true, serdes.Network)
 	if err == merrors.ErrNotFound {
 		return c.NoContent(http.StatusNotFound)
 	}
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	if network.Type != feg.FederationNetworkType {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("network %s is not a <%s> network", nid, feg.FederationNetworkType))
 	}
-	activeGw, err := health.GetActiveGateway(nid)
+	activeGw, err := health.GetActiveGateway(reqCtx, nid)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	ret := &fegModels.FederationNetworkClusterStatus{
 		ActiveGateway: activeGw,
@@ -234,27 +237,25 @@ func getHealthStatusHandler(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	pid, err := configurator.GetPhysicalIDOfEntity(nid, orc8r.MagmadGatewayType, gid)
+
+	reqCtx := c.Request().Context()
+	pid, err := configurator.GetPhysicalIDOfEntity(reqCtx, nid, orc8r.MagmadGatewayType, gid)
 	if err == merrors.ErrNotFound || len(pid) == 0 {
 		return c.NoContent(http.StatusNotFound)
 	}
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
-	res, err := health.GetHealth(nid, gid)
+	res, err := health.GetHealth(reqCtx, nid, gid)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
-	ret := &fegModels.FederationGatewayHealthStatus{
-		Status:      res.GetHealth().GetHealth().String(),
-		Description: res.GetHealth().GetHealthMessage(),
-	}
-	return c.JSON(http.StatusOK, ret)
+	return c.JSON(http.StatusOK, fegModels.ToFederationGatewayHealthStatusModel(res))
 }
 
 func makeErr(err error) *echo.HTTPError {
 	if err == merrors.ErrNotFound {
 		return echo.ErrNotFound
 	}
-	return obsidian.HttpError(err, http.StatusInternalServerError)
+	return echo.NewHTTPError(http.StatusInternalServerError, err)
 }

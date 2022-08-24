@@ -12,8 +12,10 @@ limitations under the License.
 """
 
 # pylint: disable=protected-access
+from typing import Union
 from unittest import TestCase
-from magma.enodebd.data_models.transform_for_magma import gps_tr181, bandwidth
+
+from magma.enodebd.data_models.transform_for_magma import bandwidth, gps_tr181
 from magma.enodebd.exceptions import ConfigurationError
 
 
@@ -36,7 +38,7 @@ class TransformForMagmaTests(TestCase):
         self.assertEqual(out, expected, 'Should leave zero as zero')
 
     def test_bandwidth(self) -> None:
-        inp = 'n6'
+        inp: Union[str, float, int] = 'n6'
         out = bandwidth(inp)
         expected = 1.4
         self.assertEqual(out, expected, 'Should convert RBs')

@@ -1,4 +1,3 @@
-
 """
 Copyright 2020 The Magma Authors.
 
@@ -13,16 +12,19 @@ limitations under the License.
 """
 
 import abc
+
 from lte.protos.subscriberdb_pb2 import (
+    CoreNetworkType,
     GSMSubscription,
     LTESubscription,
     SubscriberID,
 )
-
 from magma.subscriberdb.sid import SIDUtils
+
 from .crypto.gsm import UnsafePreComputedA3A8
 from .crypto.milenage import Milenage
 from .crypto.utils import CryptoError
+from .subscription.utils import ServiceNotActive
 
 
 class GSMProcessor(metaclass=abc.ABCMeta):
@@ -107,8 +109,15 @@ class Processor(GSMProcessor, LTEProcessor):
     subscriber stores.
     """
 
-    def __init__(self, store, default_sub_profile,
-                 sub_profiles, op=None, amf=None):
+    def __init__(
+        self,
+        store,
+        default_sub_profile,
+        sub_profiles,
+        op=None,
+        amf=None,
+        sub_network=None,
+    ):
         """
         Init the Processor with all the components.
 
@@ -121,11 +130,11 @@ class Processor(GSMProcessor, LTEProcessor):
         self._amf = amf
         self._default_sub_profile = default_sub_profile
         self._sub_profiles = sub_profiles
+        self._sub_network = sub_network or CoreNetworkType()
         if len(op) != 16:
             raise ValueError("OP is invalid len=%d value=%s" % (len(op), op))
         if len(amf) != 2:
-            raise ValueError("AMF has invalid length len=%d value=%s" %
-                             (len(amf), amf))
+            raise ValueError("AMF has invalid length len=%d value=%s" % (len(amf), amf))
 
     def get_sub_profile(self, imsi):
         """
@@ -141,8 +150,7 @@ class Processor(GSMProcessor, LTEProcessor):
         """
         sid = SIDUtils.to_str(SubscriberID(id=imsi, type=SubscriberID.IMSI))
         subs = self._store.get_subscriber_data(sid)
-        return self._sub_profiles.get(subs.sub_profile,
-                                      self._default_sub_profile)
+        return self._sub_profiles.get(subs.sub_profile, self._default_sub_profile)
 
     def get_gsm_auth_vector(self, imsi):
         """
@@ -157,8 +165,7 @@ class Processor(GSMProcessor, LTEProcessor):
 
         # The only GSM crypto algo we support now
         if subs.gsm.auth_algo != GSMSubscription.PRECOMPUTED_AUTH_TUPLES:
-            raise CryptoError("Unknown crypto (%s) for %s" %
-                              (subs.gsm.auth_algo, sid))
+            raise CryptoError("Unknown crypto (%s) for %s" % (subs.gsm.auth_algo, sid))
         gsm_crypto = UnsafePreComputedA3A8()
 
         if len(subs.gsm.auth_tuples) == 0:
@@ -175,11 +182,13 @@ class Processor(GSMProcessor, LTEProcessor):
         subs = self._store.get_subscriber_data(sid)
 
         if subs.lte.state != LTESubscription.ACTIVE:
-            raise CryptoError("LTE service not active for %s" % sid)
+            raise ServiceNotActive("LTE service not active for %s" % sid)
+
+        if CoreNetworkType.NT_EPC in subs.sub_network.forbidden_network_types:
+            raise ServiceNotActive("LTE services not allowed for %s" % sid)
 
         if subs.lte.auth_algo != LTESubscription.MILENAGE:
-            raise CryptoError("Unknown crypto (%s) for %s" %
-                              (subs.lte.auth_algo, sid))
+            raise CryptoError("Unknown crypto (%s) for %s" % (subs.lte.auth_algo, sid))
 
         if len(subs.lte.auth_key) != 16:
             raise CryptoError("Subscriber key not valid for %s" % sid)
@@ -193,8 +202,7 @@ class Processor(GSMProcessor, LTEProcessor):
 
         sqn = self.seq_to_sqn(self.get_next_lte_auth_seq(imsi))
         milenage = Milenage(self._amf)
-        return milenage.generate_eutran_vector(subs.lte.auth_key,
-                                               opc, sqn, plmn)
+        return milenage.generate_eutran_vector(subs.lte.auth_key, opc, sqn, plmn)
 
     def resync_lte_auth_seq(self, imsi, rand, auts):
         """
@@ -208,8 +216,7 @@ class Processor(GSMProcessor, LTEProcessor):
             raise CryptoError("LTE service not active for %s" % sid)
 
         if subs.lte.auth_algo != LTESubscription.MILENAGE:
-            raise CryptoError("Unknown crypto (%s) for %s" %
-                              (subs.lte.auth_algo, sid))
+            raise CryptoError("Unknown crypto (%s) for %s" % (subs.lte.auth_algo, sid))
 
         if len(subs.lte.auth_key) != 16:
             raise CryptoError("Subscriber key not valid for %s" % sid)
@@ -221,10 +228,9 @@ class Processor(GSMProcessor, LTEProcessor):
         else:
             opc = subs.lte.auth_opc
 
-        dummy_amf = b'\x00\x00'  # Use dummy AMF for re-synchronization
+        dummy_amf = b"\x00\x00"  # Use dummy AMF for re-synchronization
         milenage = Milenage(dummy_amf)
-        sqn_ms, mac_s = \
-            milenage.generate_resync(auts, subs.lte.auth_key, opc, rand)
+        sqn_ms, mac_s = milenage.generate_resync(auts, subs.lte.auth_key, opc, rand)
 
         if mac_s != auts[6:]:
             raise CryptoError("Invalid resync authentication code")
@@ -242,8 +248,9 @@ class Processor(GSMProcessor, LTEProcessor):
                 self.set_next_lte_auth_seq(imsi, seq_ms + 1)
             else:
                 # This shouldn't have happened
-                raise CryptoError("Re-sync delta in range but UE rejected "
-                                  "auth: %d" % seq_delta)
+                raise CryptoError(
+                    "Re-sync delta in range but UE rejected " "auth: %d" % seq_delta,
+                )
 
     def get_next_lte_auth_seq(self, imsi):
         """
@@ -280,6 +287,37 @@ class Processor(GSMProcessor, LTEProcessor):
         sid = SIDUtils.to_str(SubscriberID(id=imsi, type=SubscriberID.IMSI))
         sub_data = self._store.get_subscriber_data(sid)
         return sub_data
+
+    def generate_m5g_auth_vector(self, imsi: str, snni: bytes):
+        """
+        Returns the m5g auth vector for the subscriber by querying the store
+        for the crypto algo and secret keys.
+        """
+        sid = SIDUtils.to_str(SubscriberID(id=imsi, type=SubscriberID.IMSI))
+        subs = self._store.get_subscriber_data(sid)
+
+        if subs.lte.state != LTESubscription.ACTIVE:
+            raise ServiceNotActive("5G service not active for %s" % sid)
+
+        if CoreNetworkType.NT_5GC in subs.sub_network.forbidden_network_types:
+            raise ServiceNotActive("5G services not allowed for %s" % sid)
+
+        if subs.lte.auth_algo != LTESubscription.MILENAGE:
+            raise CryptoError("Unknown crypto (%s) for %s" % (subs.lte.auth_algo, sid))
+
+        if len(subs.lte.auth_key) != 16:
+            raise CryptoError("Subscriber key not valid for %s" % sid)
+
+        if len(subs.lte.auth_opc) == 0:
+            opc = Milenage.generate_opc(subs.lte.auth_key, self._op)
+        elif len(subs.lte.auth_opc) != 16:
+            raise CryptoError("Subscriber OPc is invalid length for %s" % sid)
+        else:
+            opc = subs.lte.auth_opc
+
+        sqn = self.seq_to_sqn(self.get_next_lte_auth_seq(imsi))
+        milenage = Milenage(self._amf)
+        return milenage.generate_m5gran_vector(subs.lte.auth_key, opc, sqn, snni)
 
     @classmethod
     def seq_to_sqn(cls, seq, ind=0):

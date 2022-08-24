@@ -15,9 +15,9 @@ import json
 import logging
 from contextlib import closing
 from typing import Any, Dict
+
 import pkg_resources
 import yaml
-
 from bravado_core.spec import Spec
 from bravado_core.validate import validate_object as bravado_validate
 
@@ -28,10 +28,12 @@ MODULE = 'module'
 FILENAME = 'filename'
 DEFINITIONS = 'definitions'
 
+
 class EventValidator(object):
     """
     gRPC based server for EventD.
     """
+
     def __init__(self, config: Dict[str, Any]):
         self.event_registry = config[EVENT_REGISTRY]
         self.specs_by_filename = self._load_specs_from_registry()
@@ -53,16 +55,18 @@ class EventValidator(object):
         if event_type not in self.event_registry:
             logging.debug(
                 'Event type %s not among registered event types (%s)',
-                event_type, self.event_registry)
+                event_type, self.event_registry,
+            )
             raise KeyError(
                 'Event type {} not registered, '
-                'please add it to the EventD config'.format(event_type))
+                'please add it to the EventD config'.format(event_type),
+            )
         filename = self.event_registry[event_type][FILENAME]
         bravado_validate(
             self.specs_by_filename[filename][BRAVADO_SPEC],
             self.specs_by_filename[filename][SWAGGER_SPEC][event_type],
-            event)
-
+            event,
+        )
 
     def _load_specs_from_registry(self) -> Dict[str, Any]:
         """
@@ -85,13 +89,15 @@ class EventValidator(object):
             if not pkg_resources.resource_exists(module, filename):
                 raise LookupError(
                     'File {} not found under {}/swagger, please ensure that '
-                    'it exists'.format(filename, info[MODULE]))
+                    'it exists'.format(filename, info[MODULE]),
+                )
 
             stream = pkg_resources.resource_stream(module, filename)
             with closing(stream) as spec_file:
                 swagger_spec = yaml.safe_load(spec_file)
                 self._check_event_exists_in_spec(
-                    swagger_spec[DEFINITIONS], filename, event_type)
+                    swagger_spec[DEFINITIONS], filename, event_type,
+                )
 
                 config = {'validate_swagger_spec': False}
                 bravado_spec = Spec.from_dict(swagger_spec, config=config)
@@ -115,4 +121,5 @@ class EventValidator(object):
             raise KeyError(
                 'Event type {} is not defined in {}, '
                 'please add the definition and re-generate '
-                'swagger specifications'.format(event_type, filename))
+                'swagger specifications'.format(event_type, filename),
+            )

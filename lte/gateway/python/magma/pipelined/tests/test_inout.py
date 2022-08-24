@@ -15,19 +15,27 @@ import unittest
 import warnings
 from concurrent.futures import Future
 
-from magma.pipelined.tests.app.start_pipelined import (
-    TestSetup,
-    PipelinedController,
-)
+from magma.pipelined.app import egress, ingress, middle
 from magma.pipelined.bridge_util import BridgeTools
+from magma.pipelined.tests.app.start_pipelined import (
+    PipelinedController,
+    TestSetup,
+)
 from magma.pipelined.tests.pipelined_test_util import (
+    assert_bridge_snapshot_match,
+    create_service_manager,
+    fake_mandatory_controller_setup,
     start_ryu_app_thread,
     stop_ryu_app_thread,
-    create_service_manager,
-    assert_bridge_snapshot_match,
-    fake_inout_setup,
 )
 from ryu.ofproto.ofproto_v1_4 import OFPP_LOCAL
+
+
+def mocked_get_virtual_iface_mac(iface):
+    if iface == 'test_mtr1':
+        return 'ae:fa:b2:76:37:5d'
+    if iface == 'testing_br':
+        return 'bb:fa:b2:76:37:5d'
 
 
 class InOutTest(unittest.TestCase):
@@ -35,6 +43,7 @@ class InOutTest(unittest.TestCase):
     IFACE = 'testing_br'
     MAC_DEST = "5e:cc:cc:b1:49:4b"
     BRIDGE_IP = '192.168.128.1'
+    MTR_PORT = "test_mtr1"
 
     @classmethod
     def setUpClass(cls):
@@ -46,18 +55,38 @@ class InOutTest(unittest.TestCase):
         to apps launched by using futures.
         """
         super(InOutTest, cls).setUpClass()
+        ingress.get_virtual_iface_mac = mocked_get_virtual_iface_mac
+        middle.get_virtual_iface_mac = mocked_get_virtual_iface_mac
+        egress.get_virtual_iface_mac = mocked_get_virtual_iface_mac
         warnings.simplefilter('ignore')
         cls.service_manager = create_service_manager([])
 
-        inout_controller_reference = Future()
+        BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
+        BridgeTools.create_internal_iface(
+            cls.BRIDGE,
+            cls.MTR_PORT, None,
+        )
+        mtr_port_no = BridgeTools.get_ofport(cls.MTR_PORT)
+
+        ingress_controller_reference = Future()
+        middle_controller_reference = Future()
+        egress_controller_reference = Future()
         testing_controller_reference = Future()
         test_setup = TestSetup(
-            apps=[PipelinedController.InOut,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.Ingress,
+                PipelinedController.Middle,
+                PipelinedController.Egress,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
-                PipelinedController.InOut:
-                    inout_controller_reference,
+                PipelinedController.Ingress:
+                    ingress_controller_reference,
+                PipelinedController.Middle:
+                    middle_controller_reference,
+                PipelinedController.Egress:
+                    egress_controller_reference,
                 PipelinedController.Testing:
                     testing_controller_reference,
                 PipelinedController.StartupFlows:
@@ -70,7 +99,11 @@ class InOutTest(unittest.TestCase):
                 'clean_restart': True,
                 'enable_nat': True,
                 'uplink_gw_mac': '11:22:33:44:55:66',
-                'uplink_port': OFPP_LOCAL
+                'uplink_port': OFPP_LOCAL,
+                'virtual_interface': cls.BRIDGE,
+                'mtr_ip': '5.6.7.8',
+                'mtr_interface': cls.MTR_PORT,
+                'ovs_mtr_port_number': mtr_port_no,
             },
             mconfig=None,
             loop=None,
@@ -78,10 +111,10 @@ class InOutTest(unittest.TestCase):
             integ_test=False,
         )
 
-        BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
-
         cls.thread = start_ryu_app_thread(test_setup)
-        cls.inout_controller = inout_controller_reference.result()
+        cls.ingress_controller = ingress_controller_reference.result()
+        cls.middle_controller = middle_controller_reference.result()
+        cls.egress_controller = egress_controller_reference.result()
         cls.testing_controller = testing_controller_reference.result()
 
     @classmethod
@@ -90,10 +123,13 @@ class InOutTest(unittest.TestCase):
         BridgeTools.destroy_bridge(cls.BRIDGE)
 
     def testFlowSnapshotMatch(self):
-        fake_inout_setup(self.inout_controller)
+        fake_mandatory_controller_setup(self.ingress_controller)
+        fake_mandatory_controller_setup(self.middle_controller)
+        fake_mandatory_controller_setup(self.egress_controller)
         assert_bridge_snapshot_match(self, self.BRIDGE, self.service_manager)
 
 
+# LTE with incomplete MTR config
 class InOutTestLTE(unittest.TestCase):
     BRIDGE = 'testing_br'
     IFACE = 'testing_br'
@@ -113,15 +149,25 @@ class InOutTestLTE(unittest.TestCase):
         warnings.simplefilter('ignore')
         cls.service_manager = create_service_manager([])
 
-        inout_controller_reference = Future()
+        ingress_controller_reference = Future()
+        middle_controller_reference = Future()
+        egress_controller_reference = Future()
         testing_controller_reference = Future()
         test_setup = TestSetup(
-            apps=[PipelinedController.InOut,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.Ingress,
+                PipelinedController.Middle,
+                PipelinedController.Egress,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
-                PipelinedController.InOut:
-                    inout_controller_reference,
+                PipelinedController.Ingress:
+                    ingress_controller_reference,
+                PipelinedController.Middle:
+                    middle_controller_reference,
+                PipelinedController.Egress:
+                    egress_controller_reference,
                 PipelinedController.Testing:
                     testing_controller_reference,
                 PipelinedController.StartupFlows:
@@ -137,7 +183,7 @@ class InOutTestLTE(unittest.TestCase):
                 'uplink_gw_mac': '11:22:33:44:55:66',
                 'mtr_ip': '1.2.3.4',
                 'ovs_mtr_port_number': 211,
-                'uplink_port': OFPP_LOCAL
+                'uplink_port': OFPP_LOCAL,
             },
             mconfig=None,
             loop=None,
@@ -148,7 +194,9 @@ class InOutTestLTE(unittest.TestCase):
         BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
 
         cls.thread = start_ryu_app_thread(test_setup)
-        cls.inout_controller = inout_controller_reference.result()
+        cls.ingress_controller = ingress_controller_reference.result()
+        cls.middle_controller = middle_controller_reference.result()
+        cls.egress_controller = egress_controller_reference.result()
         cls.testing_controller = testing_controller_reference.result()
 
     @classmethod
@@ -157,71 +205,7 @@ class InOutTestLTE(unittest.TestCase):
         BridgeTools.destroy_bridge(cls.BRIDGE)
 
     def testFlowSnapshotMatch(self):
-        fake_inout_setup(self.inout_controller)
+        fake_mandatory_controller_setup(self.ingress_controller)
+        fake_mandatory_controller_setup(self.middle_controller)
+        fake_mandatory_controller_setup(self.egress_controller)
         assert_bridge_snapshot_match(self, self.BRIDGE, self.service_manager)
-
-
-class InOutTestXWF(unittest.TestCase):
-    BRIDGE = 'testing_br'
-    IFACE = 'testing_br'
-    MAC_DEST = "5e:cc:cc:b1:49:4b"
-    BRIDGE_IP = '192.168.128.1'
-
-    @classmethod
-    def setUpClass(cls):
-        """
-        Starts the thread which launches ryu apps
-
-        Create a testing bridge, add a port, setup the port interfaces. Then
-        launch the ryu apps for testing pipelined. Gets the references
-        to apps launched by using futures.
-        """
-        super(InOutTestXWF, cls).setUpClass()
-        warnings.simplefilter('ignore')
-        cls.service_manager = create_service_manager([])
-
-        inout_controller_reference = Future()
-        testing_controller_reference = Future()
-        test_setup = TestSetup(
-            apps=[PipelinedController.InOut,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
-            references={
-                PipelinedController.InOut:
-                    inout_controller_reference,
-                PipelinedController.Testing:
-                    testing_controller_reference,
-                PipelinedController.StartupFlows:
-                    Future(),
-            },
-            config={
-                'setup_type': 'XWF',
-                'bridge_name': cls.BRIDGE,
-                'bridge_ip_address': cls.BRIDGE_IP,
-                'ovs_gtp_port_number': 32768,
-                'clean_restart': True,
-                'uplink_port': OFPP_LOCAL
-            },
-            mconfig=None,
-            loop=None,
-            service_manager=cls.service_manager,
-            integ_test=False,
-        )
-
-        BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
-
-        cls.thread = start_ryu_app_thread(test_setup)
-        cls.inout_controller = inout_controller_reference.result()
-        cls.testing_controller = testing_controller_reference.result()
-
-    @classmethod
-    def tearDownClass(cls):
-        stop_ryu_app_thread(cls.thread)
-        BridgeTools.destroy_bridge(cls.BRIDGE)
-
-    def testFlowSnapshotMatch(self):
-        assert_bridge_snapshot_match(self, self.BRIDGE, self.service_manager)
-
-
-if __name__ == "__main__":
-    unittest.main()

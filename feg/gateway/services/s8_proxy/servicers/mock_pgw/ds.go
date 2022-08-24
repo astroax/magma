@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/pkg/errors"
 	"github.com/wmnsk/go-gtp/gtpv2"
 	"github.com/wmnsk/go-gtp/gtpv2/ie"
 	"github.com/wmnsk/go-gtp/gtpv2/message"
@@ -25,11 +24,32 @@ import (
 
 func (mPgw *MockPgw) getHandleDeleteSessionRequest() gtpv2.HandlerFunc {
 	return func(c *gtpv2.Conn, sgwAddr net.Addr, msg message.Message) error {
-		session, err := c.GetSessionByTEID(msg.TEID(), sgwAddr)
+
+		fmt.Println("mock PGW received a DeleteSessionRequest")
+
+		var err error
+		dsReqFromSGW := msg.(*message.DeleteSessionRequest)
+
+		pgwTeidC := dsReqFromSGW.TEID()
+		session, err := c.GetSessionByTEID(pgwTeidC, sgwAddr)
+		mPgw.LastTEIDc = pgwTeidC
 		if err != nil {
+			return fmt.Errorf("PGW can't find session for PGWC teid %d, %s\n ",
+				pgwTeidC, err)
+		}
+
+		// get TEUD
+		sgwTeidC, err := session.GetTEID(gtpv2.IFTypeS5S8SGWGTPC)
+		if err != nil {
+			err = fmt.Errorf("Error: %w", err)
+			return err
+		}
+
+		// check bearer is n there
+		if dsReqFromSGW.LinkedEBI == nil {
 			dsr := message.NewDeleteSessionResponse(
-				0, 0,
-				ie.NewCause(gtpv2.CauseIMSIIMEINotKnown, 0, 0, 0, nil),
+				sgwTeidC, msg.Sequence(),
+				ie.NewCause(gtpv2.CauseMandatoryIEMissing, 0, 0, 0, ie.NewEPSBearerID(0)),
 			)
 			if err := c.RespondTo(sgwAddr, msg, dsr); err != nil {
 				return err
@@ -38,22 +58,29 @@ func (mPgw *MockPgw) getHandleDeleteSessionRequest() gtpv2.HandlerFunc {
 			return err
 		}
 
-		// respond to S-GW with DeleteSessionResponse.
-		teid, err := session.GetTEID(gtpv2.IFTypeS5S8SGWGTPC)
+		// check if bearer associated with EBI exists or not.
+		_, err = session.LookupBearerByEBI(dsReqFromSGW.LinkedEBI.MustEPSBearerID())
 		if err != nil {
-			err = errors.Wrap(err, "Error")
-			return err
-		}
-		dsr := message.NewDeleteSessionResponse(
-			teid, 0,
-			ie.NewCause(gtpv2.CauseRequestAccepted, 0, 0, 0, nil),
-		)
-		if err := c.RespondTo(sgwAddr, msg, dsr); err != nil {
+			dsr := message.NewDeleteBearerResponse(
+				sgwTeidC, msg.Sequence(),
+				ie.NewCause(gtpv2.CauseContextNotFound, 0, 0, 0, nil),
+			)
+			if err := c.RespondTo(sgwAddr, msg, dsr); err != nil {
+				return err
+			}
 			return err
 		}
 
-		fmt.Printf("Session deleted for Subscriber: %s", session.IMSI)
+		// respond to S-GW with DeleteSessionResponse.
+		dsr := message.NewDeleteSessionResponse(
+			sgwTeidC, msg.Sequence(),
+			ie.NewCause(gtpv2.CauseRequestAccepted, 0, 0, 0, nil),
+		)
 		c.RemoveSession(session)
+		if err := c.RespondTo(sgwAddr, msg, dsr); err != nil {
+			return err
+		}
+		fmt.Printf("mock PGW deleted a session for: %s\n", session.IMSI)
 		return nil
 	}
 }

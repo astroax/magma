@@ -11,18 +11,19 @@
  * limitations under the License.
  */
 
-#include <string>
-#include <iostream>
+#include "orc8r/gateway/c/common/config/ServiceConfigLoader.hpp"
 
+#include <glog/logging.h>
+#include <iostream>  // for operator<<, basic_ostream
+#include <string>    // for allocator, operator+, char_traits
 
-#include "ServiceConfigLoader.h"
-#include "YAMLUtils.h"
-#include "magma_logging.h"
+#include "orc8r/gateway/c/common/config/YAMLUtils.hpp"       // for YAMLUtils
+#include "orc8r/gateway/c/common/logging/magma_logging.hpp"  // for MLOG
 
 namespace magma {
 
 YAML::Node ServiceConfigLoader::load_service_config(
-    const std::string& service_name){
+    const std::string& service_name) {
   auto file_path = std::string(CONFIG_DIR) + service_name + ".yml";
   YAML::Node base_config = YAML::LoadFile(file_path);
 
@@ -30,10 +31,10 @@ YAML::Node ServiceConfigLoader::load_service_config(
   try {
     auto override_file = std::string(OVERRIDE_DIR) + service_name + ".yml";
     return YAMLUtils::merge_nodes(base_config, YAML::LoadFile(override_file));
-  } catch (YAML::BadFile e) {
+  } catch (YAML::BadFile&) {
     MLOG(MDEBUG) << "Override file not found for service " << service_name;
   }
   return base_config;
 }
 
-}
+}  // namespace magma

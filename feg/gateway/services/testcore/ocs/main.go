@@ -18,13 +18,13 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/golang/glog"
+
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/session_proxy/credit_control/gy"
 	"magma/feg/gateway/services/testcore/ocs/mock_ocs"
 	"magma/orc8r/lib/go/service"
-
-	"github.com/golang/glog"
 )
 
 const (
@@ -76,7 +76,7 @@ func main() {
 		},
 	)
 
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, serviceName)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, serviceName)
 	if err != nil {
 		log.Fatalf("Error creating mock %s service: %s", serviceName, err)
 	}

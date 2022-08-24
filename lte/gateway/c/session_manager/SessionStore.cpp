@@ -11,25 +11,43 @@
  * limitations under the License.
  */
 
-#include "SessionState.h"
-#include "SessionStore.h"
-#include "StoredState.h"
-#include "magma_logging.h"
+#include "lte/gateway/c/session_manager/SessionStore.hpp"
+
+#include <glog/logging.h>
+#include <lte/protos/session_manager.pb.h>
+#include <lte/protos/subscriberdb.pb.h>
+#include <ostream>
+#include <utility>
+#include <vector>
+
+#include "lte/gateway/c/session_manager/CreditKey.hpp"
+#include "lte/gateway/c/session_manager/MemoryStoreClient.hpp"
+#include "lte/gateway/c/session_manager/MeteringReporter.hpp"
+#include "lte/gateway/c/session_manager/SessionState.hpp"
+#include "lte/gateway/c/session_manager/StoredState.hpp"
+#include "lte/gateway/c/session_manager/Types.hpp"
+#include "orc8r/gateway/c/common/logging/magma_logging.hpp"
 
 namespace magma {
-namespace lte {
+class StaticRuleStore;
 
-SessionStore::SessionStore(std::shared_ptr<StaticRuleStore> rule_store)
-    : rule_store_(rule_store),
-      store_client_(std::make_shared<MemoryStoreClient>(rule_store)),
-      metering_reporter_(std::make_shared<MeteringReporter>()) {}
+namespace lte {
+class RedisStoreClient;
 
 SessionStore::SessionStore(
     std::shared_ptr<StaticRuleStore> rule_store,
+    std::shared_ptr<magma::MeteringReporter> metering_reporter)
+    : rule_store_(rule_store),
+      store_client_(std::make_shared<MemoryStoreClient>(rule_store)),
+      metering_reporter_(metering_reporter) {}
+
+SessionStore::SessionStore(
+    std::shared_ptr<StaticRuleStore> rule_store,
+    std::shared_ptr<magma::MeteringReporter> metering_reporter,
     std::shared_ptr<RedisStoreClient> store_client)
     : rule_store_(rule_store),
       store_client_(store_client),
-      metering_reporter_(std::make_shared<MeteringReporter>()) {}
+      metering_reporter_(metering_reporter) {}
 
 bool SessionStore::raw_write_sessions(SessionMap session_map) {
   // return true;
@@ -52,10 +70,10 @@ void SessionStore::set_and_save_reporting_flag(
 
   for (const CreditUsageUpdate& credit_update :
        update_session_request.updates()) {
-    const std::string imsi       = credit_update.common_context().sid().id();
+    const std::string imsi = credit_update.common_context().sid().id();
     const std::string session_id = credit_update.session_id();
-    const CreditKey& ckey        = credit_update.usage().charging_key();
-    const std::string mkey       = credit_update.usage().monitoring_key();
+    const CreditKey& ckey = credit_update.usage().charging_key();
+    const std::string mkey = credit_update.usage().monitoring_key();
 
     SessionSearchCriteria criteria(imsi, IMSI_AND_SESSION_ID, session_id);
     auto session_it = find_session(session_map, criteria);
@@ -65,7 +83,7 @@ void SessionStore::set_and_save_reporting_flag(
       continue;
     }
 
-    auto& session   = **session_it;
+    auto& session = **session_it;
     auto& credit_uc = session_uc[imsi][session_id];
 
     if (!session->set_credit_reporting(ckey, value, &credit_uc)) {
@@ -78,9 +96,9 @@ void SessionStore::set_and_save_reporting_flag(
 
   for (const UsageMonitoringUpdateRequest& monitor_update :
        update_session_request.usage_monitors()) {
-    const std::string imsi       = monitor_update.sid();
+    const std::string imsi = monitor_update.sid();
     const std::string session_id = monitor_update.session_id();
-    const auto mkey              = monitor_update.update().monitoring_key();
+    const auto mkey = monitor_update.update().monitoring_key();
 
     SessionSearchCriteria criteria(imsi, IMSI_AND_SESSION_ID, session_id);
     auto session_it = find_session(session_map, criteria);
@@ -89,7 +107,7 @@ void SessionStore::set_and_save_reporting_flag(
                    << " not found when setting set_and_save_reporting_flag";
       continue;
     }
-    auto& session   = **session_it;
+    auto& session = **session_it;
     auto& credit_uc = session_uc[imsi][session_id];
 
     if (!session->set_monitor_reporting(mkey, value, &credit_uc)) {
@@ -115,9 +133,9 @@ void SessionStore::sync_request_numbers(const SessionUpdate& update_criteria) {
   MLOG(MDEBUG) << "Syncing request numbers into existing sessions";
   for (auto& it : session_map) {
     auto imsi = it.first;
-    auto it2  = it.second.begin();
+    auto it2 = it.second.begin();
     while (it2 != it.second.end()) {
-      auto updates    = update_criteria.find(it.first)->second;
+      auto updates = update_criteria.find(it.first)->second;
       auto session_id = (*it2)->get_session_id();
       if (updates.find(session_id) != updates.end()) {
         (*it2)->increment_request_number(
@@ -131,7 +149,7 @@ void SessionStore::sync_request_numbers(const SessionUpdate& update_criteria) {
 }
 
 SessionMap SessionStore::read_sessions_for_deletion(const SessionRead& req) {
-  auto session_map   = store_client_->read_sessions(req);
+  auto session_map = store_client_->read_sessions(req);
   auto session_map_2 = store_client_->read_sessions(req);
   // For all sessions of the subscriber, increment the request numbers
   for (const std::string& imsi : req) {
@@ -143,9 +161,9 @@ SessionMap SessionStore::read_sessions_for_deletion(const SessionRead& req) {
   return session_map;
 }
 
-bool SessionStore::create_sessions(
-    const std::string& subscriber_id, SessionVector sessions) {
-  auto session_map           = SessionMap{};
+bool SessionStore::create_sessions(const std::string& subscriber_id,
+                                   SessionVector sessions) {
+  auto session_map = SessionMap{};
   session_map[subscriber_id] = std::move(sessions);
   store_client_->write_sessions(std::move(session_map));
   return true;
@@ -161,28 +179,53 @@ bool SessionStore::update_sessions(const SessionUpdate& update_criteria) {
   // Now attempt to modify the state
   for (auto& it : session_map) {
     auto imsi = it.first;
-    auto it2  = it.second.begin();
+    auto it2 = it.second.begin();
     while (it2 != it.second.end()) {
-      auto updates    = update_criteria.find(it.first)->second;
+      auto updates = update_criteria.find(it.first)->second;
       auto session_id = (*it2)->get_session_id();
       if (updates.find(session_id) != updates.end()) {
         auto update = updates[session_id];
         if (!(*it2)->apply_update_criteria(update)) {
           return false;
         }
-        metering_reporter_->report_usage(imsi, session_id, update);
-
         if (update.is_session_ended) {
           // TODO: Instead of deleting from session_map, mark as ended and
           //       no longer mark on read
           it2 = it.second.erase(it2);
           continue;
+        } else {
+          // Only report_usage if the session is still active, since we want to
+          // remove the counter when the session is terminated. This logic *may*
+          // lead to the metric missing the last few bytes used by the session
+          // before termination. But since the counter has to get deleted, this
+          // is inevitable with our current approach.
+          // TODO pull the metering logic out of SessionStore. SessionStore
+          // should only handle logic relating to storage/search.
+          metering_reporter_->report_usage(imsi, session_id, update);
         }
       }
       ++it2;
     }
   }
   return store_client_->write_sessions(std::move(session_map));
+}
+
+void SessionStore::initialize_metering_counter() {
+  auto session_map = store_client_->read_all_sessions();
+  for (auto& sessions_by_imsi : session_map) {
+    const std::string imsi = sessions_by_imsi.first;
+    for (auto& session : sessions_by_imsi.second) {
+      const std::string session_id = session->get_session_id();
+      auto total_usage = session->get_total_credit_usage();
+      MLOG(MDEBUG) << "Initializing metering metrics on startup for "
+                   << session_id
+                   << ", monitoring: {tx=" << total_usage.monitoring_tx
+                   << ", rx=" << total_usage.monitoring_rx
+                   << "}, charging: {tx=" << total_usage.charging_tx
+                   << ", rx=" << total_usage.charging_rx << "}";
+      metering_reporter_->initialize_usage(imsi, session_id, total_usage);
+    }
+  }
 }
 
 optional<SessionVector::iterator> SessionStore::find_session(
@@ -259,7 +302,7 @@ optional<SessionVector::iterator> SessionStore::find_session(
             }
             break;
           case RATType::TGPP_NR:
-            if ((*it)->get_local_teid() == criteria.secondary_key_unit32) {
+            if ((*it)->get_upf_local_teid() == criteria.secondary_key_unit32) {
               return it;
             }
             break;
@@ -270,6 +313,40 @@ optional<SessionVector::iterator> SessionStore::find_session(
             break;
         }
         break;  // break IMSI_AND_TEID
+
+      case IMSI_AND_PDUID:
+        if ((*it)
+                ->get_config()
+                .rat_specific_context.m5gsm_session_context()
+                .pdu_session_id() == criteria.secondary_key_unit32) {
+          return it;
+        }
+        break;  // break IMSI_AND_PDUID
+
+      case IMSI_AND_UE_IPV4_OR_IPV6_OR_UPF_TEID:
+        switch (context.rat_type()) {
+          case RATType::TGPP_WLAN:
+            return it;
+            break;
+          case RATType::TGPP_LTE:
+            if (context.ue_ipv4() == criteria.secondary_key ||
+                context.ue_ipv6() == criteria.tertiary_key) {
+              return it;
+            }
+            break;
+          case RATType::TGPP_NR:
+            if ((*it)->get_upf_local_teid() == criteria.quaternary_key_unit32) {
+              return it;
+            }
+            break;
+          default:
+            MLOG(MERROR)
+                << "Search criteria for IMSI_AND_UE_IPV4_OR_IPV6_OR_UPF_TEID"
+                   " not implemented for this RAT "
+                << context.rat_type();
+            break;
+        }
+        break;  // break  IMSI_AND_UE_IPV4_OR_IPV6_OR_TEID
     }
     continue;
   }

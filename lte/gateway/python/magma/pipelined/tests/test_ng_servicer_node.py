@@ -11,42 +11,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import logging
-import warnings
-from typing import List
-import subprocess
 import unittest
-from unittest import TestCase
 import unittest.mock
-from collections import OrderedDict
+import warnings
 from concurrent.futures import Future
+from unittest import TestCase
 from unittest.mock import MagicMock
 
+from lte.protos.session_manager_pb2 import UPFAssociationState
 from magma.pipelined.bridge_util import BridgeTools
 from magma.pipelined.tests.app.start_pipelined import (
-                TestSetup,
-                PipelinedController,
-            )
-
+    PipelinedController,
+    TestSetup,
+)
 from magma.pipelined.tests.pipelined_test_util import (
+    create_service_manager,
     start_ryu_app_thread,
     stop_ryu_app_thread,
-    create_service_manager,
-    wait_after_send
 )
-from magma.pipelined.app.ng_services import NGServiceController
-from lte.protos import pipelined_pb2_grpc
-from lte.protos import pipelined_pb2
-from lte.protos import session_manager_pb2_grpc
-from lte.protos.session_manager_pb2 import (
-                UPFAssociationState)
 
-from unittest.mock import Mock, MagicMock
 
-def mocked_send_node_state_message_success (node_message):
+def mocked_send_node_state_message_success(node_message):
     return True
 
-def mocked_send_node_state_message_failure (node_message):
+
+def mocked_send_node_state_message_failure(node_message):
     return False
 
 
@@ -69,9 +58,11 @@ class NGServiceControllerTest(unittest.TestCase):
         ng_services_controller_reference = Future()
         testing_controller_reference = Future()
         test_setup = TestSetup(
-            apps=[PipelinedController.NGServiceController,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.NGServiceController,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.NGServiceController:
                     ng_services_controller_reference,
@@ -83,15 +74,15 @@ class NGServiceControllerTest(unittest.TestCase):
             config={
                 'enodeb_iface': 'eth1',
                 'clean_restart': True,
-                '5G_feature_set': {'enable': True},
-                '5G_feature_set': {'node_identifier': '192.168.220.1'},
+                'enable5g_features': True,
+                'upf_node_identifier': '192.168.220.1',
                 'bridge_name': self.BRIDGE,
             },
             mconfig=None,
             loop=None,
             service_manager=self.service_manager,
             integ_test=False,
-            rpc_stubs={'sessiond_setinterface': MagicMock()}
+            rpc_stubs={'sessiond_setinterface': MagicMock()},
         )
 
         BridgeTools.create_bridge(self.BRIDGE, self.IFACE)
@@ -116,7 +107,7 @@ class NGServiceControllerTest(unittest.TestCase):
 
         return (node_message.associaton_state)
 
-    def test_association_setup_message_request (self):
+    def test_association_setup_message_request(self):
         ng_serv = self.ng_services_controller
         node_mgr = ng_serv._ng_node_mgr
 
@@ -125,7 +116,7 @@ class NGServiceControllerTest(unittest.TestCase):
         TestCase().assertEqual(node_mgr._smf_assoc_version, 1)
         TestCase().assertEqual(node_mgr._assoc_message_count, 1)
 
-    def test_association_release_message (self):
+    def test_association_release_message(self):
         ng_serv = self.ng_services_controller
         node_mgr = ng_serv._ng_node_mgr
 
@@ -137,7 +128,7 @@ class NGServiceControllerTest(unittest.TestCase):
         TestCase().assertEqual(node_mgr._smf_assoc_version, 0)
         TestCase().assertEqual(node_mgr._assoc_message_count, 2)
 
-    def test_association_setup_message_request_failure (self):
+    def test_association_setup_message_request_failure(self):
         ng_serv = self.ng_services_controller
         node_mgr = ng_serv._ng_node_mgr
 
@@ -150,6 +141,7 @@ class NGServiceControllerTest(unittest.TestCase):
         TestCase().assertEqual(node_mgr._smf_assoc_version, 0)
         TestCase().assertEqual(node_mgr._assoc_message_count, 0)
         TestCase().assertEqual(node_mgr._smf_assoc_state, UPFAssociationState.RELEASE)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,19 +11,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import random
 import time
 import unittest
 
 import s1ap_types
 import s1ap_wrapper
 from s1ap_utils import MagmadUtil
-import random
 
 
 class TestAttachMmeRestartDetachMultiUe(unittest.TestCase):
     def setUp(self):
         self._s1ap_wrapper = s1ap_wrapper.TestWrapper(
-            stateless_mode=MagmadUtil.stateless_cmds.ENABLE
+            stateless_mode=MagmadUtil.stateless_cmds.ENABLE,
         )
 
     def tearDown(self):
@@ -47,7 +47,7 @@ class TestAttachMmeRestartDetachMultiUe(unittest.TestCase):
         self._s1ap_wrapper.configUEDevice(num_ues)
 
         ue_ids = []
-        for i in range(num_ues):
+        for _ in range(num_ues):
             req = self._s1ap_wrapper.ue_req
             print(
                 "************************* Running End to End attach for ",
@@ -75,7 +75,7 @@ class TestAttachMmeRestartDetachMultiUe(unittest.TestCase):
 
         for ue in ue_ids:
             # Now detach the UE
-            random.seed(time.clock())
+            random.seed(time.time())
             index = random.randint(0, 1)
             print(
                 "************************* Running UE detach for UE id ",

@@ -13,32 +13,32 @@ limitations under the License.
 import unittest
 import warnings
 from concurrent.futures import Future
+from unittest.mock import MagicMock
 
 from lte.protos.mconfig.mconfigs_pb2 import PipelineD
-from magma.pipelined.app.inout import INGRESS
+from lte.protos.mobilityd_pb2 import IPAddress
+from lte.protos.pipelined_pb2 import IPFlowDL
+from magma.pipelined.app.classifier import Classifier
+from magma.pipelined.bridge_util import BridgeTools
+from magma.pipelined.openflow.magma_match import MagmaMatch
+from magma.pipelined.tests.app.flow_query import RyuDirectFlowQuery as FlowQuery
 from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
 from magma.pipelined.tests.app.start_pipelined import (
-    TestSetup,
     PipelinedController,
+    TestSetup,
 )
-from magma.pipelined.openflow.magma_match import MagmaMatch
-from magma.pipelined.tests.app.flow_query import RyuDirectFlowQuery \
-    as FlowQuery
-from magma.pipelined.bridge_util import BridgeTools
 from magma.pipelined.tests.pipelined_test_util import (
+    FlowTest,
+    FlowVerifier,
+    SnapshotVerifier,
+    create_service_manager,
     start_ryu_app_thread,
     stop_ryu_app_thread,
-    create_service_manager,
     wait_after_send,
-    FlowVerifier,
-    FlowTest,
-    SnapshotVerifier,
 )
-from ryu.lib import hub
+from scapy.all import ARP, IP, TCP, UDP, Ether
 from scapy.contrib.gtp import GTP_U_Header
-from scapy.all import *
-from magma.pipelined.app.classifier import Classifier
-from scapy.all import Ether, IP, UDP, ARP
+
 
 class GTPTrafficTest(unittest.TestCase):
     BRIDGE = 'testing_br'
@@ -51,8 +51,10 @@ class GTPTrafficTest(unittest.TestCase):
     Dst_nat = '192.168.129.42'
 
     @classmethod
-    @unittest.mock.patch('netifaces.ifaddresses',
-                return_value=[[{'addr': '00:aa:bb:cc:dd:ee'}]])
+    @unittest.mock.patch(
+        'netifaces.ifaddresses',
+        return_value=[[{'addr': '00:aa:bb:cc:dd:ee'}]],
+    )
     @unittest.mock.patch('netifaces.AF_LINK', 0)
     def setUpClass(cls, *_):
         """
@@ -70,9 +72,11 @@ class GTPTrafficTest(unittest.TestCase):
         testing_controller_reference = Future()
         classifier_reference = Future()
         test_setup = TestSetup(
-            apps=[PipelinedController.Classifier,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.Classifier,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.Classifier:
                     classifier_reference,
@@ -90,14 +94,20 @@ class GTPTrafficTest(unittest.TestCase):
                 'mtr_ip': cls.MTR_IP,
                 'ovs_internal_sampling_port_number': 15578,
                 'ovs_internal_sampling_fwd_tbl_number': 201,
+                'ovs_internal_conntrack_port_number': 15579,
+                'ovs_internal_conntrack_fwd_tbl_number': 202,
                 'clean_restart': True,
+                'ovs_multi_tunnel': False,
+                'paging_timeout': 30,
+                'classifier_controller_id': 5,
+                'enable_nat': True,
+                'ovs_uplink_port_name': "patch-up",
             },
-            mconfig=PipelineD(
-                ue_ip_block="192.168.128.0/24",
-            ),
+            mconfig=PipelineD(),
             loop=None,
             service_manager=cls.service_manager,
             integ_test=False,
+            rpc_stubs={'sessiond_setinterface': MagicMock()},
         )
 
         BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
@@ -124,9 +134,13 @@ class GTPTrafficTest(unittest.TestCase):
 
         # Attach the tunnel flows towards UE.
         seid1 = 5000
-        self.classifier_controller._add_tunnel_flows(65525, 1, 1000,
-                                                     "192.168.128.30",
-                                                      self.EnodeB_IP, seid1)
+        ue_ip_addr = "192.168.128.30"
+        ip_flow_dl = IPFlowDL(set_params=0)
+        self.classifier_controller.add_tunnel_flows(
+            65525, 1, 1000, self.EnodeB_IP,
+            IPAddress(version=IPAddress.IPV4, address=ue_ip_addr.encode('utf-8')),
+            seid1, True, ip_flow_dl=ip_flow_dl,
+        )
         # Create a set of packets
         pkt_sender = ScapyPacketInjector(self.BRIDGE)
         eth = Ether(dst=self.MAC_1, src=self.MAC_2)
@@ -136,37 +150,48 @@ class GTPTrafficTest(unittest.TestCase):
         i_tcp = TCP(seq=1, sport=1111, dport=2222)
         i_ip = IP(src='192.168.60.142', dst=self.EnodeB_IP)
 
-        arp = ARP(hwdst=self.MAC_1,hwsrc=self.MAC_2, psrc=self.Dst_nat, pdst='192.168.128.30')
-        
-        gtp_packet_udp = eth / ip / o_udp / GTP_U_Header(teid=0x1, length=28,gtp_type=255) / i_ip / i_udp
+        arp = ARP(hwdst=self.MAC_1, hwsrc=self.MAC_2, psrc=self.Dst_nat, pdst='192.168.128.30')
+
+        gtp_packet_udp = eth / ip / o_udp / GTP_U_Header(teid=0x1, length=28, gtp_type=255) / i_ip / i_udp
         gtp_packet_tcp = eth / ip / o_udp / GTP_U_Header(teid=0x1, length=68, gtp_type=255) / i_ip / i_tcp
-        arp_packet = eth / arp 
-        
+        arp_packet = eth / arp
+
         # Check if these flows were added (queries should return flows)
         flow_queries = [
-            FlowQuery(self._tbl_num, self.testing_controller,
-                      match=MagmaMatch(tunnel_id=1, in_port=32768)),
-            FlowQuery(self._tbl_num, self.testing_controller,
-                      match=MagmaMatch(ipv4_dst='192.168.128.30'))
+            FlowQuery(
+                self._tbl_num, self.testing_controller,
+                match=MagmaMatch(tunnel_id=1, in_port=32768),
+            ),
+            FlowQuery(
+                self._tbl_num, self.testing_controller,
+                match=MagmaMatch(ipv4_dst='192.168.128.30'),
+            ),
         ]
         # =========================== Verification ===========================
         # Verify 5 flows installed for classifier table (3 pkts matched)
-        
+
         flow_verifier = FlowVerifier(
             [
-                FlowTest(FlowQuery(self._tbl_num,
-                                   self.testing_controller), 3, 5),
+                FlowTest(
+                    FlowQuery(
+                        self._tbl_num,
+                        self.testing_controller,
+                    ), 3, 5,
+                ),
                 FlowTest(flow_queries[0], 0, 1),
-            ], lambda: wait_after_send(self.testing_controller))
+            ], lambda: wait_after_send(self.testing_controller),
+        )
 
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager)
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+        )
 
         with flow_verifier, snapshot_verifier:
             pkt_sender.send(gtp_packet_udp)
             pkt_sender.send(gtp_packet_tcp)
             pkt_sender.send(arp_packet)
-            
+
         flow_verifier.verify()
 
 

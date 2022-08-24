@@ -14,12 +14,12 @@ limitations under the License.
 package storage
 
 import (
-	lteprotos "magma/lte/cloud/go/protos"
-	orc8rprotos "magma/orc8r/lib/go/protos"
-
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
+
+	lteprotos "magma/lte/cloud/go/protos"
+	orc8rprotos "magma/orc8r/lib/go/protos"
 )
 
 type subscriberListener struct {
@@ -63,7 +63,7 @@ func (listener *subscriberListener) Update(batch *orc8rprotos.DataUpdateBatch) b
 			if oldSub.State != nil {
 				subscriber.State = oldSub.State
 			}
-			err = store.UpdateSubscriber(subscriber)
+			err = store.UpdateSubscriber(&lteprotos.SubscriberUpdate{Data: subscriber})
 			glog.Errorf("failed to update subscriber(%s): %s", id, err.Error())
 		} else {
 			err = store.AddSubscriber(subscriber)

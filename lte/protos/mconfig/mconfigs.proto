@@ -18,6 +18,32 @@ import "orc8r/protos/common.proto";
 package magma.mconfig;
 option go_package = "magma/lte/cloud/go/protos/mconfig";
 
+// --------------------------------------------------------------------------
+// SentryConfig stores the network-wide Sentry.io configuration
+// TODO(hcgatewood): remove this after 1.7 release, duplicated in the shared_mconfig
+// --------------------------------------------------------------------------
+message SentryConfig {
+    // dsn_python initializes the Sentry Python SDK and sets the remote URL.
+    // If set to empty string, Sentry Python SDK will not be initialized.
+    string dsn_python = 1;
+    // dsn_native initializes the Sentry Native SDK for C/C++ and sets the
+    // remote URL. If set to empty string, Sentry Native SDK will not be
+    // initialized.
+    string dsn_native = 2;
+    // upload_mme_log decides whether MME service log file (/var/log/mme.log)
+    // is uploaded along with MME crashreports
+    bool upload_mme_log = 3;
+    // sample_rate sets the rate at which Python error events are sampled.
+    // sample_rate should be a number between 0 (0% of errors sent) and 1 (100%
+    // of errors sent)
+    float sample_rate = 4;
+    // message patterns that are excluded from Sentry (regex substring match)
+    repeated string exclusion_patterns = 5;
+    // number_of_lines_in_log defines the number of lines from the 
+    // journal log that is uploaded with every crash report
+    uint32 number_of_lines_in_log = 6;
+}
+
 //------------------------------------------------------------------------------
 // EnodebD configs
 //------------------------------------------------------------------------------
@@ -113,6 +139,7 @@ message PipelineD {
         repeated string msisdns = 2;
         repeated string macs = 3;
         repeated string ips = 4;
+        repeated string imeis = 5;
     }
     LiUes li_ues = 12;
 
@@ -150,6 +177,15 @@ message PipelineD {
     }
     HEConfig he_config = 17;
 
+    // Enables 5G Standalone (SA) at a network level
+    bool enable5g_features = 18;
+    string upf_node_identifier = 19;
+
+    // SGi management IPv6 address with network mask
+    string sgi_management_iface_ipv6_addr = 20;
+    // IPv6 address of SGi management network GW
+    string sgi_management_iface_ipv6_gw = 21;
+
     // DEPRECATED
     reserved 4, 11;
 }
@@ -161,10 +197,16 @@ message SessionD {
     orc8r.LogLevel log_level = 1;
     // DEPRECATED
     // Enable forwarding S6a related requests to Federated GW
-    bool relay_enabled = 2;
+    bool relay_enabled = 2 [deprecated = true];
     WalletExhaustDetection wallet_exhaust_detection = 3;
     // Enable relaying Gx/Gy messages via FeG RPC
     bool gx_gy_relay_enabled = 4;
+    // DEPRECATED: now configured in "shared_mconfig"
+    // sentry_config stores the Sentry.io configuration for this service
+    SentryConfig sentry_config = 5 [deprecated = true];
+
+    // Enables 5G Standalone (SA) at a network level
+    bool enable5g_features = 6;
 }
 
 message WalletExhaustDetection {
@@ -305,8 +347,75 @@ message MME {
     // SGW S1U endpoint on AGW
     string ipv4_sgw_s1u_addr = 31;
 
+    // PLMN restriction configs
+    message PlmnConfig {
+        string mcc = 1;
+        string mnc = 2;
+    }
+    repeated PlmnConfig restricted_plmns = 32;
+
+    message TacList {
+        repeated uint32 tac = 1;
+    }
+    map<string, TacList> service_area_maps = 33;
+
+    FederatedModeMap federated_mode_map = 34;
+
+    // IMEI restriction configs
+    message ImeiConfig {
+        string tac = 1;
+        string snr = 2;
+    }
+    repeated ImeiConfig restricted_imeis = 35;
+
+    // MME congestion control configs
+    bool congestion_control_enabled = 40;
+
+    // DEPRECATED: now configured in "shared_mconfig"
+    // sentry_config stores the Sentry.io configuration for this service
+    SentryConfig sentry_config = 45 [deprecated = true];
+
+    // Enables 5G Standalone (SA) at a network level
+    bool enable5g_features = 46;
+
+    // AMF Slice Service Type (SST)
+    uint32 amf_default_slice_service_type = 47;
+
+    // AMF Slice Descriptor (SD)
+    string amf_default_slice_differentiator = 48;
+
+    // AMF Name
+    string amf_name = 50;
+
+    // AMF Region ID
+    string amf_region_id = 51;
+
+    // AMF Set ID
+    string amf_set_id = 52;
+
+    // AMF pointer
+    string amf_pointer = 53;
+
+    // SGW S1U ipv6 endpoint on AGW
+    string ipv6_sgw_s1u_addr = 54;
 }
 
+message FederatedModeMap {
+    bool enabled = 1;
+    repeated ModeMapItem mapping = 2;
+}
+
+message ModeMapItem {
+    enum FederatedMode {
+        SPGW_SUBSCRIBER = 0;           // default mode is HSS + spgw_task
+        LOCAL_SUBSCRIBER = 1;          // will use subscriberDb + policydb
+        S8_SUBSCRIBER = 2;             // will use HSS (feg) + s8_task
+    }
+    FederatedMode mode = 1;
+    string plmn = 2;
+    string imsi_range = 3;
+    string apn = 4;
+}
 
 //------------------------------------------------------------------------------
 // SubscriberDB configs
@@ -332,6 +441,12 @@ message SubscriberDB {
 
     // Enable relaying S6a messages via FeG RPC
     bool hss_relay_enabled = 6;
+
+    // Interval in seconds between gateway and cloud sync
+    uint32 sync_interval = 7;
+
+    // Enables 5G Standalone (SA) at a network level
+    bool enable5g_features = 8;
 }
 
 //------------------------------------------------------------------------------
@@ -365,6 +480,23 @@ message ConnectionD {
 }
 
 //------------------------------------------------------------------------------
+// LIAgentD configs
+//------------------------------------------------------------------------------
+message LIAgentD {
+    orc8r.LogLevel log_level = 1;
+    repeated NProbeTask nprobe_tasks = 2;
+}
+
+message NProbeTask {
+    string task_id = 1;
+    string target_id = 2;
+    string target_type = 3;
+    string delivery_type = 4;
+    uint64 correlation_id = 5;
+    string domain_id = 6;
+}
+
+//------------------------------------------------------------------------------
 // DnsD configs
 //------------------------------------------------------------------------------
 message DnsD {
@@ -380,4 +512,35 @@ message GatewayDNSConfigRecordsItems {
   repeated string aaaa_record = 2;
   repeated string cname_record = 3;
   string domain = 4;
+}
+
+//----------------------------------------------------------------------------
+// AgwD configs
+//----------------------------------------------------------------------------
+message AgwD {
+  enum LogLevel {
+    UNSET = 0;
+    DEBUG = 1;
+    INFO = 2;
+    WARN = 3;
+    ERROR = 4;
+  }
+  LogLevel log_level = 1;
+
+  string sctpd_downstream_service_target = 2;
+  string sctpd_upstream_service_target = 3;
+  string mme_sctpd_downstream_service_target = 4;
+  string mme_sctpd_upstream_service_target = 5;
+
+  // Sentry Client Options.
+  // The DSN to use. If the data source name is not set, the client is effectively
+  // disabled.
+  string sentry_dsn = 6;
+}
+
+//------------------------------------------------------------------------------
+// SctpD configs
+//------------------------------------------------------------------------------
+message SctpD {
+  orc8r.LogLevel log_level = 1;
 }

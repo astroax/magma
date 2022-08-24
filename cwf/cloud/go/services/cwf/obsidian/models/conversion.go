@@ -14,7 +14,11 @@
 package models
 
 import (
+	"context"
 	"fmt"
+
+	"github.com/go-openapi/strfmt"
+	"github.com/go-openapi/swag"
 
 	"magma/cwf/cloud/go/cwf"
 	"magma/feg/cloud/go/feg"
@@ -27,10 +31,7 @@ import (
 	"magma/orc8r/cloud/go/services/orchestrator/obsidian/handlers"
 	orc8rModels "magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
 	"magma/orc8r/cloud/go/storage"
-	merrors "magma/orc8r/lib/go/errors"
-
-	"github.com/go-openapi/strfmt"
-	"github.com/go-openapi/swag"
+	"magma/orc8r/lib/go/merrors"
 )
 
 func (m *CwfNetwork) GetEmptyNetwork() handlers.NetworkModel {
@@ -96,7 +97,7 @@ func (m *CwfNetwork) FromConfiguratorNetwork(n configurator.Network) interface{}
 	return m
 }
 
-func (m *CwfGateway) ValidateModel() error {
+func (m *CwfGateway) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
@@ -107,7 +108,7 @@ func (m *CwfGateway) FromBackendModels(
 ) handlers.GatewayModel {
 	mdGW := (&orc8rModels.MagmadGateway{}).FromBackendModels(magmadGateway, device, status)
 	// TODO: we should change this to a reflection based shallow copy
-	m.ID, m.Name, m.Description, m.Magmad, m.Tier, m.Device, m.Status = mdGW.ID, mdGW.Name, mdGW.Description, mdGW.Magmad, mdGW.Tier, mdGW.Device, mdGW.Status
+	m.ID, m.Name, m.Description, m.Magmad, m.Tier, m.Device, m.Status, m.RegistrationInfo = mdGW.ID, mdGW.Name, mdGW.Description, mdGW.Magmad, mdGW.Tier, mdGW.Device, mdGW.Status, mdGW.RegistrationInfo
 	if cwfGateway.Config != nil {
 		m.CarrierWifi = cwfGateway.Config.(*GatewayCwfConfigs)
 	}
@@ -115,7 +116,7 @@ func (m *CwfGateway) FromBackendModels(
 	return m
 }
 
-func (m *MutableCwfGateway) ValidateModel() error {
+func (m *MutableCwfGateway) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
@@ -142,7 +143,7 @@ func (m *MutableCwfGateway) GetAdditionalWritesOnCreate() []configurator.EntityW
 		configurator.EntityUpdateCriteria{
 			Type:              orc8r.MagmadGatewayType,
 			Key:               string(m.ID),
-			AssociationsToAdd: []storage.TypeAndKey{{Type: cwf.CwfGatewayType, Key: string(m.ID)}},
+			AssociationsToAdd: storage.TKs{{Type: cwf.CwfGatewayType, Key: string(m.ID)}},
 		},
 	}
 }
@@ -156,14 +157,12 @@ func (m *MutableCwfGateway) GetAdditionalLoadsOnLoad(gateway configurator.Networ
 }
 
 func (m *MutableCwfGateway) GetAdditionalLoadsOnUpdate() storage.TKs {
-	return []storage.TypeAndKey{{Type: cwf.CwfGatewayType, Key: string(m.ID)}}
+	return storage.TKs{{Type: cwf.CwfGatewayType, Key: string(m.ID)}}
 }
 
-func (m *MutableCwfGateway) GetAdditionalWritesOnUpdate(
-	loadedEntities map[storage.TypeAndKey]configurator.NetworkEntity,
-) ([]configurator.EntityWriteOperation, error) {
+func (m *MutableCwfGateway) GetAdditionalWritesOnUpdate(ctx context.Context, loadedEntities map[storage.TK]configurator.NetworkEntity) ([]configurator.EntityWriteOperation, error) {
 	var ret []configurator.EntityWriteOperation
-	existingEnt, ok := loadedEntities[storage.TypeAndKey{Type: cwf.CwfGatewayType, Key: string(m.ID)}]
+	existingEnt, ok := loadedEntities[storage.TK{Type: cwf.CwfGatewayType, Key: string(m.ID)}]
 	if !ok {
 		return ret, merrors.ErrNotFound
 	}
@@ -184,8 +183,8 @@ func (m *MutableCwfGateway) GetAdditionalWritesOnUpdate(
 	return ret, nil
 }
 
-func (m *GatewayCwfConfigs) FromBackendModels(networkID string, gatewayID string) error {
-	carrierWifi, err := configurator.LoadEntityConfig(networkID, cwf.CwfGatewayType, gatewayID, EntitySerdes)
+func (m *GatewayCwfConfigs) FromBackendModels(ctx context.Context, networkID string, gatewayID string) error {
+	carrierWifi, err := configurator.LoadEntityConfig(ctx, networkID, cwf.CwfGatewayType, gatewayID, EntitySerdes)
 	if err != nil {
 		return err
 	}
@@ -193,7 +192,7 @@ func (m *GatewayCwfConfigs) FromBackendModels(networkID string, gatewayID string
 	return nil
 }
 
-func (m *GatewayCwfConfigs) ToUpdateCriteria(networkID string, gatewayID string) ([]configurator.EntityUpdateCriteria, error) {
+func (m *GatewayCwfConfigs) ToUpdateCriteria(ctx context.Context, networkID string, gatewayID string) ([]configurator.EntityUpdateCriteria, error) {
 	return []configurator.EntityUpdateCriteria{
 		{
 			Type: cwf.CwfGatewayType, Key: gatewayID,
@@ -227,7 +226,7 @@ func (m *LiUes) GetFromNetwork(network configurator.Network) interface{} {
 	return networkConfig.(*NetworkCarrierWifiConfigs).LiUes
 }
 
-func (m *LiUes) ValidateModel() error {
+func (m *LiUes) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
@@ -236,7 +235,7 @@ func (m *CwfHaPair) ToEntity() configurator.NetworkEntity {
 		Type:   cwf.CwfHAPairType,
 		Key:    m.HaPairID,
 		Config: m.Config,
-		Associations: []storage.TypeAndKey{
+		Associations: storage.TKs{
 			{
 				Type: cwf.CwfGatewayType,
 				Key:  m.GatewayID1,
@@ -278,7 +277,7 @@ func (m *CwfHaPair) ToEntityUpdateCriteria() configurator.EntityUpdateCriteria {
 		Type:      cwf.CwfHAPairType,
 		Key:       m.HaPairID,
 		NewConfig: m.Config,
-		AssociationsToSet: []storage.TypeAndKey{
+		AssociationsToSet: storage.TKs{
 			{
 				Type: cwf.CwfGatewayType,
 				Key:  m.GatewayID1,
@@ -297,7 +296,7 @@ func (m *MutableCwfHaPair) ToEntityUpdateCriteria(haPairID string) configurator.
 		Type:      cwf.CwfHAPairType,
 		Key:       haPairID,
 		NewConfig: m.Config,
-		AssociationsToSet: []storage.TypeAndKey{
+		AssociationsToSet: storage.TKs{
 			{
 				Type: cwf.CwfGatewayType,
 				Key:  m.GatewayID1,
@@ -316,7 +315,7 @@ func (m *MutableCwfHaPair) ToEntity() configurator.NetworkEntity {
 		Type:   cwf.CwfHAPairType,
 		Key:    m.HaPairID,
 		Config: m.Config,
-		Associations: []storage.TypeAndKey{
+		Associations: storage.TKs{
 			{
 				Type: cwf.CwfGatewayType,
 				Key:  m.GatewayID1,

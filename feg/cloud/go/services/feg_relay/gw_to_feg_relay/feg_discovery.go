@@ -53,8 +53,8 @@ func RetrieveGatewayIdentity(inCtx context.Context) (*protos.Identity_Gateway, e
 // 5) if not Neutral Host or user PLMN ID doesn't match any configured NH route - FindServingFeGHwId finds the serving
 //    FeG ID of the serving FeG Network
 // Returns serving Federation Gateway ID or error
-func FindServingFeGHwId(agNwID, imsi string) (string, error) {
-	cfg, err := configurator.LoadNetworkConfig(agNwID, feg.FederatedNetworkType, serdes.Network)
+func FindServingFeGHwId(ctx context.Context, agNwID, imsi string) (string, error) {
+	cfg, err := configurator.LoadNetworkConfig(ctx, agNwID, feg.FederatedNetworkType, serdes.Network)
 	if err != nil {
 		return "", status.Errorf(
 			codes.NotFound, "could not load federated network configs for access network %s: %s", agNwID, err)
@@ -66,7 +66,7 @@ func FindServingFeGHwId(agNwID, imsi string) (string, error) {
 	if federatedConfig.FegNetworkID == nil || *federatedConfig.FegNetworkID == "" {
 		return "", status.Errorf(codes.Internal, "FegNetworkID is empty in network config of network: %s", agNwID)
 	}
-	fegCfg, err := configurator.LoadNetworkConfig(*federatedConfig.FegNetworkID, feg.FegNetworkType, serdes.Network)
+	fegCfg, err := configurator.LoadNetworkConfig(ctx, *federatedConfig.FegNetworkID, feg.FegNetworkType, serdes.Network)
 	if err != nil || fegCfg == nil {
 		return "", status.Errorf(
 			codes.Internal, "unable to retrieve config for federation network: %s", *federatedConfig.FegNetworkID)
@@ -86,7 +86,7 @@ func FindServingFeGHwId(agNwID, imsi string) (string, error) {
 			if len(networkFegConfigs.NhRoutes) > 0 && len(imsi) >= MinPlmnIdLen {
 				// findServingNHFeg returns serving NH FeG Hardware ID if found or an empty string
 				// given NH Routing map, calling NH network ID and user IMSI
-				nhFegHwId := findServingNHFeg(networkFegConfigs.NhRoutes, servingFegNetwork, imsi)
+				nhFegHwId := findServingNHFeg(ctx, networkFegConfigs.NhRoutes, servingFegNetwork, imsi)
 				if len(nhFegHwId) > 0 {
 					// Return here only if NH FeG was successfully found
 					// in all other cases - fail back to the legacy logic and try to relay the request to the
@@ -97,8 +97,14 @@ func FindServingFeGHwId(agNwID, imsi string) (string, error) {
 					return nhFegHwId, nil
 				}
 				glog.V(1).Infof("no NH route found for IMSI: %s", imsi)
+			} else if glog.V(1) {
+				if len(networkFegConfigs.NhRoutes) == 0 {
+					glog.Infof("no NH route configured for Gateway Network: %s, IMSI: %s", agNwID, imsi)
+				} else {
+					glog.Infof("no valid IMSI (%s) for Gateway Network: %s", imsi, agNwID)
+				}
 			}
-			return getActiveFeGForNetwork(servingFegNetwork)
+			return getActiveFeGForNetwork(ctx, servingFegNetwork)
 		}
 	}
 	return "", status.Errorf(
@@ -108,7 +114,7 @@ func FindServingFeGHwId(agNwID, imsi string) (string, error) {
 
 // findServingNHFeg returns serving NH FeG Hardware ID if found or an empty string given NH Routing map,
 // calling NH network ID and user IMSI
-func findServingNHFeg(routes models.NhRoutes, nhNetworkId, imsi string) string {
+func findServingNHFeg(ctx context.Context, routes models.NhRoutes, nhNetworkId, imsi string) string {
 	var (
 		servingFegNetworkId string
 		found               bool
@@ -128,7 +134,7 @@ func findServingNHFeg(routes models.NhRoutes, nhNetworkId, imsi string) string {
 		}
 	}
 	// verify that serving FeG network has the NH network in it's configuration
-	fegCfg, err := configurator.LoadNetworkConfig(servingFegNetworkId, feg.FegNetworkType, serdes.Network)
+	fegCfg, err := configurator.LoadNetworkConfig(ctx, servingFegNetworkId, feg.FegNetworkType, serdes.Network)
 	if err != nil || fegCfg == nil {
 		glog.Errorf("unable to retrieve config for NH federation network: %s", servingFegNetworkId)
 		return ""
@@ -140,7 +146,7 @@ func findServingNHFeg(routes models.NhRoutes, nhNetworkId, imsi string) string {
 	}
 	for _, network := range networkFegConfigs.ServedNhIds {
 		if nhNetworkId == network {
-			fegHwId, err := getActiveFeGForNetwork(servingFegNetworkId)
+			fegHwId, err := getActiveFeGForNetwork(ctx, servingFegNetworkId)
 			if err != nil {
 				glog.Errorf(
 					"failed to find active FeG in '%s' NH network for IMSI: %s: %v", servingFegNetworkId, imsi, err)

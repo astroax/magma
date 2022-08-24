@@ -12,9 +12,12 @@ limitations under the License.
 """
 
 from magma.common.redis.client import get_default_client
-from magma.common.redis.serializers import get_proto_deserializer, \
-    get_proto_serializer, RedisSerde
 from magma.common.redis.containers import RedisFlatDict
+from magma.common.redis.serializers import (
+    RedisSerde,
+    get_proto_deserializer,
+    get_proto_serializer,
+)
 from orc8r.protos.service_status_pb2 import ServiceExitStatus
 
 
@@ -27,13 +30,17 @@ class ServiceStateWrapper:
     REDIS_VALUE_TYPE = "systemd_status"
 
     def __init__(self):
-        serde = RedisSerde(self.REDIS_VALUE_TYPE,
-                           get_proto_serializer(),
-                           get_proto_deserializer(ServiceExitStatus))
+        serde = RedisSerde(
+            self.REDIS_VALUE_TYPE,
+            get_proto_serializer(),
+            get_proto_deserializer(ServiceExitStatus),
+        )
         self._flat_dict = RedisFlatDict(get_default_client(), serde)
 
-    def update_service_status(self, service_name: str,
-                              service_status: ServiceExitStatus) -> None:
+    def update_service_status(
+        self, service_name: str,
+        service_status: ServiceExitStatus,
+    ) -> None:
         """
         Update the service exit status for a given service
         """

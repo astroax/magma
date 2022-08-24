@@ -14,19 +14,15 @@
 package handlers
 
 import (
-	"fmt"
 	"net/http"
 
+	"github.com/labstack/echo/v4"
+
 	"magma/orc8r/cloud/go/models"
-	"magma/orc8r/cloud/go/obsidian"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/serdes"
-	eventdh "magma/orc8r/cloud/go/services/eventd/obsidian/handlers"
+	"magma/orc8r/cloud/go/services/obsidian"
 	models2 "magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
-	"magma/orc8r/lib/go/service/config"
-
-	"github.com/labstack/echo"
-	"github.com/olivere/elastic/v7"
 )
 
 const (
@@ -38,6 +34,8 @@ const (
 	ManageNetworkTypePath              = ManageNetworkPath + obsidian.UrlSep + "type"
 	ManageNetworkDescriptionPath       = ManageNetworkPath + obsidian.UrlSep + "description"
 	ManageNetworkFeaturesPath          = ManageNetworkPath + obsidian.UrlSep + "features"
+	ManageNetworkSentryPath            = ManageNetworkPath + obsidian.UrlSep + "sentry"
+	ManageNetworkStatePath             = ManageNetworkPath + obsidian.UrlSep + "state"
 	ManageNetworkDNSPath               = ManageNetworkPath + obsidian.UrlSep + "dns"
 	ManageNetworkDNSRecordsPath        = ManageNetworkDNSPath + obsidian.UrlSep + "records"
 	ManageNetworkDNSRecordByDomainPath = ManageNetworkDNSRecordsPath + obsidian.UrlSep + ":domain"
@@ -65,8 +63,9 @@ const (
 	ManageTierGatewaysPath = ManageTiersPath + obsidian.UrlSep + "gateways"
 	ManageTierGatewayPath  = ManageTierGatewaysPath + obsidian.UrlSep + ":gateway_id"
 
-	LogSearchQueryPath = ManageNetworkPath + obsidian.UrlSep + "logs" + obsidian.UrlSep + "search"
-	LogCountQueryPath  = ManageNetworkPath + obsidian.UrlSep + "logs" + obsidian.UrlSep + "count"
+	About          = "about"
+	Version        = "version"
+	GetVersionPath = obsidian.V1Root + About + obsidian.UrlSep + Version
 )
 
 // GetObsidianHandlers returns all plugin-level obsidian handlers for orc8r
@@ -114,11 +113,16 @@ func GetObsidianHandlers() []obsidian.Handler {
 		{Path: GatewayPingV1, Methods: obsidian.POST, HandlerFunc: gatewayPing},
 		{Path: GatewayGenericCommandV1, Methods: obsidian.POST, HandlerFunc: gatewayGenericCommand},
 		{Path: TailGatewayLogsV1, Methods: obsidian.POST, HandlerFunc: tailGatewayLogs},
+
+		// Version Info
+		{Path: GetVersionPath, Methods: obsidian.GET, HandlerFunc: getVersionHandler},
 	}
 	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkNamePath, new(models.NetworkName), "", serdes.Network)...)
 	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkTypePath, new(models.NetworkType), "", serdes.Network)...)
 	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkDescriptionPath, new(models.NetworkDescription), "", serdes.Network)...)
 	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkFeaturesPath, &models2.NetworkFeatures{}, orc8r.NetworkFeaturesConfig, serdes.Network)...)
+	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkSentryPath, &models2.NetworkSentryConfig{}, "", serdes.Network)...)
+	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkStatePath, &models2.StateConfig{}, "", serdes.Network)...)
 	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkDNSPath, &models2.NetworkDNSConfig{}, orc8r.DnsdNetworkType, serdes.Network)...)
 	ret = append(ret, GetPartialNetworkHandlers(ManageNetworkDNSRecordsPath, new(models2.NetworkDNSRecords), "", serdes.Network)...)
 
@@ -133,32 +137,6 @@ func GetObsidianHandlers() []obsidian.Handler {
 	ret = append(ret, GetPartialEntityHandlers(ManageTierImagesPath, "tier_id", new(models2.TierImages), serdes.Entity)...)
 	ret = append(ret, GetPartialEntityHandlers(ManageTierGatewaysPath, "tier_id", new(models2.TierGateways), serdes.Entity)...)
 
-	// Elastic
-	elasticConfig, err := config.GetServiceConfig(orc8r.ModuleName, "elastic")
-	if err != nil {
-		ret = append(ret, obsidian.Handler{Path: LogSearchQueryPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-		ret = append(ret, obsidian.Handler{Path: LogCountQueryPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-		ret = append(ret, obsidian.Handler{Path: eventdh.EventsPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-	} else {
-		elasticHost := elasticConfig.MustGetString("elasticHost")
-		elasticPort := elasticConfig.MustGetInt("elasticPort")
-
-		client, err := elastic.NewSimpleClient(elastic.SetURL(fmt.Sprintf("http://%s:%d", elasticHost, elasticPort)))
-		if err != nil {
-			ret = append(ret, obsidian.Handler{Path: LogSearchQueryPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-			ret = append(ret, obsidian.Handler{Path: LogCountQueryPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-			ret = append(ret, obsidian.Handler{Path: eventdh.EventsRootPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-			ret = append(ret, obsidian.Handler{Path: eventdh.EventsPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-			ret = append(ret, obsidian.Handler{Path: eventdh.EventsCountPath, Methods: obsidian.GET, HandlerFunc: getInitErrorHandler(err)})
-		} else {
-			ret = append(ret, obsidian.Handler{Path: LogSearchQueryPath, Methods: obsidian.GET, HandlerFunc: GetQueryLogHandler(client)})
-			ret = append(ret, obsidian.Handler{Path: LogCountQueryPath, Methods: obsidian.GET, HandlerFunc: GetCountLogHandler(client)})
-			ret = append(ret, obsidian.Handler{Path: eventdh.EventsRootPath, Methods: obsidian.GET, HandlerFunc: eventdh.GetMultiStreamEventsHandler(client)})
-			ret = append(ret, obsidian.Handler{Path: eventdh.EventsCountPath, Methods: obsidian.GET, HandlerFunc: eventdh.GetEventCountHandler(client)})
-			ret = append(ret, obsidian.Handler{Path: eventdh.EventsPath, Methods: obsidian.GET, HandlerFunc: eventdh.GetEventsHandler(client)})
-		}
-	}
-
 	ret = append(ret, obsidian.Handler{
 		Path:    "/",
 		Methods: obsidian.GET,
@@ -170,10 +148,4 @@ func GetObsidianHandlers() []obsidian.Handler {
 		},
 	})
 	return ret
-}
-
-func getInitErrorHandler(err error) func(c echo.Context) error {
-	return func(c echo.Context) error {
-		return obsidian.HttpError(fmt.Errorf("initialization Error: %v", err), 500)
-	}
 }

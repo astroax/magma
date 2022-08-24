@@ -10,13 +10,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from unittest import TestCase, mock
 from unittest.mock import Mock, patch
 
-from magma.enodebd.tests.test_utils.enb_acs_builder import \
-    EnodebAcsStateMachineBuilder
+import lxml.etree as ET
+from magma.enodebd.tests.test_utils.enb_acs_builder import (
+    EnodebAcsStateMachineBuilder,
+)
 from magma.enodebd.tr069 import models
 from magma.enodebd.tr069.rpc_methods import AutoConfigServer
 from magma.enodebd.tr069.spyne_mods import Tr069Application, Tr069Soap11
@@ -39,14 +40,18 @@ class Tr069Test(TestCase):
             msg = args[1]
             return msg
 
-        self.p = patch.object(AutoConfigServer, '_handle_tr069_message',
-                              Mock(side_effect=side_effect))
+        self.p = patch.object(
+            AutoConfigServer, '_handle_tr069_message',
+            Mock(side_effect=side_effect),
+        )
         self.p.start()
 
-        self.app = Tr069Application([AutoConfigServer],
-                                    models.CWMP_NS,
-                                    in_protocol=Tr069Soap11(validator='soft'),
-                                    out_protocol=Tr069Soap11())
+        self.app = Tr069Application(
+            [AutoConfigServer],
+            models.CWMP_NS,
+            in_protocol=Tr069Soap11(validator='soft'),
+            out_protocol=Tr069Soap11(),
+        )
 
     def tearDown(self):
         self.p.stop()
@@ -63,7 +68,7 @@ class Tr069Test(TestCase):
             "pci": 260,
             "allowEnodebTransmit": False,
             "subframeAssignment": 2,
-            "tac": 1
+            "tac": 1,
         },
 
     def _get_service_config(self):
@@ -84,7 +89,7 @@ class Tr069Test(TestCase):
         in an empty response.
         """
         self.enb_acs_manager.handle_tr069_message = mock.MagicMock(
-            side_effect=Exception('mock exception')
+            side_effect=Exception('mock exception'),
         )
         # stop the patcher because we want to use the above MagicMock
         self.p.stop()
@@ -216,15 +221,19 @@ class Tr069Test(TestCase):
 
         self.assertEqual(ctx.in_object.DeviceId.OUI, '00147F')
         self.assertEqual(
-            ctx.in_object.Event.EventStruct[0].EventCode, '0 BOOTSTRAP')
+            ctx.in_object.Event.EventStruct[0].EventCode, '0 BOOTSTRAP',
+        )
         self.assertEqual(
-            ctx.in_object.Event.EventStruct[2].EventCode, '2 PERIODIC')
+            ctx.in_object.Event.EventStruct[2].EventCode, '2 PERIODIC',
+        )
         self.assertEqual(ctx.in_object.MaxEnvelopes, 2)
         self.assertEqual(
             ctx.in_object.ParameterList.ParameterValueStruct[1].Name,
-            'InternetGatewayDevice.DeviceInfo.SpecVersion')
+            'InternetGatewayDevice.DeviceInfo.SpecVersion',
+        )
         self.assertEqual(
-            str(ctx.in_object.ParameterList.ParameterValueStruct[1].Value), '1.1')
+            str(ctx.in_object.ParameterList.ParameterValueStruct[1].Value), '1.1',
+        )
 
     def test_parse_inform_cavium(self):
         """
@@ -333,13 +342,16 @@ class Tr069Test(TestCase):
 
         self.assertEqual(ctx.in_object.DeviceId.OUI, '000FB7')
         self.assertEqual(
-            ctx.in_object.Event.EventStruct[0].EventCode, '0 BOOTSTRAP')
+            ctx.in_object.Event.EventStruct[0].EventCode, '0 BOOTSTRAP',
+        )
         self.assertEqual(ctx.in_object.MaxEnvelopes, 1)
         self.assertEqual(
             ctx.in_object.ParameterList.ParameterValueStruct[1].Name,
-            'Device.DeviceInfo.SoftwareVersion')
+            'Device.DeviceInfo.SoftwareVersion',
+        )
         self.assertEqual(
-            str(ctx.in_object.ParameterList.ParameterValueStruct[1].Value), '1.0')
+            str(ctx.in_object.ParameterList.ParameterValueStruct[1].Value), '1.0',
+        )
 
     def test_handle_transfer_complete(self):
         """
@@ -402,12 +414,20 @@ class Tr069Test(TestCase):
         self.assertEqual(output_msg.CommandKey, 'Downloading stuff')
         self.assertEqual(output_msg.FaultStruct.FaultCode, 0)
         self.assertEqual(output_msg.FaultStruct.FaultString, '')
-        self.assertEqual(output_msg.StartTime,
-                         datetime(2016, 11, 30, 10, 16, 29,
-                                  tzinfo=timezone(timedelta(0))))
-        self.assertEqual(output_msg.CompleteTime,
-                         datetime(2016, 11, 30, 10, 17, 5,
-                                  tzinfo=timezone(timedelta(0))))
+        self.assertEqual(
+            output_msg.StartTime,
+            datetime(
+                2016, 11, 30, 10, 16, 29,
+                tzinfo=timezone(timedelta(0)),
+            ),
+        )
+        self.assertEqual(
+            output_msg.CompleteTime,
+            datetime(
+                2016, 11, 30, 10, 17, 5,
+                tzinfo=timezone(timedelta(0)),
+            ),
+        )
 
         server.get_out_string(ctx)
         self.assertEqual(ctx.out_error, None)
@@ -415,7 +435,8 @@ class Tr069Test(TestCase):
         xml_tree = XmlTree()
         match = xml_tree.xml_compare(
             xml_tree.convert_string_to_tree(b''.join(ctx.out_string)),
-            xml_tree.convert_string_to_tree(expected_acs_string))
+            xml_tree.convert_string_to_tree(expected_acs_string),
+        )
         self.assertTrue(match)
 
     def test_parse_empty_http(self):
@@ -510,8 +531,10 @@ class Tr069Test(TestCase):
             return AutoConfigServer._generate_acs_to_cpe_request_copy(request)
 
         self.p.stop()
-        self.p = patch.object(AutoConfigServer, '_handle_tr069_message',
-                              side_effect=side_effect)
+        self.p = patch.object(
+            AutoConfigServer, '_handle_tr069_message',
+            side_effect=side_effect,
+        )
         self.p.start()
 
         server = ServerBase(self.app)
@@ -533,7 +556,8 @@ class Tr069Test(TestCase):
         xml_tree = XmlTree()
         match = xml_tree.xml_compare(
             xml_tree.convert_string_to_tree(b''.join(ctx.out_string)),
-            xml_tree.convert_string_to_tree(expected_acs_string))
+            xml_tree.convert_string_to_tree(expected_acs_string),
+        )
         self.assertTrue(match)
 
     def test_generate_set_parameter_values_string(self):
@@ -571,7 +595,7 @@ class Tr069Test(TestCase):
                             <Value xsi:type="xsd:unsignedInt">60</Value>
                         </ParameterValueStruct>
                     </ParameterList>
-                    <ParameterKey>null</ParameterKey>
+                    <ParameterKey xsi:type="xsd:string">SetParameter1</ParameterKey>
                 </cwmp:SetParameterValues>
             </soapenv:Body>
         </soapenv:Envelope>
@@ -607,7 +631,9 @@ class Tr069Test(TestCase):
         param.Value.Data = '60'
         request.ParameterList.ParameterValueStruct.append(param)
 
-        request.ParameterKey = 'null'
+        request.ParameterKey = models.ParameterKeyType()
+        request.ParameterKey.type = 'xsd:string'
+        request.ParameterKey.Data = 'SetParameter1'
 
         def side_effect(*args, **_kwargs):
             ctx = args[0]
@@ -617,8 +643,10 @@ class Tr069Test(TestCase):
             return request
 
         self.p.stop()
-        self.p = patch.object(AutoConfigServer, '_handle_tr069_message',
-                              Mock(side_effect=side_effect))
+        self.p = patch.object(
+            AutoConfigServer, '_handle_tr069_message',
+            Mock(side_effect=side_effect),
+        )
         self.p.start()
 
         server = ServerBase(self.app)
@@ -638,9 +666,18 @@ class Tr069Test(TestCase):
         server.get_out_string(ctx)
 
         xml_tree = XmlTree()
+        NS_SOAP11_ENC = 'soap11enc'
+        NS_SOAP11_ENV = 'soap11env'
+        xml_str = b''.join(ctx.out_string)
+        # Get the namespaces and validate the soap enc and env prefix are right
+        nsmap = xml_tree.get_ns(xml_str)
+        self.assertTrue(NS_SOAP11_ENC in nsmap.keys())
+        self.assertTrue(NS_SOAP11_ENV in nsmap.keys())
+
         match = xml_tree.xml_compare(
-            xml_tree.convert_string_to_tree(b''.join(ctx.out_string)),
-            xml_tree.convert_string_to_tree(expected_acs_string))
+            xml_tree.convert_string_to_tree(xml_str),
+            xml_tree.convert_string_to_tree(expected_acs_string),
+        )
         self.assertTrue(match)
 
     def test_parse_fault_response(self):
@@ -694,11 +731,13 @@ class Tr069Test(TestCase):
         self.assertEqual(output_msg.FaultString, 'Invalid arguments')
         self.assertEqual(
             output_msg.SetParameterValuesFault[1].ParameterName,
-            'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Username')
+            'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.3.WANPPPConnection.1.Username',
+        )
         self.assertEqual(output_msg.SetParameterValuesFault[1].FaultCode, 9003)
         self.assertEqual(
             output_msg.SetParameterValuesFault[1].FaultString,
-            'Invalid arguments')
+            'Invalid arguments',
+        )
 
     def test_parse_hex_values(self):
         """
@@ -772,6 +811,10 @@ class XmlTree():
 
         return ET.fromstring(xmlString)
 
+    @staticmethod
+    def get_ns(xmlString):
+        return ET.fromstring(xmlString).nsmap
+
     def xml_compare(self, x1, x2, excludes=None):
         """
         Compares two xml etrees
@@ -789,14 +832,18 @@ class XmlTree():
         for name, value in x1.attrib.items():
             if name not in excludes:
                 if x2.attrib.get(name) != value:
-                    print('Attributes do not match: %s=%r, %s=%r'
-                          % (name, value, name, x2.attrib.get(name)))
+                    print(
+                        'Attributes do not match: %s=%r, %s=%r'
+                        % (name, value, name, x2.attrib.get(name)),
+                    )
                     return False
         for name in x2.attrib.keys():
             if name not in excludes:
                 if name not in x1.attrib:
-                    print('x2 has an attribute x1 is missing: %s'
-                          % name)
+                    print(
+                        'x2 has an attribute x1 is missing: %s'
+                        % name,
+                    )
                     return False
         if not self.text_compare(x1.text, x2.text):
             print('text: %r != %r' % (x1.text, x2.text))
@@ -807,16 +854,20 @@ class XmlTree():
         cl1 = x1.getchildren()
         cl2 = x2.getchildren()
         if len(cl1) != len(cl2):
-            print('children length differs, %i != %i'
-                  % (len(cl1), len(cl2)))
+            print(
+                'children length differs, %i != %i'
+                % (len(cl1), len(cl2)),
+            )
             return False
         i = 0
         for c1, c2 in zip(cl1, cl2):
             i += 1
             if c1.tag not in excludes:
                 if not self.xml_compare(c1, c2, excludes):
-                    print('children %i do not match: %s'
-                          % (i, c1.tag))
+                    print(
+                        'children %i do not match: %s'
+                        % (i, c1.tag),
+                    )
                     return False
         return True
 

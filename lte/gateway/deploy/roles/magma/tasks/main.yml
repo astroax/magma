@@ -10,6 +10,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+- name: Fix resolve conf
+  ansible.builtin.file:
+    src: /var/run/systemd/resolve/resolv.conf
+    dest: /etc/resolv.conf
+    state: link
+    force: yes
+
+- name: Set hostname
+  become: yes
+  ansible.builtin.hostname:
+    name: magma-dev
+  when: full_provision
+
+
 - name: Include vars of all.yaml
   include_vars:
     file: all.yaml
@@ -37,6 +51,7 @@
     - lighttpd
     - sessiond
     - connectiond
+    - liagentd
   when: full_provision
 
 - name: Copy sctpd service file
@@ -71,6 +86,34 @@
   copy: src=99-magma.conf dest=/etc/sysctl.d/99-magma.conf
   when: full_provision
 
+- name: Copy set_irq_affinity
+  copy: src=set_irq_affinity dest=/usr/local/bin/set_irq_affinity mode=751
+  when: full_provision
+
+- name: Copy magma-bridge-reset.sh
+  copy: src=magma-bridge-reset.sh dest=/usr/local/bin/magma-bridge-reset.sh mode=751
+  when: full_provision
+
+- name: Copy magma-setup-wg.sh
+  copy: src=magma-setup-wg.sh dest=/usr/local/bin/magma-setup-wg.sh mode=751
+  when: full_provision
+
+- name: Copy magma-create-gtp-port.sh
+  copy: src=magma-create-gtp-port.sh dest=/usr/local/bin/magma-create-gtp-port.sh mode=751
+  when: full_provision
+
+- name: Add the sysctl config from the step before
+  become: yes
+  command: 'sysctl -p /etc/sysctl.d/99-magma.conf'
+  when: full_provision
+
+- name: Set core ulimit to unlimited
+  pam_limits:
+    domain: '*'
+    limit_item: core
+    limit_type: '-'
+    value: unlimited
+
 - name: Create the /var/core directory
   file: path=/var/core state=directory
   when: full_provision
@@ -83,6 +126,7 @@
     remote_src: yes
   with_items:
     - config_stateless_agw.py
+    - config_iface_for_ipv6.py
     - create_oai_certs.py
     - generate_oai_config.py
     - generate_dnsd_config.py
@@ -96,18 +140,8 @@
   copy: src=configure_envoy_namespace.sh dest=/usr/local/bin/configure_envoy_namespace.sh
   when: full_provision
 
-- name: Create symlink for stateless scripts
-  file: src="{{ magma_root }}/lte/gateway/deploy/roles/magma/files/config_stateless_{{ item }}.sh" path="/usr/local/bin/config_stateless_{{ item }}.sh" state=link force=yes follow=no
-  with_items:
-    - agw
-    - mobilityd
-    - mme
-    - pipelined
-    - sctpd
-    - sessiond
-
 - name: Create symlink for sctpd binary
-  file: src='{{ c_build }}/sctpd/sctpd' path=/usr/local/sbin/sctpd state=link force=yes follow=no
+  file: src='{{ c_build }}/sctpd/src/sctpd' path=/usr/local/sbin/sctpd state=link force=yes follow=no
   when: full_provision
 
 - name: Create symlink for OAI mme binary
@@ -127,7 +161,11 @@
   when: full_provision
 
 - name: Create symlink for connectiond binary
-  file: src='{{ c_build }}/connection_tracker/connectiond' path=/usr/local/bin/connectiond state=link force=yes follow=no
+  file: src='{{ c_build }}/connection_tracker/src/connectiond' path=/usr/local/bin/connectiond state=link force=yes follow=no
+  when: full_provision
+
+- name: Create symlink for li agent binary
+  file: src='{{ c_build }}/li_agent/src/liagentd' path=/usr/local/bin/liagentd state=link force=yes follow=no
   when: full_provision
 
 - name: Create symlink for corefile collection script
@@ -160,6 +198,15 @@
   sysctl: name="net.ipv4.ip_forward" value=1 sysctl_set=yes state=present reload=yes
   when: full_provision
 
+# Explicitly set policy to stop docker from blocking everything
+# https://docs.docker.com/network/iptables/#docker-on-a-router
+- name: Allow forwarding in iptables
+  iptables:
+    chain: FORWARD
+    policy: ACCEPT
+  become: yes
+  when: full_provision
+
 - name: Install OpenAirInterface (OAI) dependencies
   retries: 5
   when: preburn
@@ -180,9 +227,17 @@
       - oai-freediameter
       - prometheus-cpp-dev
       - libczmq-dev
+      - libczmq-dev
+
+- name: Install LI Agent dependencies
+  retries: 5
+  apt:
+    state: present
+    update_cache: yes
+    pkg:
+      - uuid-dev
 
 - name: Fix vport-gtp kernel module for Ubuntu Focal
-  when: ansible_distribution == "Ubuntu"
   become: yes
   block:
     - shell: rmmod openvswitch
@@ -190,28 +245,14 @@
     - shell: modprobe vport-gtp
       ignore_errors: yes
 
-- name: Install Debian Magma gateway dev dependencies
-  retries: 5
-  when: preburn and ansible_distribution == "Debian"
-  apt:
-    state: present
-    update_cache: no
-    pkg:
-      - libconfig8-dev
-
 - name: Install Ubuntu Magma gateway dev dependencies
   retries: 5
-  when: preburn and ansible_distribution == "Ubuntu"
+  when: preburn
   apt:
     state: present
     update_cache: no
     pkg:
       - libconfig-dev
-
-- name: Overwrite linux 4.9 GTP module with patched module
-  apt: pkg=oai-gtp=4.9-5 state=present update_cache=yes dpkg_options=force-overwrite
-  retries: 5
-  when: preburn and ansible_distribution == "Debian"
 
 - name: Install common Magma dependencies
   retries: 5
@@ -223,9 +264,15 @@
       # install prometheus
       - prometheus-cpp-dev
       # install openvswitch
+      - libopenvswitch
+      - libopenvswitch-dev
+      - magma-libfluid
+      - openvswitch-common
+      - openvswitch-datapath-dkms
+      - openvswitch-doc
       - openvswitch-switch
       - openvswitch-test
-      - magma-libfluid
+      - python3-openvswitch
       # install lxml
       - python3-lxml
       - bridge-utils
@@ -233,55 +280,47 @@
       - libyaml-cpp-dev
       - libgoogle-glog-dev
       # folly deps
-      - libfolly-dev
-      - libdouble-conversion-dev
       - libboost-chrono-dev
-      - redis-server
-      - python-redis
+      - libdouble-conversion-dev
+      - libfolly-dev
       - magma-cpp-redis
+      - python-redis
+      - redis-server
       # Time synchronization with NTP for eventd
       - ntpdate
       # For call tracing
       - tshark
-
-- name: Install debian Magma dependencies
-  retries: 5
-  when: preburn and ansible_distribution == "Debian"
-  apt:
-    state: present
-    update_cache: yes
-    pkg:
-      - openvswitch-datapath-module-4.9.0-9-amd64
-      - python-openvswitch
-      - nlohmann-json-dev
+      - getenvoy-envoy
+      # eBPF compile and load tools for kernsnoopd and AGW datapath
+      # Ubuntu bcc lib (bpfcc-tools) is pretty old, use magma repo package
+      - bcc-tools
 
 - name: Install ubuntu Magma dependencies
   retries: 5
-  when: preburn and ansible_distribution == "Ubuntu"
+  when: preburn
   apt:
     state: present
     update_cache: yes
     pkg:
       - python3-openvswitch
       - nlohmann-json3-dev
+      # managing gtp interface
+      - ifupdown
 
 - name: Copy the gtp interface initialization definition
   copy:
     src: magma_ifaces_gtp
     dest: /etc/network/interfaces.d/gtp
-  when: full_provision and ansible_distribution == "Debian"
-
-- name: Preload the GTP module
-  ignore_errors: yes
-  modprobe:
-    name: gtp
-    state: present
   when: full_provision
 
-- name: Persist preloading the GTP module on boot
-  copy:
-    src: magma_modules_load
-    dest: /etc/modules-load.d/magma.conf
+- name: Configure IPv6 address on eth0 interface
+  blockinfile:
+    block: |
+        iface eth0 inet6 static
+              address 2020::10/64
+              gateway 2020::1
+    insertafter: "iface eth0 inet dhcp"
+    path: "/etc/network/interfaces"
   when: full_provision
 
 - name: Delete the OVS bridge on system initialization
@@ -311,7 +350,7 @@
 
 - name: Download golang tar
   get_url:
-    url: "https://storage.googleapis.com/golang/go{{ all_vars.GO_VERSION }}.linux-amd64.tar.gz"
+    url: "https://artifactory.magmacore.org/artifactory/generic/go{{ all_vars.GO_VERSION }}.linux-amd64.tar.gz"
     dest: "{{ all_vars.WORK_DIR }}"
     mode: 0440
   when: preburn
@@ -321,6 +360,16 @@
     src: "{{all_vars.WORK_DIR}}/go{{ all_vars.GO_VERSION }}.linux-amd64.tar.gz"
     dest: /usr/local
     copy: no
+  when: preburn
+
+- name: Set Go environment vars in profile
+  lineinfile:
+    dest: "/home/{{ ansible_user }}/.profile"
+    state: present
+    line: "{{ item }}"
+  with_items:
+    - export PATH=$PATH:/usr/local/bin/go/
+    - export PATH=$PATH:$(go env GOPATH)/bin/
   when: preburn
 
 - name: Install dnsmasq
@@ -348,9 +397,15 @@
     state: restarted
   when: full_provision
 
+- name: Restart OVS
+  ignore_errors: yes
+  shell: |
+    ifdown gtp_br0
+    /etc/init.d/openvswitch-switch  force-reload-kmod
+
 - name: Bring up ovs bridge
   ignore_errors: yes
-  shell: ifup --allow=ovs {{ item }}
+  shell: ifup -i /etc/network/interfaces.d/gtp {{ item }}
   with_items:
     - gtp_br0
     - uplink_br0
@@ -363,4 +418,110 @@
     - eth0
     - mtr0
     - ipfix0
+    - li_port
+  when: full_provision
+
+- name: Copy ryu ipfix patch for 3.5
+  copy:
+    src: nx_actions.py
+    dest: /home/vagrant/build/python/lib/python3.5/site-packages/ryu/ofproto/
+  when: full_provision
+
+- name: Copy ryu ipfix patch for 3.8
+  copy:
+    src: nx_actions_3.5.py
+    dest: /home/vagrant/build/python/lib/python3.8/site-packages/ryu/ofproto/nx_actions.py
+  when: full_provision
+  ignore_errors: true
+
+- name: Copy ryu qfi patch1 for 3.8
+  copy:
+    src: patches/0002-QFI-value-set-in-Openflow-controller-using-RYU.patch
+    dest: /home/vagrant/build/python/lib/python3.8/site-packages/ryu/ofproto/nicira_ext.py
+  when: full_provision
+  ignore_errors: true
+
+- name: Copy ryu qfi patch2 for 3.8
+  copy:
+    src: patches/0003-QFI-value-set-in-Openflow-controller-using-RYU.patch
+    dest: /home/vagrant/build/python/lib/python3.8/site-packages/ryu/ofproto/nx_match.py
+  when: full_provision
+  ignore_errors: true
+
+- name: Change build folder ownership
+  ansible.builtin.file:
+    path: /home/vagrant/build
+    owner: vagrant
+    group: vagrant
+    recurse: yes
+
+- name: Install dev requirements only used for Magma VM
+  retries: 5
+  apt:
+    state: latest
+    pkg:
+      - clangd-12
+      - lld
+      - clang-format-11
+  when: preburn
+
+- name: Create a symlink for clangd
+  file:
+    src: '/usr/bin/clangd-12'
+    path: '/usr/bin/clangd'
+    state: link
+    force: yes
+  when: preburn
+
+- name: Create a symlink for clang-format
+  file:
+    src: '/usr/bin/clang-format-11'
+    path: '/usr/bin/clang-format'
+    state: link
+    force: yes
+  when: preburn
+
+# TODO: Fix magma-dev VM box and remove this step.
+- name: Install Magma dependencies
+  retries: 5
+  apt:
+    state: latest
+    pkg:
+      - magma-libfluid
+
+- name: Create eBPF code dir
+  command: 'mkdir /var/opt/magma/ebpf/ -p'
+  when: full_provision
+
+- name: Prepare AGW for eBPF
+  command: 'apt-get -y install bcc-tools linux-headers-5.4.0-74-generic'
+  when: full_provision
+
+- name: Copy eBPF code
+  copy:
+    src: '{{ magma_root }}/lte/gateway/python/magma/pipelined/ebpf/{{ item }}'
+    dest: /var/opt/magma/ebpf/{{ item }}
+    force: yes
+    remote_src: yes
+  with_items:
+    - ebpf_ul_handler.c
+    - ebpf_dl_handler.c
+  when: full_provision
+
+
+- name: Copy eBPF code
+  copy:
+    src: '{{ magma_root }}/orc8r/gateway/c/common/ebpf/EbpfMap.h'
+    dest: /var/opt/magma/ebpf/EbpfMap.h
+    force: yes
+    remote_src: yes
+  when: full_provision
+
+# TODO: preburn this and add it under MME(OAI) dependencies
+- name: Install SQLite3 C++ library
+  retries: 5
+  apt:
+    state: latest
+    pkg:
+      - libsqlite3-dev
   when: full_provision

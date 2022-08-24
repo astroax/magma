@@ -14,14 +14,14 @@ limitations under the License.
 package storage
 
 import (
+	"github.com/golang/protobuf/proto"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"magma/orc8r/cloud/go/blobstore"
 	accessprotos "magma/orc8r/cloud/go/services/accessd/protos"
 	"magma/orc8r/cloud/go/storage"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/golang/protobuf/proto"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -37,11 +37,11 @@ const (
 )
 
 type accessdBlobstore struct {
-	factory blobstore.BlobStorageFactory
+	factory blobstore.StoreFactory
 }
 
 // NewAccessdBlobstore returns an initialized instance of accessdBlobstore as AccessdStorage.
-func NewAccessdBlobstore(factory blobstore.BlobStorageFactory) AccessdStorage {
+func NewAccessdBlobstore(factory blobstore.StoreFactory) AccessdStorage {
 	return &accessdBlobstore{factory: factory}
 }
 
@@ -145,7 +145,7 @@ func (a *accessdBlobstore) PutACL(id *protos.Identity, acl *accessprotos.AccessC
 		return status.Error(codes.InvalidArgument, "nil AccessControl_List")
 	}
 
-	store, err := a.factory.StartTransaction(&storage.TxOptions{})
+	store, err := a.factory.StartTransaction(nil)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to start transaction: %s", err)
 	}
@@ -157,7 +157,7 @@ func (a *accessdBlobstore) PutACL(id *protos.Identity, acl *accessprotos.AccessC
 	}
 
 	blob := blobstore.Blob{Type: AccessdDefaultType, Key: id.HashString(), Value: marshaledACL}
-	err = store.CreateOrUpdate(placeholderNetworkID, blobstore.Blobs{blob})
+	err = store.Write(placeholderNetworkID, blobstore.Blobs{blob})
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to put acl: %s", err)
 	}
@@ -177,13 +177,13 @@ func (a *accessdBlobstore) UpdateACLWithEntities(id *protos.Identity, entities [
 		return status.Error(codes.InvalidArgument, "nil AccessControl_Entity slice")
 	}
 
-	store, err := a.factory.StartTransaction(&storage.TxOptions{})
+	store, err := a.factory.StartTransaction(nil)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to start transaction: %s", err)
 	}
 	defer store.Rollback()
 
-	blobRecvd, err := store.Get(placeholderNetworkID, storage.TypeAndKey{Type: AccessdDefaultType, Key: id.HashString()})
+	blobRecvd, err := store.Get(placeholderNetworkID, storage.TK{Type: AccessdDefaultType, Key: id.HashString()})
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to get acl: %s", err)
 	}
@@ -205,7 +205,7 @@ func (a *accessdBlobstore) UpdateACLWithEntities(id *protos.Identity, entities [
 	}
 
 	blobPut := blobstore.Blob{Type: AccessdDefaultType, Key: id.HashString(), Value: marshaledACL}
-	err = store.CreateOrUpdate(placeholderNetworkID, blobstore.Blobs{blobPut})
+	err = store.Write(placeholderNetworkID, blobstore.Blobs{blobPut})
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to put acl: %s", err)
 	}
@@ -223,14 +223,14 @@ func (a *accessdBlobstore) DeleteACL(id *protos.Identity) error {
 		return status.Error(codes.InvalidArgument, "nil Identity")
 	}
 
-	store, err := a.factory.StartTransaction(&storage.TxOptions{})
+	store, err := a.factory.StartTransaction(nil)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to start transaction: %s", err)
 	}
 	defer store.Rollback()
 
-	tk := storage.TypeAndKey{Type: AccessdDefaultType, Key: id.HashString()}
-	err = store.Delete(placeholderNetworkID, []storage.TypeAndKey{tk})
+	tk := storage.TK{Type: AccessdDefaultType, Key: id.HashString()}
+	err = store.Delete(placeholderNetworkID, storage.TKs{tk})
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to delete acl: %s", err)
 	}

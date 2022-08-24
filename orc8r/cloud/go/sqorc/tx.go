@@ -62,8 +62,7 @@ func CloseRowsLogOnError(rows *sql.Rows, callsite string) {
 	if rows == nil {
 		return
 	}
-
 	if err := rows.Close(); err != nil {
-		glog.Errorf("error closing *Rows in %s: %s", callsite, err)
+		glog.Errorf("Error closing sql rows in %s: %+v", callsite, err)
 	}
 }

@@ -12,18 +12,19 @@ limitations under the License.
 """
 
 from lte.protos.policydb_pb2 import PolicyRule
-
 from magma.common.redis.client import get_default_client
 from magma.common.redis.containers import RedisHashDict
-from magma.common.redis.serializers import get_proto_deserializer, \
-    get_proto_serializer
+from magma.common.redis.serializers import (
+    get_proto_deserializer,
+    get_proto_serializer,
+)
 
 
 class PolicyRuleDict(RedisHashDict):
     """
-    PolicyRuleDict uses the RedisHashDict collection to store a mapping of policy
-    rule ids to PolicyRules. Setting and deleting items in the dictionary syncs
-    with Redis automatically
+    PolicyRuleDict uses the RedisHashDict collection to store a mapping of
+    policy rule ids to PolicyRules.
+    Setting and deleting items in the dictionary syncs with Redis automatically
     """
     _DICT_HASH = "policydb:rules"
     _NOTIFY_CHANNEL = "policydb:rules:stream_update"
@@ -34,12 +35,14 @@ class PolicyRuleDict(RedisHashDict):
             client,
             self._DICT_HASH,
             get_proto_serializer(),
-            get_proto_deserializer(PolicyRule))
+            get_proto_deserializer(PolicyRule),
+        )
 
     def send_update_notification(self):
         """
-        Use Redis pub/sub channels to send notifications. Subscribers can listen
-        to this channel to know when an update is done to the policy store
+        Use Redis pub/sub channels to send notifications. Subscribers can
+        listen to this channel to know when an update is done to the policy
+        store
         """
         self.redis.publish(self._NOTIFY_CHANNEL, "Stream Update")
 

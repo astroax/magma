@@ -16,6 +16,7 @@ limitations under the License.
 import argparse
 
 from lte.protos.subscriberdb_pb2 import (
+    CoreNetworkType,
     GSMSubscription,
     LTESubscription,
     SubscriberData,
@@ -23,10 +24,9 @@ from lte.protos.subscriberdb_pb2 import (
     SubscriberUpdate,
 )
 from lte.protos.subscriberdb_pb2_grpc import SubscriberDBStub
-from orc8r.protos.common_pb2 import Void
-
 from magma.common.rpc_utils import grpc_wrapper
 from magma.subscriberdb.sid import SIDUtils
+from orc8r.protos.common_pb2 import Void
 
 
 @grpc_wrapper
@@ -34,6 +34,7 @@ def add_subscriber(client, args):
     gsm = GSMSubscription()
     lte = LTESubscription()
     state = SubscriberState()
+    sub_network = CoreNetworkType()
 
     if len(args.gsm_auth_tuple) != 0:
         gsm.state = GSMSubscription.ACTIVE
@@ -50,8 +51,21 @@ def add_subscriber(client, args):
     if args.lte_auth_opc is not None:
         lte.auth_opc = bytes.fromhex(args.lte_auth_opc)
 
+    if args.forbidden_network_types is not None:
+        if (len(args.forbidden_network_types.split(",")) > 2):
+            print("Forbidden Core Network Types are NT_5GC, NT_EPC")
+            return
+        for n in args.forbidden_network_types.split(","):
+            if n == "NT_5GC":
+                sub_network.forbidden_network_types.extend([CoreNetworkType.NT_5GC])
+            elif n == "NT_EPC":
+                sub_network.forbidden_network_types.extend([CoreNetworkType.NT_EPC])
+            else:
+                print("Invalid Network type, Forbidden Core Network Types are NT_5GC, NT_EPC")
+                return
+
     data = SubscriberData(
-        sid=SIDUtils.to_pb(args.sid), gsm=gsm, lte=lte, state=state,
+        sid=SIDUtils.to_pb(args.sid), gsm=gsm, lte=lte, state=state, sub_network=sub_network,
     )
     client.AddSubscriber(data)
 
@@ -122,7 +136,7 @@ def update_subscriber(client, args):
             if len(apn_val) != 12:
                 print(
                     "Incorrect APN parameters."
-                    "Please check: subscriber_cli.py update -h"
+                    "Please check: subscriber_cli.py update -h",
                 )
                 return
             apn_dict = dict(zip(apn_keys, apn_val))
@@ -131,10 +145,10 @@ def update_subscriber(client, args):
             apn_config.qos_profile.class_id = int(apn_dict[qci])
             apn_config.qos_profile.priority_level = int(apn_dict[priority])
             apn_config.qos_profile.preemption_capability = int(
-                apn_dict[pre_cap]
+                apn_dict[pre_cap],
             )
             apn_config.qos_profile.preemption_vulnerability = int(
-                apn_dict[pre_vul]
+                apn_dict[pre_vul],
             )
             apn_config.ambr.max_bandwidth_ul = int(apn_dict[ul])
             apn_config.ambr.max_bandwidth_dl = int(apn_dict[dl])
@@ -177,7 +191,8 @@ def create_parser():
     """
     parser = argparse.ArgumentParser(
         description='Management CLI for SubscriberDB',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
     # Add subcommands
     subparsers = parser.add_subparsers(title="subcommands", dest="cmd")
@@ -209,6 +224,7 @@ def create_parser():
             type=int,
             help="LTE authentication seq number (hex digits)",
         )
+        cmd.add_argument("--forbidden-network-types", help="Core NetworkType Restriction")
 
     for cmd in [parser_update]:
         cmd.add_argument(

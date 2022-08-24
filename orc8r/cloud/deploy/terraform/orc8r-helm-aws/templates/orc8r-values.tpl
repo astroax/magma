@@ -22,6 +22,17 @@ secret:
     orc8r: ${configs_secret}
   envdir: ${envdir_secret}
 
+# certs sub-chart configuration.
+certs:
+  create: ${managed_certs_create}
+  enabled: ${managed_certs_enabled}
+  domainName: ${managed_certs_domain_name}
+  nms:
+    customIssuer: ${nms_custom_issuer}
+  route53:
+    enabled: ${managed_certs_route53_enabled}
+    region: ${region}
+
 nginx:
   create: true
 
@@ -34,6 +45,8 @@ nginx:
   service:
     enabled: true
     legacyEnabled: true
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "magma-uuid=${magma_uuid}"
     extraAnnotations:
       proxy:
         external-dns.alpha.kubernetes.io/hostname: ${api_hostname}
@@ -52,6 +65,10 @@ controller:
   image:
     repository: ${docker_registry}/controller
     tag: "${docker_tag}"
+    env:
+      orc8r_domain_name: "${orc8r_domain_name}"
+      version_tag: "${docker_tag}"
+      helm_version_tag: "${orc8r_chart_version}"
   replicas: ${controller_replicas}
   spec:
     database:
@@ -77,36 +94,36 @@ metrics:
             claimName: ${metrics_pvc_promcfg}
 
   prometheus:
-    create: true
+    create: ${enable_metrics}
     includeOrc8rAlerts: true
     prometheusCacheHostname: ${prometheus_cache_hostname}
     alertmanagerHostname: ${alertmanager_hostname}
 
   alertmanager:
-    create: true
+    create: ${enable_metrics}
 
   prometheusConfigurer:
-    create: true
+    create: ${enable_metrics}
     image:
       repository: docker.io/facebookincubator/prometheus-configurer
       tag: ${prometheus_configurer_version}
     prometheusURL: ${prometheus_url}
 
   alertmanagerConfigurer:
-    create: true
+    create: ${enable_metrics}
     image:
       repository: docker.io/facebookincubator/alertmanager-configurer
       tag: ${alertmanager_configurer_version}
     alertmanagerURL: ${alertmanager_url}
 
   prometheusCache:
-    create: true
+    create: ${enable_metrics}
     image:
       repository: docker.io/facebookincubator/prometheus-edge-hub
       tag: 1.1.0
     limit: 500000
   grafana:
-    create: false
+    create: ${enable_metrics}
 
   userGrafana:
     image:
@@ -115,17 +132,21 @@ metrics:
     create: ${create_usergrafana}
     volumes:
       datasources:
-        persistentVolumeClaim:
-          claimName: ${grafana_pvc_grafanaDatasources}
+        volumeSpec:
+          persistentVolumeClaim:
+            claimName: ${grafana_pvc_grafanaDatasources}
       dashboardproviders:
-        persistentVolumeClaim:
-          claimName: ${grafana_pvc_grafanaProviders}
+        volumeSpec:
+          persistentVolumeClaim:
+            claimName: ${grafana_pvc_grafanaProviders}
       dashboards:
-        persistentVolumeClaim:
-          claimName: ${grafana_pvc_grafanaDashboards}
+        volumeSpec:
+          persistentVolumeClaim:
+            claimName: ${grafana_pvc_grafanaDashboards}
       grafanaData:
-        persistentVolumeClaim:
-          claimName: ${grafana_pvc_grafanaData}
+        volumeSpec:
+          persistentVolumeClaim:
+            claimName: ${grafana_pvc_grafanaData}
 
   thanos:
     enabled: ${thanos_enabled}
@@ -170,6 +191,9 @@ nms:
   secret:
     certs: ${nms_certs_secret}
 
+  certs:
+    enabled: ${nms_managed_certs_enabled}
+
   magmalte:
     create: true
 
@@ -179,10 +203,14 @@ nms:
 
     env:
       api_host: ${api_hostname}
-      mysql_db: ${nms_db_name}
-      mysql_host: ${nms_db_host}
-      mysql_user: ${nms_db_user}
+      mysql_db: ${orc8r_db_name}
+      mysql_dialect: ${orc8r_db_dialect}
+      mysql_host: ${orc8r_db_host}
+      mysql_port: ${orc8r_db_port}
+      mysql_user: ${orc8r_db_user}
+      mysql_pass: ${orc8r_db_pass}
       grafana_address: ${user_grafana_hostname}
+      version_tag: "${docker_tag}"
 
   nginx:
     create: true
@@ -191,6 +219,7 @@ nms:
       type: LoadBalancer
       annotations:
         external-dns.alpha.kubernetes.io/hostname: "${nms_hostname}"
+        service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "magma-uuid=${magma_uuid}"
 
     deployment:
       spec:
@@ -198,4 +227,58 @@ nms:
         ssl_cert_key_name: controller.key
 
 logging:
-  enabled: false
+  enabled: ${enable_logging}
+
+dp:
+  create: ${dp_enabled}
+
+  configuration_controller:
+    sasEndpointUrl: "${dp_sas_endpoint_url}"
+    image:
+      repository: "${docker_registry}/configuration-controller"
+      tag: "${docker_tag}"
+
+    database:
+      driver: postgres
+      db: ${orc8r_db_name}
+      host: ${orc8r_db_host}
+      port: ${orc8r_db_port}
+      user: ${orc8r_db_user}
+      pass: ${orc8r_db_pass}
+
+  protocol_controller:
+    enabled: false
+    image:
+      repository: "${docker_registry}/protocol-controller"
+      tag: "${docker_tag}"
+
+  radio_controller:
+    image:
+      repository: "${docker_registry}/radio-controller"
+      tag: "${docker_tag}"
+
+    database:
+      driver: postgres
+      db: ${orc8r_db_name}
+      host: ${orc8r_db_host}
+      port: ${orc8r_db_port}
+      user: ${orc8r_db_user}
+      pass: ${orc8r_db_pass}
+
+  active_mode_controller:
+    image:
+      repository: "${docker_registry}/active-mode-controller"
+      tag: "${docker_tag}"
+
+  db_service:
+    image:
+      repository: "${docker_registry}/db-service"
+      tag: "${docker_tag}"
+
+    database:
+      driver: postgres
+      db: ${orc8r_db_name}
+      host: ${orc8r_db_host}
+      port: ${orc8r_db_port}
+      user: ${orc8r_db_user}
+      pass: ${orc8r_db_pass}

@@ -2,6 +2,7 @@
 !.cache/test_certs
 !fb/config/
 
+!.devcontainer/
 !third_party/
 
 !cwf/cloud/
@@ -50,6 +51,20 @@
 !orc8r/tools/ansible/roles/fluent_bit/files
 !orc8r/tools/docker/
 
+!dp/cloud/docker/python/test_runner/entrypoint.sh
+!dp/cloud/go/
+!dp/cloud/python/
+!dp/protos/
+!dp/Makefile
+
+!build/gen
+
 !protos/
 
-!xwf/gateway/
+!bazel/
+!*.bzl
+!*.bazel
+!*.BUILD
+!.bazelrc
+!.bazelignore
+!.bazelversion

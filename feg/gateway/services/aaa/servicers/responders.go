@@ -15,12 +15,12 @@ limitations under the License.
 package servicers
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 
 	fegprotos "magma/feg/cloud/go/protos"
@@ -210,7 +210,7 @@ func (srv *accountingService) TerminateRegistration(
 	return res, err
 }
 
-// CancelLocation fulfils S6a's CLR and disconnect UE from AAA if successful
+// CancelLocation fulfills S6a's CLR and disconnect UE from AAA if successful
 func (srv *accountingService) CancelLocation(
 	_ context.Context, req *fegprotos.CancelLocationRequest) (*fegprotos.CancelLocationAnswer, error) {
 
@@ -226,7 +226,7 @@ func (srv *accountingService) CancelLocation(
 	return res, nil
 }
 
-// Reset fulfils S6a's RSR and disconnect UE from AAA if successful
+// Reset fulfills S6a's RSR and disconnect UE from AAA if successful
 func (srv *accountingService) Reset(_ context.Context, req *fegprotos.ResetRequest) (*fegprotos.ResetAnswer, error) {
 	res := &fegprotos.ResetAnswer{}
 	if req == nil {
@@ -235,7 +235,7 @@ func (srv *accountingService) Reset(_ context.Context, req *fegprotos.ResetReque
 	imsis := req.GetUserId()
 	if len(imsis) == 0 { // we do not support reset all request
 		glog.Warning("S6a Reset ALL is not supported")
-		res.ErrorCode = fegprotos.ErrorCode_COMMAND_UNSUPORTED
+		res.ErrorCode = fegprotos.ErrorCode_COMMAND_UNSUPPORTED
 		return res, nil
 	}
 	for _, imsi := range imsis {
@@ -265,9 +265,7 @@ func (srv *accountingService) Reset(_ context.Context, req *fegprotos.ResetReque
 }
 
 func (srv *accountingService) s6aDisconnectUser(imsi string) fegprotos.ErrorCode {
-	if strings.HasPrefix(imsi, ImsiPrefix) {
-		imsi = imsi[len(ImsiPrefix):]
-	}
+	imsi = strings.TrimPrefix(imsi, ImsiPrefix)
 	sid := srv.sessions.FindSession(imsi)
 	if len(sid) == 0 {
 		glog.Errorf("radius session for S6a IMSI: %s is not found", imsi)

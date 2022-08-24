@@ -12,22 +12,27 @@ limitations under the License.
 """
 
 import unittest
+import warnings
 from concurrent.futures import Future
 from unittest.mock import MagicMock
 
-import warnings
 from lte.protos.mconfig.mconfigs_pb2 import PipelineD
 from lte.protos.pipelined_pb2 import SetupUEMacRequest, UEMacFlowRequest
-from orc8r.protos.directoryd_pb2 import DirectoryRecord
-from magma.subscriberdb.sid import SIDUtils
-from magma.pipelined.bridge_util import BridgeTools
 from magma.pipelined.app.base import global_epoch
-from magma.pipelined.tests.app.start_pipelined import PipelinedController, \
-    TestSetup
-from magma.pipelined.tests.pipelined_test_util import FlowTest, FlowVerifier, \
-    create_service_manager, start_ryu_app_thread, stop_ryu_app_thread, \
-    wait_after_send, SnapshotVerifier, get_enforcement_stats, \
-    wait_for_enforcement_stats, fake_cwf_setup
+from magma.pipelined.bridge_util import BridgeTools
+from magma.pipelined.tests.app.start_pipelined import (
+    PipelinedController,
+    TestSetup,
+)
+from magma.pipelined.tests.pipelined_test_util import (
+    SnapshotVerifier,
+    create_service_manager,
+    fake_cwf_setup,
+    start_ryu_app_thread,
+    stop_ryu_app_thread,
+)
+from magma.subscriberdb.sid import SIDUtils
+from orc8r.protos.directoryd_pb2 import DirectoryRecord
 
 
 class CWFRestartResilienceTest(unittest.TestCase):
@@ -40,8 +45,10 @@ class CWFRestartResilienceTest(unittest.TestCase):
     DPI_IP = '1.1.1.1'
 
     @classmethod
-    @unittest.mock.patch('netifaces.ifaddresses',
-                         return_value=[[{'addr': '00:11:22:33:44:55'}]])
+    @unittest.mock.patch(
+        'netifaces.ifaddresses',
+        return_value=[[{'addr': '00:11:22:33:44:55'}]],
+    )
     @unittest.mock.patch('netifaces.AF_LINK', 0)
     def setUpClass(cls, *_):
         """
@@ -66,11 +73,12 @@ class CWFRestartResilienceTest(unittest.TestCase):
         loop_mock.call_soon_threadsafe = mock_thread_safe
 
         test_setup = TestSetup(
-            apps=[PipelinedController.UEMac,
-                  PipelinedController.Arp,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows,
-                  ],
+            apps=[
+                PipelinedController.UEMac,
+                PipelinedController.Arp,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.UEMac:
                     ue_mac_controller_reference,
@@ -111,8 +119,10 @@ class CWFRestartResilienceTest(unittest.TestCase):
         )
 
         BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
-        BridgeTools.create_internal_iface(cls.BRIDGE, cls.DPI_PORT,
-                                          cls.DPI_IP)
+        BridgeTools.create_internal_iface(
+            cls.BRIDGE, cls.DPI_PORT,
+            cls.DPI_IP,
+        )
 
         cls.thread = start_ryu_app_thread(test_setup)
 
@@ -143,16 +153,23 @@ class CWFRestartResilienceTest(unittest.TestCase):
         ap_mac_addr2 = '12:12:13:24:25:26'
 
         directoryd_mock.return_value = [
-            DirectoryRecord(id=imsi1, fields={'ipv4_addr': ip1,
-                                              'mac_addr': mac1})
+            DirectoryRecord(
+                id=imsi1, fields={
+                    'ipv4_addr': ip1,
+                    'mac_addr': mac1,
+                },
+            ),
         ]
 
         fake_cwf_setup(
-            ue_mac_controller=self.ue_mac_controller)
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager,
-                                             'default_flows',
-                                             include_stats=False)
+            ue_mac_controller=self.ue_mac_controller,
+        )
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+            'default_flows',
+            include_stats=False,
+        )
         with snapshot_verifier:
             pass
 
@@ -180,11 +197,14 @@ class CWFRestartResilienceTest(unittest.TestCase):
 
         fake_cwf_setup(
             ue_mac_controller=self.ue_mac_controller,
-            setup_ue_mac_request=setup_ue_mac_request)
+            setup_ue_mac_request=setup_ue_mac_request,
+        )
 
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager,
-                                             'recovery_flows',
-                                             include_stats=False)
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+            'recovery_flows',
+            include_stats=False,
+        )
         with snapshot_verifier:
             pass

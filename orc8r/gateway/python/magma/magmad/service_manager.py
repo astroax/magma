@@ -18,8 +18,8 @@ import subprocess
 from enum import Enum
 from typing import List, Tuple
 
-from magma.magmad.service_poller import ServicePoller
 import magma.magmad.events as magmad_events
+from magma.magmad.service_poller import ServicePoller
 
 
 class ServiceState(Enum):
@@ -37,6 +37,7 @@ class ServiceState(Enum):
 
 class CommandReturn(object):
     """ Return from _run_command. Intended to mimic return from envoy.run() """
+
     def __init__(self, status_code, std_out):
         self.status_code = status_code
         self.std_out = std_out
@@ -88,17 +89,20 @@ class ServiceManager(object):
             return init_systems[init_system]
         except KeyError:
             raise ValueError(
-                'Init system {} not found'.format(init_system)
+                'Init system {} not found'.format(init_system),
             )
 
     async def start_services(self):
         await asyncio.gather(
-            *[self._service_control[s].start_process() for s in self._services]
+            *[
+                self._service_control[s].start_process()
+                for s in self._services
+            ],
         )
 
     async def stop_services(self):
         await asyncio.gather(
-            *[self._service_control[s].stop_process() for s in self._services]
+            *[self._service_control[s].stop_process() for s in self._services],
         )
 
     async def restart_services(self, services=None):
@@ -108,7 +112,7 @@ class ServiceManager(object):
         for service in services:
             self._service_poller.process_service_restart(service)
         await asyncio.gather(
-            *[self._service_control[s].restart_process() for s in services]
+            *[self._service_control[s].restart_process() for s in services],
         )
         magmad_events.restarted_services(services)
 
@@ -123,7 +127,7 @@ class ServiceManager(object):
 
         await asyncio.gather(
             *[self._service_control[s].stop_process() for s in stop],
-            *[self._service_control[s].start_process() for s in start]
+            *[self._service_control[s].start_process() for s in start],
         )
 
     def _parse_dynamic_services(
@@ -147,16 +151,27 @@ class ServiceManager(object):
                 stop.append(s)
         return start, stop
 
-    def _clean_dynamic_services(self, dynamic_services):
-        """ Check for invalid service names, remove them from list """
+    def _clean_dynamic_services(
+            self, dynamic_services: List[str],
+    ) -> List[str]:
+        """Filter out any dynamic services that are not registered
+
+        Args:
+            dynamic_services (List[str]): list of services specified in mconfig
+
+        Returns:
+            List[str]: intersection of dynamic_services and
+            registered_dynamic_services
+        """
         clean_dynamic_services = []
-        for s in dynamic_services:
-            if s not in self._registered_dynamic_services:
-                error_msg = "Magmad mconfig error: " +\
-                    "service {} is not a registered dynamic service".format(s)
-                logging.error(error_msg)
+        for service_name in dynamic_services:
+            if service_name not in self._registered_dynamic_services:
+                logging.error(
+                    "Not enabling %s as it is not listed as a registered dynamic service in magmad.yml",
+                    service_name,
+                )
             else:
-                clean_dynamic_services.append(s)
+                clean_dynamic_services.append(service_name)
         return clean_dynamic_services
 
     class ServiceControl(object):
@@ -166,6 +181,7 @@ class ServiceManager(object):
         /etc/systemd/system/ for systemd managed services. Runit service files
         should be copied to /etc/sv/.
         """
+
         def __init__(self, name, init_system_spec):
             self._init_system_spec = init_system_spec(name)
 
@@ -197,21 +213,21 @@ class ServiceManager(object):
         async def start_process(self):
             """Starts a process by name."""
             ret = await self._run_command_async(
-                self._init_system_spec.start_cmd
+                self._init_system_spec.start_cmd,
             )
             return ret.status_code
 
         async def stop_process(self):
             """Stops a process by name."""
             ret = await self._run_command_async(
-                self._init_system_spec.stop_cmd
+                self._init_system_spec.stop_cmd,
             )
             return ret.status_code
 
         async def restart_process(self):
             """Restarts a process by name."""
             ret = await self._run_command_async(
-                self._init_system_spec.restart_cmd
+                self._init_system_spec.restart_cmd,
             )
             return ret.status_code
 

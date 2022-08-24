@@ -17,6 +17,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -171,7 +172,7 @@ func init() {
 func handleSwxCmd(cmd *commands.Command, args []string) int {
 	f := cmd.Flags()
 	if f.NArg() < 1 {
-		fmt.Printf("IMSI argument must be provided\n\n")
+		fmt.Print("IMSI argument must be provided\n\n")
 		return 1
 	}
 	if f.NArg() > 1 {
@@ -181,7 +182,7 @@ func handleSwxCmd(cmd *commands.Command, args []string) int {
 	imsi = strings.TrimSpace(f.Arg(0))
 	err := validateImsi(imsi)
 	if err != nil {
-		fmt.Printf(err.Error())
+		fmt.Print(err.Error())
 		cmd.Usage()
 		return 1
 	}
@@ -196,7 +197,7 @@ func sendSwxRequest(requestName string) int {
 	if len(config.ServerCfg.Addr) > 0 {
 		swxProxyBuiltIn, err := servicers.NewSwxProxy(&config)
 		if err != nil {
-			fmt.Printf(err.Error())
+			fmt.Print(err.Error())
 			return 1
 		}
 		swxCli = swxBuiltIn{swxProxyBuiltIn}
@@ -221,9 +222,9 @@ func sendSar(addr string, client swxClient) int {
 	}
 	json, err := orcprotos.MarshalIntern(req)
 	if err != nil {
-		fmt.Printf("Unable to convert request to JSON for printing; Still attempting to send request...")
+		fmt.Print("Unable to convert request to JSON for printing; Still attempting to send request...")
 	} else {
-		fmt.Printf("Sending SAR (REGISTER) to %s:\n%s\n%+#v\n\n", addr, json, *req)
+		fmt.Printf("Sending SAR (REGISTER) to %s:\n%s\n%+#v\n\n", addr, json, req)
 	}
 	res, err := client.Register(req)
 	if err != nil || res == nil {
@@ -246,7 +247,7 @@ func sendMar(addr string, client swxClient) int {
 	if err != nil {
 		fmt.Printf("Unable to convert request to JSON for printing; Still attempting to send request...")
 	} else {
-		fmt.Printf("Sending MAR to %s:\n%s\n%+#v\n\n", addr, json, *req)
+		fmt.Printf("Sending MAR to %s:\n%s\n%+#v\n\n", addr, json, req)
 	}
 	res, err := client.Authenticate(req)
 	if err != nil || res == nil {
@@ -255,10 +256,10 @@ func sendMar(addr string, client swxClient) int {
 	}
 	json, err = orcprotos.MarshalIntern(res)
 	if err != nil {
-		fmt.Printf("Marshal Error %v for result: %+v", err, *res)
+		fmt.Printf("Marshal Error %v for result: %+v", err, res)
 		return 3
 	}
-	fmt.Printf("Received successful MAA:\n%s\n%+v\n", json, *res)
+	fmt.Printf("Received successful MAA:\n%s\n%+v\n", json, res)
 	return 0
 }
 
@@ -376,7 +377,7 @@ func getInteractiveRequestParameters(reader *bufio.Reader, requestType string) e
 	}
 	err = validateImsi(imsiValue)
 	if err != nil {
-		fmt.Printf(err.Error())
+		fmt.Print(err.Error())
 		return err
 	}
 	imsi = imsiValue
@@ -387,10 +388,15 @@ func getInteractiveRequestParameters(reader *bufio.Reader, requestType string) e
 			return err
 		}
 		if vectorsStr != "" {
-			numVectors, err = strconv.ParseUint(vectorsStr, 10, 64)
+			numVectors, err = strconv.ParseUint(vectorsStr, 10, 32)
 			if err != nil {
-				fmt.Printf(err.Error())
+				fmt.Println(err.Error())
 				return err
+			}
+			if numVectors > math.MaxUint32 {
+				strErrMsg := fmt.Sprintf("number %d is outside the boundaries of uint32 type", numVectors)
+				fmt.Println(strErrMsg)
+				return fmt.Errorf(strErrMsg)
 			}
 		}
 		return nil
@@ -398,20 +404,20 @@ func getInteractiveRequestParameters(reader *bufio.Reader, requestType string) e
 		return nil
 	}
 	err = fmt.Errorf("Invalid request type %s provided", requestType)
-	fmt.Printf(err.Error())
+	fmt.Println(err.Error())
 	return err
 }
 
 func getUserInput(prompt string, reader *bufio.Reader) (string, error) {
-	fmt.Printf(prompt)
+	fmt.Print(prompt)
 	if reader == nil {
 		err := fmt.Errorf("Nil IO reader provided")
-		fmt.Printf(err.Error())
+		fmt.Print(err.Error())
 		return "", err
 	}
 	input, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Printf(err.Error())
+		fmt.Print(err.Error())
 		return "", err
 	}
 	return strings.TrimSuffix(input, "\n"), nil

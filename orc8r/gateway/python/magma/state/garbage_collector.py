@@ -10,16 +10,20 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-import grpc
 import logging
 
+import grpc
 from magma.common.grpc_client_manager import GRPCClientManager
-from magma.common.rpc_utils import grpc_async_wrapper
 from magma.common.redis.containers import RedisFlatDict
+from magma.common.rpc_utils import (
+    grpc_async_wrapper,
+    indicates_connection_error,
+    print_grpc,
+)
+from magma.common.sentry import EXCLUDE_FROM_ERROR_MONITORING
 from magma.common.service import MagmaService
 from magma.state.keys import make_scoped_device_id
-from magma.state.redis_dicts import get_json_redis_dicts, \
-    get_proto_redis_dicts
+from magma.state.redis_dicts import get_json_redis_dicts, get_proto_redis_dicts
 from orc8r.protos.state_pb2 import DeleteStatesRequest, StateID
 
 DEFAULT_GRPC_TIMEOUT = 10
@@ -31,10 +35,15 @@ class GarbageCollector:
     garbage and deletes that state from the Orchestrator State service. If the
     RPC call succeeds, it then deletes the state from Redis
     """
-    def __init__(self,
-                 service: MagmaService,
-                 grpc_client_manager: GRPCClientManager):
+
+    def __init__(
+        self,
+        service: MagmaService,
+        grpc_client_manager: GRPCClientManager,
+        print_grpc_payload: bool = False,
+    ):
         self._service = service
+        self._print_grpc_payload = print_grpc_payload
         # Redis dicts for each type of state to replicate
         self._redis_dicts = []
         self._redis_dicts.extend(get_proto_redis_dicts(service.config))
@@ -65,30 +74,46 @@ class GarbageCollector:
     async def _send_to_state_service(self, request: DeleteStatesRequest):
         state_client = self._grpc_client_manager.get_client()
         try:
-            await grpc_async_wrapper(
+            print_grpc(
+                request, self._print_grpc_payload,
+                "Garbage collector sending to state service",
+            )
+            response = await grpc_async_wrapper(
                 state_client.DeleteStates.future(
                     request,
                     DEFAULT_GRPC_TIMEOUT,
-                ))
+                ),
+            )
+            print_grpc(response, self._print_grpc_payload)
 
         except grpc.RpcError as err:
-            logging.error("GRPC call failed for state deletion: %s", err)
+            logging.error(
+                "GRPC call failed for state deletion: %s",
+                err,
+                extra=EXCLUDE_FROM_ERROR_MONITORING if indicates_connection_error(err) else None,
+            )
         else:
             for redis_dict in self._redis_dicts:
                 for key in redis_dict.garbage_keys():
                     await self._delete_state_from_redis(redis_dict, key)
 
-    async def _delete_state_from_redis(self,
-                                       redis_dict: RedisFlatDict,
-                                       key: str) -> None:
+    async def _delete_state_from_redis(
+        self,
+        redis_dict: RedisFlatDict,
+        key: str,
+    ) -> None:
         # Ensure that the object isn't updated before deletion
         with redis_dict.lock(key):
             deleted = redis_dict.delete_garbage(key)
             if deleted:
-                logging.debug("Successfully garbage collected "
-                              "state for key: %s", key)
+                logging.debug(
+                    "Successfully garbage collected "
+                    "state for key: %s", key,
+                )
             else:
-                logging.debug("Successfully garbage collected "
-                              "state in cloud for key %s. "
-                              "Didn't delete locally as the "
-                              "object is no longer garbage", key)
+                logging.debug(
+                    "Successfully garbage collected "
+                    "state in cloud for key %s. "
+                    "Didn't delete locally as the "
+                    "object is no longer garbage", key,
+                )

@@ -16,20 +16,21 @@ package main
 import (
 	"time"
 
-	"magma/orc8r/cloud/go/obsidian"
-	"magma/orc8r/cloud/go/obsidian/swagger"
-	swagger_protos "magma/orc8r/cloud/go/obsidian/swagger/protos"
+	"github.com/golang/glog"
+	io_prometheus_client "github.com/prometheus/client_model/go"
+	"google.golang.org/grpc"
+
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/service"
 	"magma/orc8r/cloud/go/services/metricsd"
 	"magma/orc8r/cloud/go/services/metricsd/collection"
 	"magma/orc8r/cloud/go/services/metricsd/obsidian/handlers"
-	"magma/orc8r/cloud/go/services/metricsd/servicers"
+	"magma/orc8r/cloud/go/services/metricsd/servicers/protected"
+	"magma/orc8r/cloud/go/services/metricsd/servicers/southbound"
+	"magma/orc8r/cloud/go/services/obsidian"
+	swagger_protos "magma/orc8r/cloud/go/services/obsidian/swagger/protos"
+	swagger_servicers "magma/orc8r/cloud/go/services/obsidian/swagger/servicers/protected"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/golang/glog"
-	io_prometheus_client "github.com/prometheus/client_model/go"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -47,10 +48,13 @@ func main() {
 		glog.Fatalf("Error creating orc8r service for metricsd: %s", err)
 	}
 
-	controllerServicer := servicers.NewMetricsControllerServer()
+	cloudControllerServicer := protected.NewCloudMetricsControllerServer()
+	protos.RegisterCloudMetricsControllerServer(srv.ProtectedGrpcServer, cloudControllerServicer)
+
+	controllerServicer := southbound.NewMetricsControllerServer()
 	protos.RegisterMetricsControllerServer(srv.GrpcServer, controllerServicer)
 
-	swagger_protos.RegisterSwaggerSpecServer(srv.GrpcServer, swagger.NewSpecServicerFromFile(metricsd.ServiceName))
+	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(metricsd.ServiceName))
 
 	// Initialize gatherers
 	additionalCollectors := []collection.MetricCollector{
@@ -62,7 +66,7 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error initializing MetricsGatherer: %s", err)
 	}
-	go controllerServicer.ConsumeCloudMetrics(metricsCh, service.MustGetHostname())
+	go cloudControllerServicer.ConsumeCloudMetrics(metricsCh, service.MustGetHostname())
 	gatherer.Run()
 
 	obsidian.AttachHandlers(srv.EchoServer, handlers.GetObsidianHandlers(srv.Config))

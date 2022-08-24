@@ -18,7 +18,7 @@ import (
 	"fmt"
 
 	streamer_protos "magma/orc8r/cloud/go/services/streamer/protos"
-	"magma/orc8r/cloud/go/services/streamer/providers"
+	stream_provider "magma/orc8r/cloud/go/services/streamer/providers/servicers/protected"
 	"magma/orc8r/lib/go/definitions"
 	"magma/orc8r/lib/go/protos"
 )
@@ -30,15 +30,15 @@ func NewProviderServicer() streamer_protos.StreamProviderServer {
 }
 
 func (s *providerServicer) GetUpdates(ctx context.Context, req *protos.StreamRequest) (*protos.DataUpdateBatch, error) {
-	var streamer providers.StreamProvider
+	var streamer stream_provider.StreamProvider
 	switch req.GetStreamName() {
 	case definitions.MconfigStreamName:
-		streamer = &providers.MconfigProvider{}
+		streamer = &stream_provider.MconfigProvider{}
 	default:
 		return nil, fmt.Errorf("GetUpdates failed: unknown stream name provided: %s", req.GetStreamName())
 	}
 
-	update, err := streamer.GetUpdates(req.GetGatewayId(), req.GetExtraArgs())
+	update, err := streamer.GetUpdates(ctx, req.GetGatewayId(), req.GetExtraArgs())
 	if err != nil {
 		// Note: return blank err to properly receive EAGAIN from mconfig provider
 		return nil, err

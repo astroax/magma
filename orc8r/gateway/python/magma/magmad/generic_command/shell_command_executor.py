@@ -14,11 +14,13 @@ import asyncio
 import logging
 import shlex
 from functools import partial
+from typing import Any, Dict
 
-from typing import Dict, Any
-
-from magma.magmad.generic_command.command_executor import \
-    CommandExecutor, ExecutorFuncT, ParamValueT
+from magma.magmad.generic_command.command_executor import (
+    CommandExecutor,
+    ExecutorFuncT,
+    ParamValueT,
+)
 
 
 class ShellCommandExecutor(CommandExecutor):
@@ -26,6 +28,7 @@ class ShellCommandExecutor(CommandExecutor):
     The shell command executor stores shell commands from the service config
     into its dispatch table
     """
+
     def __init__(
             self,
             config: Dict[str, Any],
@@ -35,13 +38,13 @@ class ShellCommandExecutor(CommandExecutor):
         self._dispatch_table = get_shell_commands_from_config(config)
 
     def get_command_dispatch(
-            self
+            self,
     ) -> Dict[str, ExecutorFuncT]:
         return self._dispatch_table
 
 
 def get_shell_commands_from_config(
-        config: Dict[str, Any]
+        config: Dict[str, Any],
 ) -> Dict[str, ExecutorFuncT]:
     """
     Gets a list of shell commands from the config. Creates subprocess
@@ -62,16 +65,18 @@ def get_shell_commands_from_config(
         allow_params = shell_command.get('allow_params', False)
 
         logging.debug("Loading command %s", name)
-        command_dispatch_table[name] = partial(_run_subprocess,
-                                               command,
-                                               allow_params)
+        command_dispatch_table[name] = partial(
+            _run_subprocess,
+            command,
+            allow_params,
+        )
     return command_dispatch_table
 
 
 async def _run_subprocess(
         cmd: str,
         allow_params: bool,
-        params: Dict[str, ParamValueT]
+        params: Dict[str, ParamValueT],
 ) -> Dict[str, Any]:
     """
     Runs a command given params (optional), and returns the return code,
@@ -88,7 +93,7 @@ async def _run_subprocess(
     process = await asyncio.create_subprocess_exec(
         *cmd_list,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.PIPE,
     )
 
     stdout, stderr = await process.communicate()
@@ -96,5 +101,5 @@ async def _run_subprocess(
     return {
         "returncode": process.returncode,
         "stdout": stdout.decode(),
-        "stderr": stderr.decode()
+        "stderr": stderr.decode(),
     }

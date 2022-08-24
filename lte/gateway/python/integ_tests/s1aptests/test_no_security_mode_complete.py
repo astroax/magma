@@ -13,10 +13,9 @@ limitations under the License.
 
 import unittest
 
-import orc8r.protos.metricsd_pb2 as metricsd
 import s1ap_types
 import s1ap_wrapper
-from python.integ_tests.common.service303_utils import (
+from integ_tests.common.service303_utils import (
     MetricValue,
     verify_gateway_metrics,
 )
@@ -27,35 +26,35 @@ class TestNoSecurityModeComplete(unittest.TestCase):
     TEST_METRICS = [
         MetricValue(
             service="mme",
-            name=str(metricsd.ue_attach),
+            name="ue_attach",
             labels={
-                str(metricsd.result): "failure",
-                str(metricsd.cause): "no_response_for_security_mode_command",
+                "result": "failure",
+                "cause": "no_response_for_security_mode_command",
             },
             value=1,
         ),
         MetricValue(
             service="mme",
-            name=str(metricsd.ue_attach),
-            labels={str(metricsd.action): "attach_accept_sent"},
+            name="ue_attach",
+            labels={"action": "attach_accept_sent"},
             value=0,
         ),
         MetricValue(
             service="mme",
-            name=str(metricsd.ue_detach),
-            labels={str(metricsd.cause): "implicit_detach"},
+            name="ue_detach",
+            labels={"cause": "implicit_detach"},
             value=1,
         ),
         MetricValue(
             service="mme",
-            name=str(metricsd.nas_security_mode_command_timer_expired),
+            name="nas_security_mode_command_timer_expired",
             labels={},
             value=1,
         ),
         MetricValue(
             service="mme",
-            name=str(metricsd.spgw_create_session),
-            labels={str(metricsd.result): "success"},
+            name="spgw_create_session",
+            labels={"result": "success"},
             value=0,
         ),
     ]
@@ -76,7 +75,7 @@ class TestNoSecurityModeComplete(unittest.TestCase):
         req = self._s1ap_wrapper.ue_req
         print(
             "************************* Running attach no security mode \
-            complete timer expiry test"
+            complete timer expiry test",
         )
 
         attach_req = s1ap_types.ueAttachRequest_t()
@@ -89,11 +88,11 @@ class TestNoSecurityModeComplete(unittest.TestCase):
         attach_req.useOldSecCtxt = sec_ctxt
 
         self._s1ap_wrapper._s1_util.issue_cmd(
-            s1ap_types.tfwCmd.UE_ATTACH_REQUEST, attach_req
+            s1ap_types.tfwCmd.UE_ATTACH_REQUEST, attach_req,
         )
         response = self._s1ap_wrapper.s1_util.get_response()
         self.assertEqual(
-            response.msg_type, s1ap_types.tfwCmd.UE_AUTH_REQ_IND.value
+            response.msg_type, s1ap_types.tfwCmd.UE_AUTH_REQ_IND.value,
         )
         auth_res = s1ap_types.ueAuthResp_t()
         auth_res.ue_Id = req.ue_id
@@ -102,13 +101,13 @@ class TestNoSecurityModeComplete(unittest.TestCase):
         auth_res.sqnRcvd = sqnRecvd
 
         self._s1ap_wrapper._s1_util.issue_cmd(
-            s1ap_types.tfwCmd.UE_AUTH_RESP, auth_res
+            s1ap_types.tfwCmd.UE_AUTH_RESP, auth_res,
         )
-        # Wait for timer expiry 5 times, until context is released
+        # Wait for timer 3460 expiry 5 times, until context is released
         for i in range(5):
             response = self._s1ap_wrapper.s1_util.get_response()
             self.assertEqual(
-                response.msg_type, s1ap_types.tfwCmd.UE_SEC_MOD_CMD_IND.value
+                response.msg_type, s1ap_types.tfwCmd.UE_SEC_MOD_CMD_IND.value,
             )
             print("************************* Timeout", i + 1)
 
@@ -116,7 +115,7 @@ class TestNoSecurityModeComplete(unittest.TestCase):
         # Context release
         response = self._s1ap_wrapper.s1_util.get_response()
         self.assertEqual(
-            response.msg_type, s1ap_types.tfwCmd.UE_CTX_REL_IND.value
+            response.msg_type, s1ap_types.tfwCmd.UE_CTX_REL_IND.value,
         )
         print("************************* Context released")
 

@@ -1,7 +1,9 @@
 # ------------------------------------------------------------------------------
 # Base: for tests, precommit, codegen, etc.
 # ------------------------------------------------------------------------------
-FROM ubuntu:xenial as base
+ARG PLATFORM=linux/amd64
+
+FROM --platform=$PLATFORM ubuntu:xenial as base
 
 ENV GO111MODULE on
 ENV GOPATH ${USER}/go
@@ -18,19 +20,26 @@ RUN apt-get update && apt-get install -y \
   gcc \
   git \
   make \
+  openjdk-8-jre-headless \
   unzip \
   vim
 
-# Golang 1.13
+# Golang 1.18
 WORKDIR /usr/local
-RUN curl https://facebookconnectivity.jfrog.io/artifactory/generic/go1.13.4.linux-amd64.tar.gz -O && \
-    tar xf go1.13.4.linux-amd64.tar.gz && \
-    cp -r go/bin/* /usr/local/bin/
+ARG GOLANG_VERSION="1.18.3"
+RUN GO_TARBALL="go${GOLANG_VERSION}.linux-amd64.tar.gz" \
+ && curl https://artifactory.magmacore.org/artifactory/generic/${GO_TARBALL} --remote-name --location \
+ && tar -xzf ${GO_TARBALL} \
+ && ln -s /usr/local/go/bin/go /usr/local/bin/go \
+ && rm ${GO_TARBALL}
+
+# Install goimports
+# RUN go get golang.org/x/tools/cmd/goimports
 
 # Protobuf compiler
 # Apt has 2.x but we need 3.x
 # See: https://grpc.io/docs/protoc-installation/
-RUN curl -Lfs https://github.com/google/protobuf/releases/download/v3.1.0/protoc-3.1.0-linux-x86_64.zip -o protoc3.zip && \
+RUN curl -Lfs https://github.com/protocolbuffers/protobuf/releases/download/v3.10.0/protoc-3.10.0-linux-x86_64.zip -o protoc3.zip && \
     unzip protoc3.zip -d protoc3 && \
     mv protoc3/bin/protoc /bin/protoc && \
     chmod a+rx /bin/protoc && \
@@ -43,7 +52,7 @@ RUN curl -Lfs https://github.com/google/protobuf/releases/download/v3.1.0/protoc
 # ------------------------------------------------------------------------------
 FROM base as gocache
 
-ARG MAGMA_MODULES="orc8r lte feg cwf wifi fbinternal"
+ARG MAGMA_MODULES="orc8r lte feg cwf dp"
 RUN echo "export GOCACHE_MODULES=\"$(for m in $MAGMA_MODULES ; do echo -n /gomod/src/magma/$m ; echo -n ' ' ; done)\"" >> /etc/profile.d/env.sh
 
 COPY gomod /gomod
@@ -55,7 +64,7 @@ RUN . /etc/profile.d/env.sh && for m in $GOCACHE_MODULES ; do cd ${m}/cloud/go &
 # ------------------------------------------------------------------------------
 FROM gocache as src
 
-ARG MAGMA_MODULES="orc8r lte feg cwf wifi fbinternal"
+ARG MAGMA_MODULES="orc8r lte feg cwf dp"
 RUN echo "export MAGMA_MODULES=\"$(for m in $MAGMA_MODULES ; do echo -n /src/magma/$m ; echo -n ' ' ; done)\"" >> /etc/profile.d/env.sh
 
 # Source code
@@ -85,11 +94,12 @@ RUN apt-get update && apt-get install -y \
   openssl \
   supervisor \
   unzip \
-  wget
+  wget \
+&& rm -rf /var/lib/apt/lists/*
 
 # Swagger UI
 # See: https://github.com/swagger-api/swagger-ui
-ARG SWAGGER_UI_VERSION="3.1.7"
+ARG SWAGGER_UI_VERSION="3.52.2"
 RUN cd /tmp && \
   wget "https://github.com/swagger-api/swagger-ui/archive/v$SWAGGER_UI_VERSION.zip" && \
   unzip "v$SWAGGER_UI_VERSION.zip" -d swagger-ui && \
@@ -103,11 +113,15 @@ COPY src/magma/orc8r/cloud/docker/wait-for-it.sh /usr/local/bin
 RUN mkdir -p /var/opt/magma/envdir
 
 # Build artifacts
-ARG CNTLR_FILES=src/magma/orc8r/cloud/docker/controller
-COPY --from=builder /${CNTLR_FILES}/apidocs /var/opt/magma/static/apidocs
+ARG SWAGGER_FILES=src/magma/orc8r/cloud/go/services/obsidian/swagger
+COPY --from=builder /${SWAGGER_FILES}/v1/index.html /var/opt/magma/static/swagger/v1/ui/index.html
+COPY --from=builder /${SWAGGER_FILES}/v1/css/sidebar.css /var/opt/magma/static/swagger/v1/static/sidebar.css
+COPY --from=builder /${SWAGGER_FILES}/v1/swagger.yml /var/opt/magma/static/swagger/v1/spec/swagger.yml
+COPY --from=builder src/magma/orc8r/cloud/swagger /etc/magma/swagger
 COPY --from=builder /build/bin /var/opt/magma/bin
 
 # Supervisor configs
+ARG CNTLR_FILES=src/magma/orc8r/cloud/docker/controller
 COPY ${CNTLR_FILES}/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY ${CNTLR_FILES}/supervisor_logger.py /usr/local/lib/python2.7/dist-packages/supervisor_logger.py
 

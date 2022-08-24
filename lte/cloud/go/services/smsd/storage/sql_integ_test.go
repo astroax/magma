@@ -18,13 +18,13 @@ import (
 	"testing"
 	"time"
 
-	"magma/lte/cloud/go/services/smsd/storage"
-	"magma/orc8r/cloud/go/clock"
-	"magma/orc8r/cloud/go/sqorc"
-
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/stretchr/testify/assert"
+
+	"magma/lte/cloud/go/services/smsd/storage"
+	"magma/orc8r/cloud/go/clock"
+	"magma/orc8r/cloud/go/sqorc"
 )
 
 func TestSQLSMSStorage_Integration(t *testing.T) {
@@ -58,7 +58,7 @@ func TestSQLSMSStorage_Integration(t *testing.T) {
 	// Create 1 SMS each for 2 subs
 	_, err = store.CreateSMS(
 		"n1",
-		storage.MutableSMS{
+		&storage.MutableSMS{
 			Imsi:         "IMSI1",
 			SourceMsisdn: "123",
 			Message:      "hello world",
@@ -67,7 +67,7 @@ func TestSQLSMSStorage_Integration(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = store.CreateSMS(
 		"n1",
-		storage.MutableSMS{
+		&storage.MutableSMS{
 			Imsi:         "IMSI2",
 			SourceMsisdn: "456",
 			Message:      "goodbye world",
@@ -227,7 +227,7 @@ func TestSQLSMSStorage_Integration(t *testing.T) {
 	// Create new SMSs: 1 for imsi2, 1 for imsi3
 	_, err = store.CreateSMS(
 		"n1",
-		storage.MutableSMS{
+		&storage.MutableSMS{
 			Imsi:         "IMSI2",
 			SourceMsisdn: "789",
 			Message:      "message 3",
@@ -236,7 +236,7 @@ func TestSQLSMSStorage_Integration(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = store.CreateSMS(
 		"n1",
-		storage.MutableSMS{
+		&storage.MutableSMS{
 			Imsi:         "IMSI3",
 			SourceMsisdn: "123",
 			Message:      "message 4",
@@ -344,7 +344,7 @@ func TestSQLSMSStorage_Integration(t *testing.T) {
 	// Create a new message for imsi1 and verify refs get re-used
 	_, err = store.CreateSMS(
 		"n1",
-		storage.MutableSMS{
+		&storage.MutableSMS{
 			Imsi:         "IMSI1",
 			SourceMsisdn: "123",
 			Message:      "message 5",

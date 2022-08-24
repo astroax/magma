@@ -2,44 +2,97 @@ package s8_proxy_test
 
 import (
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/services/s8_proxy"
 	"magma/feg/gateway/services/s8_proxy/test_init"
-
-	"github.com/stretchr/testify/assert"
 )
 
 const (
-	IMSI1 = "001010000000055"
-)
-
-var (
-	gtpServerAddr = "127.0.0.1:0"
-	gtpClientAddr = "127.0.0.1:0"
+	IMSI1          = "001010000000055"
+	BEARER         = 5
+	PGW_ADDRS      = "127.0.0.1:0"
+	S8_PROXY_ADDRS = ":0"
+	AGWTeidC       = 10
 )
 
 func TestS8ProxyClient(t *testing.T) {
 	// run both s8 and pgw
-	mockPgw, err := test_init.StartS8AndPGWService(t, gtpClientAddr, gtpServerAddr)
+	mockPgw, err := test_init.StartS8AndPGWService(t, S8_PROXY_ADDRS, PGW_ADDRS)
 	if err != nil {
 		t.Fatal(err)
 		return
 	}
 
+	// in case pgwAddres has a 0 port, mock_pgw will chose the port. With this variable we make
+	// sure we use the right address (this only happens in testing)
+	actualPgwAddress := mockPgw.LocalAddr().String()
+
 	//------------------------
 	//---- Create Session ----
-	csReq := &protos.CreateSessionRequestPgw{
-		Imsi:   IMSI1,
-		Msisdn: "00111",
-		Mei:    "111",
+	csReq := getCreateSessionRequest(actualPgwAddress, AGWTeidC)
+
+	csRes, err := s8_proxy.CreateSession(csReq)
+	if err != nil {
+		t.Fatalf("S8_proxy client Create Session Error: %v", err)
+		return
+	}
+
+	assert.NoError(t, err)
+	assert.NotEmpty(t, csRes)
+
+	// check fteid was received properly
+	assert.Equal(t, mockPgw.LastTEIDu, csRes.BearerContext.UserPlaneFteid.Teid)
+	assert.NotEmpty(t, csRes.BearerContext.UserPlaneFteid.Ipv4Address)
+	assert.Empty(t, csRes.BearerContext.UserPlaneFteid.Ipv6Address)
+
+	t.Logf("Create Session: %+v", csRes)
+
+	//------------------------
+	//---- Delete session ----
+	dsReq := &protos.DeleteSessionRequestPgw{
+		PgwAddrs: actualPgwAddress,
+		Imsi:     IMSI1,
+		BearerId: BEARER,
+		CAgwTeid: AGWTeidC,
+		CPgwTeid: csRes.CPgwFteid.Teid,
 		ServingNetwork: &protos.ServingNetwork{
 			Mcc: "222",
 			Mnc: "333",
 		},
-		RatType: 0,
+		Uli: &protos.UserLocationInformation{
+			Tac: 5,
+			Eci: 6,
+		},
+	}
+	_, err = s8_proxy.DeleteSession(dsReq)
+	assert.NoError(t, err)
+
+	//------------------------
+	//---- Echo Request ----
+	eReq := &protos.EchoRequest{PgwAddrs: actualPgwAddress}
+	_, err = s8_proxy.SendEcho(eReq)
+	assert.NoError(t, err)
+}
+
+func getCreateSessionRequest(pgwAddrs string, cPgwTeid uint32) *protos.CreateSessionRequestPgw {
+	_, offset := time.Now().Zone()
+	return &protos.CreateSessionRequestPgw{
+		PgwAddrs: pgwAddrs,
+		Imsi:     IMSI1,
+		Msisdn:   "00111",
+		Mei:      "111",
+		CAgwTeid: cPgwTeid,
+		ServingNetwork: &protos.ServingNetwork{
+			Mcc: "222",
+			Mnc: "333",
+		},
+		RatType: protos.RATType_EUTRAN,
 		BearerContext: &protos.BearerContext{
-			Id: 5,
+			Id: BEARER,
 			UserPlaneFteid: &protos.Fteid{
 				Ipv4Address: "127.0.0.10",
 				Ipv6Address: "",
@@ -68,52 +121,21 @@ func TestS8ProxyClient(t *testing.T) {
 			Ipv6Prefix:  0,
 		},
 
-		Apn:            "internet.com",
-		SelectionMode:  "",
-		ApnRestriction: 0,
+		Apn:           "internet.com",
+		SelectionMode: protos.SelectionModeType_APN_provided_subscription_verified,
 		Ambr: &protos.Ambr{
 			BrUl: 999,
 			BrDl: 888,
 		},
 		Uli: &protos.UserLocationInformation{
-			Lac:    1,
-			Ci:     2,
-			Sac:    3,
-			Rac:    4,
-			Tac:    5,
-			Eci:    6,
-			MeNbi:  7,
-			EMeNbi: 8,
+			Tac: 5,
+			Eci: 6,
 		},
 		IndicationFlag: nil,
+		TimeZone: &protos.TimeZone{
+			DeltaSeconds:       int32(offset),
+			DaylightSavingTime: 0,
+		},
 	}
-
-	csRes, err := s8_proxy.CreateSession(csReq)
-	if err != nil {
-		t.Fatalf("S8_proxy client Create Session Error: %v", err)
-		return
-	}
-
-	assert.NoError(t, err)
-	assert.NotEmpty(t, csRes)
-
-	// check fteid was received properly
-	assert.Equal(t, mockPgw.LastTEIDu, csRes.BearerContext.UserPlaneFteid.Teid)
-	assert.NotEmpty(t, csRes.BearerContext.UserPlaneFteid.Ipv4Address)
-	assert.Empty(t, csRes.BearerContext.UserPlaneFteid.Ipv6Address)
-
-	t.Logf("Create Session: %#+v", *csRes)
-
-	//------------------------
-	//---- Delete session ----
-	cdReq := &protos.DeleteSessionRequestPgw{Imsi: IMSI1}
-	_, err = s8_proxy.DeleteSession(cdReq)
-	assert.NoError(t, err)
-
-	//------------------------
-	//---- Echo Request ----
-	eReq := &protos.EchoRequest{}
-	_, err = s8_proxy.SendEcho(eReq)
-	assert.NoError(t, err)
 
 }

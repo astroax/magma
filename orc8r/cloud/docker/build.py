@@ -21,54 +21,55 @@ import argparse
 import glob
 import os
 import shutil
-import subprocess
+import subprocess  # noqa: S404
+import sys
 from collections import namedtuple
+from types import MappingProxyType
 from typing import Iterable, List, Optional
 
-HOST_BUILD_CTX = '/tmp/magma_orc8r_build'
+HOST_BUILD_CTX = '/tmp/magma_orc8r_build'  # noqa: S108
 HOST_MAGMA_ROOT = '../../../.'
 IMAGE_MAGMA_ROOT = os.path.join('src', 'magma')
 
 GOLINT_FILE = '.golangci.yml'
+TEST_RESULT_DIR = 'orc8r/cloud/test-results'
 
-MODULES = [
+MODULES = (
     'orc8r',
     'lte',
     'feg',
     'cwf',
-    'wifi',
-    'fbinternal',
-]
+    'dp',
+)
 
-DEPLOYMENT_TO_MODULES = {
+DEPLOYMENT_TO_MODULES = MappingProxyType({
     'all': MODULES,
-    'orc8r': [],
-    'orc8r-f': ['fbinternal'],
-    'fwa': ['lte'],
-    'fwa-f': ['lte', 'fbinternal'],
-    'ffwa': ['lte', 'feg'],
-    'ffwa-f': ['lte', 'feg', 'fbinternal'],
-    'cwf': ['lte', 'feg', 'cwf'],
-    'cwf-f': ['lte', 'feg', 'cwf', 'fbinternal'],
-    'wifi': ['wifi'],
-    'wifi-f': ['wifi', 'fbinternal'],
-}
+    'orc8r': ('orc8r'),
+    'fwa': ('orc8r', 'lte'),
+    'ffwa': ('orc8r', 'lte', 'feg'),
+    'cwf': ('orc8r', 'lte', 'feg', 'cwf'),
+})
 
 DEPLOYMENTS = DEPLOYMENT_TO_MODULES.keys()
 
-EXTRA_COMPOSE_FILES = [
+EXTRA_COMPOSE_FILES = (
     'docker-compose.metrics.yml',
     # For now, logging is left out of the build because the fluentd daemonset
     # and forwarder pod shouldn't change very frequently - we can build and
     # push locally when they need to be updated.
     # We can integrate this into the CI pipeline if/when we see the need for it
     # 'docker-compose.logging.yml',
-]
+)
 
 MagmaModule = namedtuple('MagmaModule', ['name', 'host_path'])
 
 
 def main() -> None:
+    """
+    Run docker-compose script
+    """
+    _check_assumptions()
+
     args = _parse_args()
     mods = _get_modules(DEPLOYMENT_TO_MODULES[args.deployment])
 
@@ -87,19 +88,44 @@ def main() -> None:
         _run(['build', 'test'])
         _run(['run', '--rm'] + _get_mnt_vols(mods) + ['test', 'make lint'])
         _down(args)
+    elif args.tidy:
+        _run(['build', 'test'])
+        _run(['run', '--rm'] + _get_mnt_vols(mods) + ['test', 'make tidy'])
+        _down(args)
     elif args.precommit:
         _run(['build', 'test'])
         _run(['run', '--rm'] + _get_mnt_vols(mods) + ['test', 'make precommit'])
         _down(args)
+    elif args.coverage:
+        _run(['up', '-d', 'postgres_test'])
+        _run(['build', 'test'])
+        _run(['run', '--rm'] + _get_mnt_vols(mods) + ['test', 'make cover'])
+        _down(args)
     elif args.tests:
         _run(['up', '-d', 'postgres_test'])
         _run(['build', 'test'])
-        _run(['run', '--rm', 'test', 'make test'])
+        _run(['run', '--rm'] + _get_test_result_vol() + ['test', 'make test'])
         _down(args)
+    elif args.build_service:
+        _run(['build', args.build_service])
     else:
         d_args = _get_default_file_args(args) + _get_default_build_args(args)
         _run(d_args)
-        _down(args)
+
+
+def _check_assumptions():
+    """Check assumptions about environment."""
+    cwd = os.path.dirname(os.path.realpath(__file__))
+    if cwd != os.getcwd():
+        sys.exit("Must run from orc8r/cloud/docker directory")
+
+    if 'PWD' not in os.environ:
+        msg = (
+            "$PWD environment variable must be set.\n"
+            "Normally this is set by your shell. Try running without sudo, "
+            "then try explicitly setting the PWD env var."
+        )
+        sys.exit(msg)
 
 
 def _get_modules(mods: Iterable[str]) -> Iterable[MagmaModule]:
@@ -134,9 +160,9 @@ def _run(cmd: List[str]) -> None:
     cmd = ['docker-compose'] + cmd
     print("Running '%s'..." % ' '.join(cmd))
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)  # noqa: S603
     except subprocess.CalledProcessError as err:
-        exit(err.returncode)
+        sys.exit(err.returncode)
 
 
 def _get_mnt_vols(modules: Iterable[MagmaModule]) -> List[str]:
@@ -145,7 +171,7 @@ def _get_mnt_vols(modules: Iterable[MagmaModule]) -> List[str]:
         # .golangci.yml file
         '-v', '%s:%s' % (
             os.path.abspath(os.path.join(HOST_MAGMA_ROOT, GOLINT_FILE)),
-            os.path.join(os.sep, IMAGE_MAGMA_ROOT, GOLINT_FILE)
+            os.path.join(os.sep, IMAGE_MAGMA_ROOT, GOLINT_FILE),
         ),
     ]
     # Per-module directory mounts
@@ -154,11 +180,26 @@ def _get_mnt_vols(modules: Iterable[MagmaModule]) -> List[str]:
     return vols
 
 
+def _get_test_result_vol() -> List[str]:
+    """Return the volume argment to mount TEST_RESULT_DIR
+
+    Returns:
+        List[str]: -v command to mount TEST_RESULT_DIR
+    """
+    return [
+        '-v', '%s:%s' % (
+            os.path.abspath(os.path.join(HOST_MAGMA_ROOT, TEST_RESULT_DIR)),
+            os.path.join(os.sep, IMAGE_MAGMA_ROOT, TEST_RESULT_DIR),
+        ),
+    ]
+
+
 def _get_default_file_args(args: argparse.Namespace) -> List[str]:
-    def make_file_args(fs: Optional[List[str]] = None) -> List[str]:
+    def make_file_args(fs: Optional[Iterable[str]] = None) -> List[str]:
         if fs is None:
             return []
-        fs = ['docker-compose.yml'] + fs + ['docker-compose.override.yml']
+        fs = ['docker-compose.yml'] + \
+            list(fs) + ['docker-compose.override.yml']
         ret = []
         for f in fs:
             ret.extend(['-f', f])
@@ -194,7 +235,10 @@ def _copy_module(module: MagmaModule) -> None:
             os.path.join(build_ctx, d),
         )
 
-    copy_to_ctx('cloud')
+    if module.name == 'nms':
+        copy_to_ctx('scripts')
+    else:
+        copy_to_ctx('cloud')
 
     # Orc8r module also has lib/ and gateway/
     if module.name == 'orc8r':
@@ -224,6 +268,12 @@ def _get_module_image_dst(module: MagmaModule) -> str:
     """
     Given a path to a module on the host, return the intended destination
     in the final image.
+
+    Parameters:
+        module: Magma module
+
+    Returns:
+        str: destination in the final image
     """
     return os.path.join(os.sep, IMAGE_MAGMA_ROOT, module.name)
 
@@ -232,6 +282,12 @@ def _get_module_host_dst(module: MagmaModule) -> str:
     """
     Given a path to a module on the host, return the intended destination
     in the build context.
+
+    Parameters:
+        module: Magma module
+
+    Returns:
+        str: destination in the build context
     """
     return os.path.join(HOST_BUILD_CTX, IMAGE_MAGMA_ROOT, module.name)
 
@@ -282,6 +338,16 @@ def _parse_args() -> argparse.Namespace:
         action='store_true',
         help='Mount the source code and run the linter',
     )
+    parser.add_argument(
+        '--tidy', '-i',
+        action='store_true',
+        help='Mount the source code and run go mod tidy',
+    )
+    parser.add_argument(
+        '--coverage', '-o',
+        action='store_true',
+        help='Generate test coverage statistics',
+    )
 
     # Build something
     parser.add_argument(
@@ -299,6 +365,10 @@ def _parse_args() -> argparse.Namespace:
         action='store',
         default='all',
         help='Build deployment type: %s' % ','.join(DEPLOYMENTS),
+    )
+    parser.add_argument(
+        '--build-service', '-b',
+        help='Build particular service',
     )
 
     # How to do it

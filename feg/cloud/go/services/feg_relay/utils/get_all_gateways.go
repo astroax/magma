@@ -15,7 +15,12 @@ limitations under the License.
 package utils
 
 import (
+	"context"
 	"fmt"
+
+	"github.com/go-openapi/swag"
+	"github.com/golang/glog"
+	"google.golang.org/grpc/metadata"
 
 	"magma/feg/cloud/go/feg"
 	"magma/feg/cloud/go/serdes"
@@ -24,14 +29,8 @@ import (
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/device"
 	orc8rModels "magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/lib/go/merrors"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/go-openapi/swag"
-	"github.com/golang/glog"
-	"github.com/pkg/errors"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc/metadata"
 )
 
 // GetAllGatewaysIDs returns all Gateways served by calling FeG,
@@ -50,7 +49,7 @@ func GetAllGatewayIDs(ctx context.Context) ([]string, error) {
 	if len(networkID) == 0 || len(logicalID) == 0 {
 		return res, fmt.Errorf("Unregistered Federated Gateway: %s", fegId.String())
 	}
-	cfg, err := getFegCfg(networkID, logicalID)
+	cfg, err := getFegCfg(ctx, networkID, logicalID)
 	if err != nil {
 		return res, fmt.Errorf("Error getting Federated Gateway %s:%s configs: %v", networkID, logicalID, err)
 	}
@@ -58,6 +57,7 @@ func GetAllGatewayIDs(ctx context.Context) ([]string, error) {
 	// Find as many gateways as possible, swallowing intermediate errors
 	for _, networkID := range cfg.ServedNetworkIds {
 		gateways, _, err := configurator.LoadEntities(
+			ctx,
 			networkID, swag.String(orc8r.MagmadGatewayType), nil, nil, nil,
 			configurator.EntityLoadCriteria{},
 			serdes.Entity,
@@ -67,7 +67,7 @@ func GetAllGatewayIDs(ctx context.Context) ([]string, error) {
 			continue
 		}
 		for _, gatewayEntity := range gateways {
-			record, err := device.GetDevice(networkID, orc8r.AccessGatewayRecordType, gatewayEntity.PhysicalID, serdes.Device)
+			record, err := device.GetDevice(ctx, networkID, orc8r.AccessGatewayRecordType, gatewayEntity.PhysicalID, serdes.Device)
 			if err != nil {
 				glog.Errorf("Find Gateway Record Error: %v for Gateway %s:%s", err, networkID, gatewayEntity.Key)
 				continue
@@ -84,20 +84,21 @@ func GetAllGatewayIDs(ctx context.Context) ([]string, error) {
 	return res, nil
 }
 
-func getFegCfg(networkID, gatewayID string) (*models.GatewayFederationConfigs, error) {
+func getFegCfg(ctx context.Context, networkID, gatewayID string) (*models.GatewayFederationConfigs, error) {
 	fegGateway, err := configurator.LoadEntity(
+		ctx,
 		networkID, feg.FegGatewayType, gatewayID,
 		configurator.EntityLoadCriteria{LoadConfig: true},
 		serdes.Entity,
 	)
 	if err != nil && err != merrors.ErrNotFound {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if err == nil && fegGateway.Config != nil {
 		return fegGateway.Config.(*models.GatewayFederationConfigs), nil
 	}
 
-	iNetworkConfig, err := configurator.LoadNetworkConfig(networkID, feg.FegNetworkType, serdes.Network)
+	iNetworkConfig, err := configurator.LoadNetworkConfig(ctx, networkID, feg.FegNetworkType, serdes.Network)
 	if err != nil {
 		return nil, merrors.ErrNotFound
 	}

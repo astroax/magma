@@ -20,34 +20,35 @@ import (
 	"context"
 	"fmt"
 
-	"magma/feg/cloud/go/protos"
-	"magma/orc8r/lib/go/errors"
-	"magma/orc8r/lib/go/registry"
-
 	"github.com/golang/glog"
+
+	"magma/feg/cloud/go/protos"
+	"magma/orc8r/lib/go/merrors"
+	lib_protos "magma/orc8r/lib/go/protos"
+	"magma/orc8r/lib/go/registry"
 )
 
-// getHealthClient is a utility function to get an RPC connection to the
+// getCloudHealthClient is a utility function to get an RPC connection to the
 // Health service
-func getHealthClient() (protos.HealthClient, error) {
-	conn, err := registry.GetConnection(ServiceName)
+func getCloudHealthClient() (protos.CloudHealthClient, error) {
+	conn, err := registry.GetConnection(ServiceName, lib_protos.ServiceType_PROTECTED)
 	if err != nil {
-		initErr := errors.NewInitError(err, ServiceName)
+		initErr := merrors.NewInitError(err, ServiceName)
 		glog.Error(initErr)
 		return nil, initErr
 	}
-	return protos.NewHealthClient(conn), nil
+	return protos.NewCloudHealthClient(conn), nil
 }
 
 // GetActiveGateway returns the active federated gateway in the network specified by networkID
-func GetActiveGateway(networkID string) (string, error) {
-	client, err := getHealthClient()
+func GetActiveGateway(ctx context.Context, networkID string) (string, error) {
+	client, err := getCloudHealthClient()
 	if err != nil {
 		return "", err
 	}
 
 	// Currently, we use networkID as clusterID as we only support one cluster per network
-	clusterState, err := client.GetClusterState(context.Background(), &protos.ClusterStateRequest{
+	clusterState, err := client.GetClusterState(ctx, &protos.ClusterStateRequest{
 		NetworkId: networkID,
 		ClusterId: networkID,
 	})
@@ -59,14 +60,14 @@ func GetActiveGateway(networkID string) (string, error) {
 
 // GetHealth fetches the health stats for a given gateway
 // represented by a (networkID, logicalId)
-func GetHealth(networkID string, logicalID string) (*protos.HealthStats, error) {
+func GetHealth(ctx context.Context, networkID string, logicalID string) (*protos.HealthStats, error) {
 	if len(networkID) == 0 {
 		return nil, fmt.Errorf("Empty networkId provided")
 	}
 	if len(logicalID) == 0 {
 		return nil, fmt.Errorf("Empty logicalId provided")
 	}
-	client, err := getHealthClient()
+	client, err := getCloudHealthClient()
 	if err != nil {
 		return nil, err
 	}
@@ -75,5 +76,5 @@ func GetHealth(networkID string, logicalID string) (*protos.HealthStats, error) 
 		NetworkId: networkID,
 		LogicalId: logicalID,
 	}
-	return client.GetHealth(context.Background(), gatewayHealthReq)
+	return client.GetHealth(ctx, gatewayHealthReq)
 }

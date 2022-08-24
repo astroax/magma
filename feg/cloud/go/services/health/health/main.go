@@ -16,17 +16,18 @@ package main
 import (
 	"time"
 
+	"github.com/golang/glog"
+
 	"magma/feg/cloud/go/feg"
 	"magma/feg/cloud/go/protos"
 	"magma/feg/cloud/go/services/health"
 	"magma/feg/cloud/go/services/health/reporter"
-	"magma/feg/cloud/go/services/health/servicers"
+	protected_servicers "magma/feg/cloud/go/services/health/servicers/protected"
+	servicers "magma/feg/cloud/go/services/health/servicers/southbound"
 	"magma/orc8r/cloud/go/blobstore"
 	"magma/orc8r/cloud/go/service"
 	"magma/orc8r/cloud/go/sqorc"
 	"magma/orc8r/cloud/go/storage"
-
-	"github.com/golang/glog"
 )
 
 const (
@@ -39,11 +40,11 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error creating service: %+v", err)
 	}
-	db, err := sqorc.Open(storage.SQLDriver, storage.DatabaseSource)
+	db, err := sqorc.Open(storage.GetSQLDriver(), storage.GetDatabaseSource())
 	if err != nil {
 		glog.Fatalf("Failed to connect to database: %+v", err)
 	}
-	store := blobstore.NewEntStorage(health.DBTableName, db, sqorc.GetSqlBuilder())
+	store := blobstore.NewSQLStoreFactory(health.DBTableName, db, sqorc.GetSqlBuilder())
 	err = store.InitializeFactory()
 	if err != nil {
 		glog.Fatalf("Error initializing health database: %+v", err)
@@ -54,6 +55,12 @@ func main() {
 		glog.Fatalf("Error creating health servicer: %+v", err)
 	}
 	protos.RegisterHealthServer(srv.GrpcServer, healthServer)
+
+	cloudHealthServer, err := protected_servicers.NewCloudHealthServer(store)
+	if err != nil {
+		glog.Fatalf("Error creating cloud health servicer: %+v", err)
+	}
+	protos.RegisterCloudHealthServer(srv.ProtectedGrpcServer, cloudHealthServer)
 
 	// create a networkHealthStatusReporter to monitor and periodically log metrics
 	// on if all gateways in a network are unhealthy

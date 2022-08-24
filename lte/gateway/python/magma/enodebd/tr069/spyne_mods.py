@@ -20,10 +20,10 @@ modifications are required because:
 3) Minor enhancements for debug-ability
 """
 
-from magma.enodebd.logger import EnodebdLogger as logger
+from typing import Any, Dict, List, Union
 
 from lxml import etree
-
+from magma.enodebd.logger import EnodebdLogger as logger
 from spyne.application import Application
 from spyne.interface._base import Interface
 from spyne.protocol.soap import Soap11
@@ -32,6 +32,7 @@ from spyne.protocol.xml import XmlDocument
 
 class Tr069Interface(Interface):
     """ Modified base interface class. """
+
     def reset_interface(self):
         super(Tr069Interface, self).reset_interface()
         # Replace default namespace prefix (may not strictly be
@@ -48,10 +49,14 @@ class Tr069Interface(Interface):
 
 class Tr069Application(Application):
     """ Modified spyne application. """
-    def __init__(self, services, tns, name=None, in_protocol=None,
-                 out_protocol=None, config=None):
+
+    def __init__(
+        self, services, tns, name=None, in_protocol=None,
+        out_protocol=None, config=None,
+    ):
         super(Tr069Application, self).__init__(
-            services, tns, name, in_protocol, out_protocol, config)
+            services, tns, name, in_protocol, out_protocol, config,
+        )
         # Use modified interface class
         self.interface = Tr069Interface(self)
 
@@ -92,7 +97,8 @@ class Tr069Soap11(Soap11):
                 b'   <soap11env:Body>/n'
                 b'       <cwmp:EmptyHttp/>/n'
                 b'   </soap11env:Body>/n'
-                b'</soap11env:Envelope>']
+                b'</soap11env:Envelope>',
+            ]
 
         super(Tr069Soap11, self).create_in_document(ctx, charset)
 
@@ -117,8 +123,10 @@ class Tr069Soap11(Soap11):
                 detail_children = list(detail_elem)
                 if len(detail_children):
                     if len(detail_children) > 1:
-                        logger.warning("Multiple detail elements found in SOAP"
-                                        " fault - using first one")
+                        logger.warning(
+                            "Multiple detail elements found in SOAP"
+                            " fault - using first one",
+                        )
                     ctx.in_body_doc = detail_children[0]
                     ctx.method_request_string = ctx.in_body_doc.tag
                     self.validate_body(ctx, message)
@@ -134,7 +142,33 @@ class Tr069Soap11(Soap11):
         return super(Tr069Soap11, self).get_call_handles(ctx)
 
     def serialize(self, ctx, message):
+        # Workaround for issue https://github.com/magma/magma/issues/7869
+        # Updates to ctx.descriptor.out_message.Attributes.sub_name are taking
+        # effect on the descriptor. But when puled from _attrcache dictionary,
+        # it still has a stale value.
+        # Force repopulation of dictionary by deleting entry
+        # TODO Remove this code once we have a better fix
+        if (ctx.descriptor and ctx.descriptor.out_message in self._attrcache):
+            del self._attrcache[ctx.descriptor.out_message]  # noqa: WPS529
+
         super(Tr069Soap11, self).serialize(ctx, message)
 
         # Keep XSD namespace
         etree.cleanup_namespaces(ctx.out_document, keep_ns_prefixes=['xsd'])
+
+
+def as_dict(x: Any) -> Union[Dict, List, str]:
+    """
+    Represent TR069 payloads as python dictionaries. Used mostly for debug
+
+    Args:
+        x (Any): element to represent as dict
+
+    Returns:
+        Union[Dict, List, str]
+    """
+    if hasattr(x, 'as_dict'):
+        return {k: as_dict(v) for k, v in x.as_dict().items()}
+    elif isinstance(x, list):
+        return [as_dict(v) for v in x]
+    return str(x)

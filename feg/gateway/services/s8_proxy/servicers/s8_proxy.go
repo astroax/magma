@@ -16,39 +16,47 @@ package servicers
 import (
 	"context"
 	"fmt"
+	"net"
+	"time"
+
 	"github.com/golang/glog"
-	"github.com/wmnsk/go-gtp/gtpv2"
+
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/gtp"
+	"magma/feg/gateway/services/s8_proxy/metrics"
+	orc8r_protos "magma/orc8r/lib/go/protos"
 )
 
-type echoResponse struct {
-	error
-}
-
 type S8Proxy struct {
-	config      *S8ProxyConfig
-	gtpClient   *gtp.Client
-	echoChannel chan (error)
+	config        *S8ProxyConfig
+	gtpClient     *gtp.Client
+	healthTracker *metrics.S8HealthTracker
 }
 
 type S8ProxyConfig struct {
-	ClientAddr string
-	ServerAddr string
+	GtpTimeout        time.Duration
+	ClientAddr        string
+	ServerAddr        *net.UDPAddr
+	ApnOperatorSuffix string
 }
 
-// NewS8Proxy creates an s8 proxy already connected to a server (checks with echo if PGW is alive)
+// NewS8Proxy creates an s8 proxy, but does not checks the PGW is alive
 func NewS8Proxy(config *S8ProxyConfig) (*S8Proxy, error) {
-	gtpCli, err := gtp.NewConnectedAutoClient(context.Background(), config.ServerAddr, gtpv2.IFTypeS5S8SGWGTPC)
+	gtpCli, err := gtp.NewRunningClient(
+		context.Background(), config.ClientAddr,
+		gtp.SGWControlPlaneIfType, config.GtpTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating S8_Proxy: %s", err)
 	}
 	return newS8ProxyImp(gtpCli, config)
 }
 
-//NewS8ProxyNoFirstEcho creates an s8 proxy, but does not checks the PGW is alive
-func NewS8ProxyNoFirstEcho(config *S8ProxyConfig) (*S8Proxy, error) {
-	gtpCli, err := gtp.NewRunningAutoClient(context.Background(), config.ServerAddr, gtpv2.IFTypeS5S8SGWGTPC)
+// NewS8ProxyWithEcho creates an s8 proxy already connected to a server (checks with echo if PGW is alive)
+// Used mainly for testing with s8_cli
+func NewS8ProxyWithEcho(config *S8ProxyConfig) (*S8Proxy, error) {
+	gtpCli, err := gtp.NewConnectedAutoClient(
+		context.Background(), config.ServerAddr.String(),
+		gtp.SGWControlPlaneIfType, config.GtpTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating S8_Proxy: %s", err)
 	}
@@ -58,96 +66,229 @@ func NewS8ProxyNoFirstEcho(config *S8ProxyConfig) (*S8Proxy, error) {
 func newS8ProxyImp(cli *gtp.Client, config *S8ProxyConfig) (*S8Proxy, error) {
 	// TODO: validate config
 	s8p := &S8Proxy{
-		config:      config,
-		gtpClient:   cli,
-		echoChannel: make(chan error),
+		config:        config,
+		gtpClient:     cli,
+		healthTracker: metrics.NewS8HealthTracker(),
 	}
 	addS8GtpHandlers(s8p)
 	return s8p, nil
 }
 
 func (s *S8Proxy) CreateSession(ctx context.Context, req *protos.CreateSessionRequestPgw) (*protos.CreateSessionResponsePgw, error) {
-	// build csReq IE message
-	csReqIEs, sessionTeids, err := buildCreateSessionRequestIE(req, s.gtpClient)
+	metrics.SessionCreateRequests.Inc()
+	err := validateCreateSessionRequest(req)
 	if err != nil {
+		metrics.SessionCreateFails.Inc()
+		err = fmt.Errorf("Create Session failed for IMSI %s:, couldn't validate request: %s", req.Imsi, err)
+		glog.Error(err)
+		return nil, err
+	}
+
+	cPgwUDPAddr, err := s.configOrRequestedPgwAddress(req.PgwAddrs)
+	if err != nil {
+		metrics.SessionCreateFails.Inc()
+		err = fmt.Errorf("Create Session failed for IMSI %s: %s", req.Imsi, err)
+		glog.Error(err)
+		return nil, err
+	}
+	// build csReq IE message
+	csReqMsg, err := buildCreateSessionRequestMsg(cPgwUDPAddr, s.config.ApnOperatorSuffix, req)
+	if err != nil {
+		metrics.SessionCreateFails.Inc()
+		err = fmt.Errorf("Create Session failed to build IEs for IMSI %s: %s", req.Imsi, err)
+		glog.Error(err)
 		return nil, err
 	}
 
 	// send, register and receive create session (session is created on the gtp client during this process too)
-	csRes, err := s.sendAndReceiveCreateSession(csReqIEs, sessionTeids)
+	csRes, err := s.sendAndReceiveCreateSession(req, cPgwUDPAddr, csReqMsg)
 	if err != nil {
-		err = fmt.Errorf("Create Session Request failed: %s", err)
+		metrics.SessionCreateFails.Inc()
+		err = fmt.Errorf("Create Session failed for IMSI %s: %s", req.Imsi, err)
 		glog.Error(err)
 		return nil, err
 	}
 	return csRes, nil
 }
 
-// TODO: see if ModifyBearerRequest applies to S8 for Magma
-func (s *S8Proxy) ModifyBearer(ctx context.Context, req *protos.ModifyBearerRequestPgw) (*protos.ModifyBearerResponsePgw, error) {
-	// Todo: delete this condition
-	err := fmt.Errorf("ModifyBearer is not completed implemented")
-	if err != nil {
-		glog.Error(err)
-		return nil, err
-	}
-
-	session, teid, err := getSessionAndCTeid(s.gtpClient, req.Imsi)
-	if err != nil {
-		return nil, err
-	}
-	mbReqIEs := buildModifyBearerRequest(req, session.GetDefaultBearer().EBI)
-	mdRes, err := s.sendAndReceiveModifyBearer(teid, session, mbReqIEs)
-	if err != nil {
-		err = fmt.Errorf("Modify Bearer Request failed: %s", err)
-		glog.Error(err)
-		return nil, err
-	}
-	return mdRes, nil
-}
-
 func (s *S8Proxy) DeleteSession(ctx context.Context, req *protos.DeleteSessionRequestPgw) (*protos.DeleteSessionResponsePgw, error) {
-	session, teid, err := getSessionAndCTeid(s.gtpClient, req.Imsi)
+	metrics.SessionDeleteRequests.Inc()
+	err := validateDeleteSessionRequest(req)
 	if err != nil {
+		metrics.SessionDeleteFails.Inc()
+		err = fmt.Errorf("Delete Session failed for IMSI %s:, couldn't validate request: %s", req.Imsi, err)
+		glog.Error(err)
+		return nil, err
+	}
+	cPgwUDPAddr, err := s.configOrRequestedPgwAddress(req.PgwAddrs)
+	if err != nil {
+		metrics.SessionDeleteFails.Inc()
+		err = fmt.Errorf("Delete Session failed for IMSI %s: %s", req.Imsi, err)
+		glog.Error(err)
+		return nil, err
+	}
+	dsReqMsg, err := buildDeleteSessionRequestMsg(cPgwUDPAddr, req)
+	if err != nil {
+		metrics.SessionDeleteFails.Inc()
+		err = fmt.Errorf("Delete Session failed to build IEs for IMSI %s: %s", req.Imsi, err)
+		glog.Error(err)
 		return nil, err
 	}
 
-	cdRes, err := s.sendAndReceiveDeleteSession(teid, session)
+	cdRes, err := s.sendAndReceiveDeleteSession(req, cPgwUDPAddr, dsReqMsg)
 	if err != nil {
-		glog.Errorf("Couldnt delete session for IMSI %s:, %s", req.Imsi, err)
+		metrics.SessionDeleteFails.Inc()
+		err = fmt.Errorf("Delete Session failed for IMSI %s:, %s", req.Imsi, err)
+		glog.Error(err)
 		return nil, err
 	}
-
-	// remove session from the s8_proxy client
-	s.gtpClient.RemoveSession(session)
-
 	return cdRes, nil
 }
 
-func (s *S8Proxy) SendEcho(ctx context.Context, req *protos.EchoRequest) (*protos.EchoResponse, error) {
-	err := s.sendAndReceiveEchoRequest()
+func (s *S8Proxy) SendEcho(_ context.Context, req *protos.EchoRequest) (*protos.EchoResponse, error) {
+	cPgwUDPAddr, err := s.configOrRequestedPgwAddress(req.PgwAddrs)
+	if err != nil {
+		err = fmt.Errorf("SendEcho to %s failed: %s", cPgwUDPAddr, err)
+		glog.Error(err)
+		return nil, err
+	}
+	err = s.gtpClient.SendEchoRequest(cPgwUDPAddr)
 	if err != nil {
 		return nil, err
 	}
 	return &protos.EchoResponse{}, nil
 }
 
-// TODO: this is a function to expose WaitUntilClientIsReady. That function is only used
-// as a hack for testing and will be removed.
-func (s *S8Proxy) WaitUntilClientIsReady() {
-	s.gtpClient.WaitUntilClientIsReady(0)
+func (s *S8Proxy) CreateBearerResponse(_ context.Context, res *protos.CreateBearerResponsePgw) (*orc8r_protos.Void, error) {
+	metrics.BearerCreateRequests.Inc()
+	cPgwUDPAddr := ParseAddress(res.PgwAddrs)
+	if cPgwUDPAddr == nil {
+		metrics.BearerCreateFails.Inc()
+		err := fmt.Errorf("CreateBearerResponse to %s failed: couldnt paarse address", res.PgwAddrs)
+		glog.Error(err)
+		return nil, err
+	}
+
+	cbResMsg, err := buildCreateBearerResMsg(res)
+	if err != nil {
+		metrics.BearerCreateFails.Inc()
+		return nil, err
+	}
+
+	_, err = s.sendAndReceiveCreateBearerResponse(res, cPgwUDPAddr, cbResMsg)
+	if err != nil {
+		metrics.BearerCreateFails.Inc()
+		err = fmt.Errorf("Create Bearer Response failed for IMSI %s:, %s", res.Imsi, err)
+		glog.Error(err)
+		return nil, err
+	}
+
+	return &orc8r_protos.Void{}, nil
 }
 
-func getSessionAndCTeid(cli *gtp.Client, imsi string) (*gtpv2.Session, uint32, error) {
-	session, err := cli.GetSessionByIMSI(imsi)
-	if err != nil {
-		glog.Errorf("Couldnt delete session. Couldnt find a session for IMSI %s:, %s", imsi, err)
-		return nil, 0, err
+func (s *S8Proxy) DeleteBearerResponse(_ context.Context, res *protos.DeleteBearerResponsePgw) (*orc8r_protos.Void, error) {
+	metrics.BearerDeleteRequests.Inc()
+	cPgwUDPAddr := ParseAddress(res.PgwAddrs)
+	if cPgwUDPAddr == nil {
+		metrics.BearerDeleteFails.Inc()
+		err := fmt.Errorf("DeleteBearerResponse to %s failed: couldnt paarse address", res.PgwAddrs)
+		glog.Error(err)
+		return nil, err
 	}
-	teid, err := session.GetTEID(gtpv2.IFTypeS5S8PGWGTPC)
+
+	dbResMsg, err := buildDeleteBearerResMsg(res)
 	if err != nil {
-		glog.Errorf("Couldnt delete session. Couldnt find control TEID for IMSI %s:, %s", imsi, err)
-		return nil, 0, err
+		metrics.BearerDeleteFails.Inc()
+		return nil, err
 	}
-	return session, teid, nil
+
+	_, err = s.sendAndReceiveDeleteBearerResponse(res, cPgwUDPAddr, dbResMsg)
+	if err != nil {
+		metrics.BearerDeleteFails.Inc()
+		err = fmt.Errorf("Create Bearer Response failed for IMSI %s:, %s", res.Imsi, err)
+		glog.Error(err)
+		return nil, err
+	}
+
+	return &orc8r_protos.Void{}, nil
+}
+
+// configOrRequestedPgwAddress returns an UDPAddrs if the passed string corresponds to a valid ip,
+// otherwise it uses the server address configured on s8_proxy
+func (s *S8Proxy) configOrRequestedPgwAddress(pgwAddrsFromRequest string) (*net.UDPAddr, error) {
+	addrs := ParseAddress(pgwAddrsFromRequest)
+	if addrs != nil {
+		// address coming from string has precedence
+		return addrs, nil
+	}
+	if s.config.ServerAddr != nil {
+		return s.config.ServerAddr, nil
+	}
+	return nil, fmt.Errorf("Neither the request nor s8_proxy has a valid server (pgw) address")
+}
+
+func validateCreateSessionRequest(csr *protos.CreateSessionRequestPgw) error {
+	if csr.BearerContext == nil || csr.BearerContext.UserPlaneFteid == nil || csr.BearerContext.Id == 0 ||
+		csr.BearerContext.Qos == nil || csr.Uli == nil || csr.ServingNetwork == nil {
+		return fmt.Errorf("CreateSessionRequest missing fields %+v", csr)
+	}
+	return nil
+}
+
+func validateDeleteSessionRequest(dsr *protos.DeleteSessionRequestPgw) error {
+	if dsr.Imsi == "" || dsr.Uli == nil || dsr.ServingNetwork == nil {
+		return fmt.Errorf("DeleteSessionRequest missing fields %+v", dsr)
+	}
+	return nil
+}
+
+func (s *S8Proxy) Disable(ctx context.Context, req *protos.DisableMessage) (*orc8r_protos.Void, error) {
+	return &orc8r_protos.Void{}, nil
+}
+
+func (s *S8Proxy) Enable(ctx context.Context, req *orc8r_protos.Void) (*orc8r_protos.Void, error) {
+	return &orc8r_protos.Void{}, nil
+}
+
+// GetHealthStatus retrieves a health status object which contains the current
+// health of the service
+func (s *S8Proxy) GetHealthStatus(ctx context.Context, req *orc8r_protos.Void) (*protos.HealthStatus, error) {
+	currentMetrics, err := metrics.GetCurrentHealthMetrics()
+	if err != nil {
+		return &protos.HealthStatus{
+			Health:        protos.HealthStatus_UNHEALTHY,
+			HealthMessage: fmt.Sprintf("Error occurred while retrieving health metrics: %s", err),
+		}, err
+	}
+	deltaMetrics, err := s.healthTracker.Metrics.GetDelta(currentMetrics)
+	if err != nil {
+		return &protos.HealthStatus{
+			Health:        protos.HealthStatus_UNHEALTHY,
+			HealthMessage: err.Error(),
+		}, err
+	}
+
+	reqTotal := deltaMetrics.SessionCreateRequests + deltaMetrics.SessionDeleteRequests +
+		deltaMetrics.BearerCreateRequests + deltaMetrics.BearerDeleteRequests
+	failureTotal := deltaMetrics.SessionCreateFails +
+		deltaMetrics.SessionCreateFails +
+		deltaMetrics.BearerCreateFails + deltaMetrics.BearerDeleteFails
+
+	exceedsThreshold := reqTotal >= int64(s.healthTracker.MinimumRequestThreshold) &&
+		float32(failureTotal)/float32(reqTotal) >= s.healthTracker.RequestFailureThreshold
+	if exceedsThreshold {
+		unhealthyMsg := fmt.Sprintf("Metric Request Failure Ratio >= threshold %f; %d / %d",
+			s.healthTracker.RequestFailureThreshold,
+			failureTotal,
+			reqTotal,
+		)
+		return &protos.HealthStatus{
+			Health:        protos.HealthStatus_UNHEALTHY,
+			HealthMessage: unhealthyMsg,
+		}, nil
+	}
+	return &protos.HealthStatus{
+		Health:        protos.HealthStatus_HEALTHY,
+		HealthMessage: "All metrics appear healthy",
+	}, nil
 }

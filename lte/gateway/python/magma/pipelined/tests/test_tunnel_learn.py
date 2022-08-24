@@ -17,16 +17,27 @@ from concurrent.futures import Future
 
 from lte.protos.mconfig.mconfigs_pb2 import PipelineD
 from magma.pipelined.app.tunnel_learn import TunnelLearnController
-from magma.pipelined.tests.app.start_pipelined import TestSetup, \
-    PipelinedController
-from magma.pipelined.tests.app.packet_builder import IPPacketBuilder
-from magma.pipelined.tests.app.subscriber import SubContextConfig, default_ambr_config
-from magma.pipelined.tests.app.table_isolation import RyuDirectTableIsolator, \
-    RyuForwardFlowArgsBuilder
-from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
 from magma.pipelined.bridge_util import BridgeTools
-from magma.pipelined.tests.pipelined_test_util import start_ryu_app_thread, \
-    stop_ryu_app_thread, create_service_manager, assert_bridge_snapshot_match
+from magma.pipelined.tests.app.packet_builder import IPPacketBuilder
+from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
+from magma.pipelined.tests.app.start_pipelined import (
+    PipelinedController,
+    TestSetup,
+)
+from magma.pipelined.tests.app.subscriber import (
+    SubContextConfig,
+    default_ambr_config,
+)
+from magma.pipelined.tests.app.table_isolation import (
+    RyuDirectTableIsolator,
+    RyuForwardFlowArgsBuilder,
+)
+from magma.pipelined.tests.pipelined_test_util import (
+    assert_bridge_snapshot_match,
+    create_service_manager,
+    start_ryu_app_thread,
+    stop_ryu_app_thread,
+)
 
 
 class TunnelLearnTest(unittest.TestCase):
@@ -49,17 +60,22 @@ class TunnelLearnTest(unittest.TestCase):
         """
         super(TunnelLearnTest, cls).setUpClass()
         warnings.simplefilter('ignore')
-        cls.service_manager = create_service_manager([],
-            ['ue_mac', 'tunnel_learn'])
+        cls.service_manager = create_service_manager(
+            [],
+            ['ue_mac', 'tunnel_learn'],
+        )
         cls._tbl_num = cls.service_manager.get_table_num(
-            TunnelLearnController.APP_NAME)
+            TunnelLearnController.APP_NAME,
+        )
 
         tunnel_learn_controller_reference = Future()
         testing_controller_reference = Future()
         test_setup = TestSetup(
-            apps=[PipelinedController.TunnelLearnController,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.TunnelLearnController,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.TunnelLearnController:
                     tunnel_learn_controller_reference,
@@ -80,8 +96,8 @@ class TunnelLearnTest(unittest.TestCase):
                 'clean_restart': True,
                 'access_control': {
                     'ip_blocklist': [
-                    ]
-                }
+                    ],
+                },
             },
             mconfig=PipelineD(
                 allowed_gre_peers=[],
@@ -109,8 +125,10 @@ class TunnelLearnTest(unittest.TestCase):
         in the scratch table(snapshot is checked)
         """
         # Set up subscribers
-        sub = SubContextConfig('IMSI001010000000013', '192.168.128.74',
-                               default_ambr_config, self._tbl_num)
+        sub = SubContextConfig(
+            'IMSI001010000000013', '192.168.128.74',
+            default_ambr_config, self._tbl_num,
+        )
 
         isolator = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub).build_requests(),

@@ -15,28 +15,28 @@ package configurator
 
 import (
 	"context"
+	"fmt"
+
+	"github.com/golang/glog"
+	"github.com/golang/protobuf/ptypes/wrappers"
+	"github.com/thoas/go-funk"
 
 	"magma/orc8r/cloud/go/serde"
 	"magma/orc8r/cloud/go/services/configurator/protos"
 	"magma/orc8r/cloud/go/services/configurator/storage"
 	storage2 "magma/orc8r/cloud/go/storage"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/lib/go/merrors"
 	commonProtos "magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/golang/glog"
-	"github.com/golang/protobuf/ptypes/wrappers"
-	"github.com/pkg/errors"
-	"github.com/thoas/go-funk"
 )
 
 // ListNetworkIDs loads a list of all networkIDs registered
-func ListNetworkIDs() ([]string, error) {
+func ListNetworkIDs(ctx context.Context) ([]string, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return nil, err
 	}
-	idsWrapper, err := client.ListNetworkIDs(context.Background(), &commonProtos.Void{})
+	idsWrapper, err := client.ListNetworkIDs(ctx, &commonProtos.Void{})
 	if err != nil {
 		return nil, err
 	}
@@ -45,13 +45,13 @@ func ListNetworkIDs() ([]string, error) {
 
 // ListNetworksOfType returns a list of all network IDs which match the given
 // type
-func ListNetworksOfType(networkType string) ([]string, error) {
+func ListNetworksOfType(ctx context.Context, networkType string) ([]string, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return nil, err
 	}
 	networks, err := client.LoadNetworks(
-		context.Background(),
+		ctx,
 		&protos.LoadNetworksRequest{
 			Criteria: &storage.NetworkLoadCriteria{},
 			Filter: &storage.NetworkLoadFilter{
@@ -65,13 +65,13 @@ func ListNetworksOfType(networkType string) ([]string, error) {
 	return funk.Map(networks.Networks, func(n *storage.Network) string { return n.ID }).([]string), nil
 }
 
-func CreateNetwork(network Network, serdes serde.Registry) error {
-	_, err := CreateNetworks([]Network{network}, serdes)
+func CreateNetwork(ctx context.Context, network Network, serdes serde.Registry) error {
+	_, err := CreateNetworks(ctx, []Network{network}, serdes)
 	return err
 }
 
 // CreateNetworks registers the given list of Networks and returns the created networks
-func CreateNetworks(networks []Network, serdes serde.Registry) ([]Network, error) {
+func CreateNetworks(ctx context.Context, networks []Network, serdes serde.Registry) ([]Network, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return nil, err
@@ -85,7 +85,7 @@ func CreateNetworks(networks []Network, serdes serde.Registry) ([]Network, error
 		}
 		req.Networks = append(req.Networks, pNet)
 	}
-	res, err := client.CreateNetworks(context.Background(), req)
+	res, err := client.CreateNetworks(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func CreateNetworks(networks []Network, serdes serde.Registry) ([]Network, error
 }
 
 // UpdateNetworks updates the specified networks and returns the updated networks
-func UpdateNetworks(updates []NetworkUpdateCriteria, serdes serde.Registry) error {
+func UpdateNetworks(ctx context.Context, updates []NetworkUpdateCriteria, serdes serde.Registry) error {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return err
@@ -116,36 +116,36 @@ func UpdateNetworks(updates []NetworkUpdateCriteria, serdes serde.Registry) erro
 		}
 		req.Updates = append(req.Updates, protoUpdate)
 	}
-	_, err = client.UpdateNetworks(context.Background(), req)
+	_, err = client.UpdateNetworks(ctx, req)
 	return err
 }
 
 // DeleteNetworks deletes the network specified by networkID
-func DeleteNetworks(networkIDs []string) error {
+func DeleteNetworks(ctx context.Context, networkIDs []string) error {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return err
 	}
-	_, err = client.DeleteNetworks(context.Background(), &protos.DeleteNetworksRequest{NetworkIDs: networkIDs})
+	_, err = client.DeleteNetworks(ctx, &protos.DeleteNetworksRequest{NetworkIDs: networkIDs})
 	return err
 }
 
 // DeleteNetwork deletes a network.
-func DeleteNetwork(networkID string) error {
+func DeleteNetwork(ctx context.Context, networkID string) error {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return err
 	}
 	_, err = client.DeleteNetworks(
-		context.Background(),
+		ctx,
 		&protos.DeleteNetworksRequest{NetworkIDs: []string{networkID}},
 	)
 	return err
 }
 
 // DoesNetworkExist returns true iff the network exists.
-func DoesNetworkExist(networkID string) (bool, error) {
-	loaded, _, err := LoadNetworks([]string{networkID}, true, false, nil)
+func DoesNetworkExist(ctx context.Context, networkID string) (bool, error) {
+	loaded, _, err := LoadNetworks(ctx, []string{networkID}, true, false, nil)
 	if err != nil {
 		return false, err
 	}
@@ -156,7 +156,7 @@ func DoesNetworkExist(networkID string) (bool, error) {
 }
 
 // LoadNetworks loads networks networks according to specified criteria.
-func LoadNetworks(networks []string, loadMetadata bool, loadConfigs bool, serdes serde.Registry) ([]Network, []string, error) {
+func LoadNetworks(ctx context.Context, networks []string, loadMetadata bool, loadConfigs bool, serdes serde.Registry) ([]Network, []string, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return nil, nil, err
@@ -170,7 +170,7 @@ func LoadNetworks(networks []string, loadMetadata bool, loadConfigs bool, serdes
 			LoadConfigs:  loadConfigs,
 		},
 	}
-	res, err := client.LoadNetworks(context.Background(), req)
+	res, err := client.LoadNetworks(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -187,7 +187,7 @@ func LoadNetworks(networks []string, loadMetadata bool, loadConfigs bool, serdes
 }
 
 // LoadNetworksOfType loads all networks of the passed type.
-func LoadNetworksOfType(typeVal string, loadMetadata bool, loadConfigs bool, serdes serde.Registry) ([]Network, error) {
+func LoadNetworksOfType(ctx context.Context, typeVal string, loadMetadata bool, loadConfigs bool, serdes serde.Registry) ([]Network, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func LoadNetworksOfType(typeVal string, loadMetadata bool, loadConfigs bool, ser
 			LoadConfigs:  loadConfigs,
 		},
 	}
-	res, err := client.LoadNetworks(context.Background(), req)
+	res, err := client.LoadNetworks(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -218,9 +218,9 @@ func LoadNetworksOfType(typeVal string, loadMetadata bool, loadConfigs bool, ser
 }
 
 // LoadNetwork loads the network identified by the network ID.
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func LoadNetwork(networkID string, loadMetadata bool, loadConfigs bool, serdes serde.Registry) (Network, error) {
-	networks, _, err := LoadNetworks([]string{networkID}, loadMetadata, loadConfigs, serdes)
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func LoadNetwork(ctx context.Context, networkID string, loadMetadata bool, loadConfigs bool, serdes serde.Registry) (Network, error) {
+	networks, _, err := LoadNetworks(ctx, []string{networkID}, loadMetadata, loadConfigs, serdes)
 	if err != nil {
 		return Network{}, err
 	}
@@ -231,9 +231,9 @@ func LoadNetwork(networkID string, loadMetadata bool, loadConfigs bool, serdes s
 }
 
 // LoadNetworkConfig loads network config of type configType registered under the network ID.
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func LoadNetworkConfig(networkID, configType string, serdes serde.Registry) (interface{}, error) {
-	network, err := LoadNetwork(networkID, false, true, serdes)
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func LoadNetworkConfig(ctx context.Context, networkID, configType string, serdes serde.Registry) (interface{}, error) {
+	network, err := LoadNetwork(ctx, networkID, false, true, serdes)
 	if err != nil {
 		return nil, err
 	}
@@ -246,19 +246,19 @@ func LoadNetworkConfig(networkID, configType string, serdes serde.Registry) (int
 	return network.Configs[configType], nil
 }
 
-func UpdateNetworkConfig(networkID, configType string, config interface{}, serdes serde.Registry) error {
+func UpdateNetworkConfig(ctx context.Context, networkID, configType string, config interface{}, serdes serde.Registry) error {
 	updateCriteria := NetworkUpdateCriteria{
 		ID:                   networkID,
 		ConfigsToAddOrUpdate: map[string]interface{}{configType: config},
 	}
-	return UpdateNetworks([]NetworkUpdateCriteria{updateCriteria}, serdes)
+	return UpdateNetworks(ctx, []NetworkUpdateCriteria{updateCriteria}, serdes)
 }
 
 // WriteEntities executes a series of entity writes (creation or update) to be
 // executed in order within a single transaction.
 // This function is all-or-nothing - any failure or error encountered during
 // any operation will rollback the entire batch.
-func WriteEntities(networkID string, writes []EntityWriteOperation, serdes serde.Registry) error {
+func WriteEntities(ctx context.Context, networkID string, writes []EntityWriteOperation, serdes serde.Registry) error {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return err
@@ -280,11 +280,11 @@ func WriteEntities(networkID string, writes []EntityWriteOperation, serdes serde
 			}
 			req.Writes = append(req.Writes, &protos.WriteEntityRequest{Request: &protos.WriteEntityRequest_Update{Update: protoEuc}})
 		default:
-			return errors.Errorf("unrecognized entity write operation %T", op)
+			return fmt.Errorf("unrecognized entity write operation %T", op)
 		}
 	}
 
-	_, err = client.WriteEntities(context.Background(), req)
+	_, err = client.WriteEntities(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -292,8 +292,8 @@ func WriteEntities(networkID string, writes []EntityWriteOperation, serdes serde
 }
 
 // CreateEntity creates a network entity.
-func CreateEntity(networkID string, entity NetworkEntity, serdes serde.Registry) (NetworkEntity, error) {
-	ret, err := CreateEntities(networkID, NetworkEntities{entity}, serdes)
+func CreateEntity(ctx context.Context, networkID string, entity NetworkEntity, serdes serde.Registry) (NetworkEntity, error) {
+	ret, err := CreateEntities(ctx, networkID, NetworkEntities{entity}, serdes)
 	if err != nil {
 		return NetworkEntity{}, err
 	}
@@ -302,7 +302,7 @@ func CreateEntity(networkID string, entity NetworkEntity, serdes serde.Registry)
 
 // CreateEntities registers the given entities and returns the created network
 // entities.
-func CreateEntities(networkID string, entities NetworkEntities, serdes serde.Registry) (NetworkEntities, error) {
+func CreateEntities(ctx context.Context, networkID string, entities NetworkEntities, serdes serde.Registry) (NetworkEntities, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return nil, err
@@ -316,7 +316,7 @@ func CreateEntities(networkID string, entities NetworkEntities, serdes serde.Reg
 		}
 		req.Entities = append(req.Entities, protoEnt)
 	}
-	res, err := client.CreateEntities(context.Background(), req)
+	res, err := client.CreateEntities(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -327,13 +327,13 @@ func CreateEntities(networkID string, entities NetworkEntities, serdes serde.Reg
 
 // CreateInternalEntity is a loose wrapper around CreateEntity to create an
 // entity in the internal network structure
-func CreateInternalEntity(entity NetworkEntity, serdes serde.Registry) (NetworkEntity, error) {
-	return CreateEntity(storage.InternalNetworkID, entity, serdes)
+func CreateInternalEntity(ctx context.Context, entity NetworkEntity, serdes serde.Registry) (NetworkEntity, error) {
+	return CreateEntity(ctx, storage.InternalNetworkID, entity, serdes)
 }
 
 // UpdateEntity updates a network entity.
-func UpdateEntity(networkID string, update EntityUpdateCriteria, serdes serde.Registry) (NetworkEntity, error) {
-	updates, err := UpdateEntities(networkID, []EntityUpdateCriteria{update}, serdes)
+func UpdateEntity(ctx context.Context, networkID string, update EntityUpdateCriteria, serdes serde.Registry) (NetworkEntity, error) {
+	updates, err := UpdateEntities(ctx, networkID, []EntityUpdateCriteria{update}, serdes)
 	if err != nil {
 		return NetworkEntity{}, err
 	}
@@ -344,7 +344,7 @@ func UpdateEntity(networkID string, update EntityUpdateCriteria, serdes serde.Re
 }
 
 // UpdateEntities updates the registered entities and returns the updated entities
-func UpdateEntities(networkID string, updates []EntityUpdateCriteria, serdes serde.Registry) (NetworkEntities, error) {
+func UpdateEntities(ctx context.Context, networkID string, updates []EntityUpdateCriteria, serdes serde.Registry) (NetworkEntities, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return nil, err
@@ -358,7 +358,7 @@ func UpdateEntities(networkID string, updates []EntityUpdateCriteria, serdes ser
 		}
 		req.Updates = append(req.Updates, upProto)
 	}
-	res, err := client.UpdateEntities(context.Background(), req)
+	res, err := client.UpdateEntities(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -371,33 +371,33 @@ func UpdateEntities(networkID string, updates []EntityUpdateCriteria, serdes ser
 
 // UpdateInternalEntity is a loose wrapper around UpdateEntity to update an
 // entity in the internal network structure.
-func UpdateInternalEntity(update EntityUpdateCriteria, serdes serde.Registry) (NetworkEntity, error) {
-	return UpdateEntity(storage.InternalNetworkID, update, serdes)
+func UpdateInternalEntity(ctx context.Context, update EntityUpdateCriteria, serdes serde.Registry) (NetworkEntity, error) {
+	return UpdateEntity(ctx, storage.InternalNetworkID, update, serdes)
 }
 
-func CreateOrUpdateEntityConfig(networkID string, entityType string, entityKey string, config interface{}, serdes serde.Registry) error {
+func CreateOrUpdateEntityConfig(ctx context.Context, networkID string, entityType string, entityKey string, config interface{}, serdes serde.Registry) error {
 	updateCriteria := EntityUpdateCriteria{
 		Key:       entityKey,
 		Type:      entityType,
 		NewConfig: config,
 	}
-	_, err := UpdateEntities(networkID, []EntityUpdateCriteria{updateCriteria}, serdes)
+	_, err := UpdateEntities(ctx, networkID, []EntityUpdateCriteria{updateCriteria}, serdes)
 	return err
 }
 
-func DeleteEntity(networkID string, entityType string, entityKey string) error {
-	return DeleteEntities(networkID, storage2.TKs{{Type: entityType, Key: entityKey}})
+func DeleteEntity(ctx context.Context, networkID string, entityType string, entityKey string) error {
+	return DeleteEntities(ctx, networkID, storage2.TKs{{Type: entityType, Key: entityKey}})
 }
 
 // DeleteEntities deletes the entities specified by networkID and tks.
 // We also have cascading deletes to delete foreign keys for assocs.
-func DeleteEntities(networkID string, ids storage2.TKs) error {
+func DeleteEntities(ctx context.Context, networkID string, ids storage2.TKs) error {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return err
 	}
 	_, err = client.DeleteEntities(
-		context.Background(),
+		ctx,
 		&protos.DeleteEntitiesRequest{
 			NetworkID: networkID,
 			ID:        tksToEntIDs(ids),
@@ -408,14 +408,14 @@ func DeleteEntities(networkID string, ids storage2.TKs) error {
 
 // DeleteInternalEntity is a loose wrapper around DeleteEntities to delete an
 // entity in the internal network structure
-func DeleteInternalEntity(entityType, entityKey string) error {
-	return DeleteEntity(storage.InternalNetworkID, entityType, entityKey)
+func DeleteInternalEntity(ctx context.Context, entityType, entityKey string) error {
+	return DeleteEntity(ctx, storage.InternalNetworkID, entityType, entityKey)
 }
 
 // GetPhysicalIDOfEntity gets the physicalID associated with the entity identified by (networkID, entityType, entityKey)
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func GetPhysicalIDOfEntity(networkID, entityType, entityKey string) (string, error) {
-	entity, err := LoadSerializedEntity(networkID, entityType, entityKey, EntityLoadCriteria{})
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func GetPhysicalIDOfEntity(ctx context.Context, networkID, entityType, entityKey string) (string, error) {
+	entity, err := LoadSerializedEntity(ctx, networkID, entityType, entityKey, EntityLoadCriteria{})
 	if err != nil {
 		return "", err
 	}
@@ -423,18 +423,19 @@ func GetPhysicalIDOfEntity(networkID, entityType, entityKey string) (string, err
 }
 
 // ListEntityKeys returns all keys for an entity type in a network.
-func ListEntityKeys(networkID string, entityType string) ([]string, error) {
+func ListEntityKeys(ctx context.Context, networkID string, entityType string) ([]string, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
 		return []string{}, err
 	}
-	networkExists, _ := DoesNetworkExist(networkID)
+
+	networkExists, _ := DoesNetworkExist(ctx, networkID)
 	if !networkExists {
 		return []string{}, merrors.ErrNotFound
 	}
 
 	res, err := client.LoadEntities(
-		context.Background(),
+		ctx,
 		&protos.LoadEntitiesRequest{
 			NetworkID: networkID,
 			Filter: &storage.EntityLoadFilter{
@@ -451,15 +452,16 @@ func ListEntityKeys(networkID string, entityType string) ([]string, error) {
 }
 
 // ListInternalEntityKeys calls ListEntityKeys with the internal networkID
-func ListInternalEntityKeys(entityType string) ([]string, error) {
-	return ListEntityKeys(storage.InternalNetworkID, entityType)
+func ListInternalEntityKeys(ctx context.Context, entityType string) ([]string, error) {
+	return ListEntityKeys(ctx, storage.InternalNetworkID, entityType)
 }
 
 // LoadEntity loads the network entity identified by (network ID, entity type, entity key).
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func LoadEntity(networkID string, entityType string, entityKey string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntity, error) {
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func LoadEntity(ctx context.Context, networkID string, entityType string, entityKey string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntity, error) {
 	ret := NetworkEntity{}
 	loaded, notFound, err := LoadEntities(
+		ctx,
 		networkID,
 		nil, nil, nil,
 		storage2.TKs{{Type: entityType, Key: entityKey}},
@@ -476,9 +478,9 @@ func LoadEntity(networkID string, entityType string, entityKey string, criteria 
 }
 
 // LoadEntityConfig loads the config for the entity identified by (network ID, entity type, entity key).
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func LoadEntityConfig(networkID, entityType, entityKey string, serdes serde.Registry) (interface{}, error) {
-	entity, err := LoadEntity(networkID, entityType, entityKey, EntityLoadCriteria{LoadConfig: true}, serdes)
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func LoadEntityConfig(ctx context.Context, networkID, entityType, entityKey string, serdes serde.Registry) (interface{}, error) {
+	entity, err := LoadEntity(ctx, networkID, entityType, entityKey, EntityLoadCriteria{LoadConfig: true}, serdes)
 	if err != nil {
 		return nil, err
 	}
@@ -489,10 +491,11 @@ func LoadEntityConfig(networkID, entityType, entityKey string, serdes serde.Regi
 }
 
 // LoadEntityForPhysicalID loads the network entity identified by the physical ID.
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func LoadEntityForPhysicalID(physicalID string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntity, error) {
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func LoadEntityForPhysicalID(ctx context.Context, physicalID string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntity, error) {
 	ret := NetworkEntity{}
 	loaded, _, err := LoadEntities(
+		ctx,
 		"placeholder",
 		nil, nil, &physicalID,
 		nil,
@@ -506,7 +509,7 @@ func LoadEntityForPhysicalID(physicalID string, criteria EntityLoadCriteria, ser
 		return ret, merrors.ErrNotFound
 	}
 	if len(loaded) > 1 {
-		return ret, errors.Errorf("expected one entity from query, found %d", len(loaded))
+		return ret, fmt.Errorf("expected one entity from query, found %d", len(loaded))
 	}
 	return loaded[0], nil
 }
@@ -515,32 +518,25 @@ func LoadEntityForPhysicalID(physicalID string, criteria EntityLoadCriteria, ser
 // typeFilter, keyFilter, physicalID, and ids are all used to define a filter to
 // filter out results - if they are all nil, it will return all network entities
 // If ids is empty, all entities will be returned
-func LoadEntities(
-	networkID string,
-	typeFilter *string,
-	keyFilter *string,
-	physicalID *string,
-	ids storage2.TKs,
-	criteria EntityLoadCriteria,
-	serdes serde.Registry,
-) (NetworkEntities, storage2.TKs, error) {
-	protoEnts, notFound, err := loadEntities(networkID, typeFilter, keyFilter, physicalID, ids, criteria)
+func LoadEntities(ctx context.Context, networkID string, typeFilter *string, keyFilter *string, physicalID *string, ids storage2.TKs, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntities, storage2.TKs, error) {
+	protoEnts, notFound, err := loadEntities(ctx, networkID, typeFilter, keyFilter, physicalID, ids, criteria)
 	if err != nil {
 		return nil, nil, err
 	}
 	ret, err := (NetworkEntities{}).fromProtos(protoEnts, serdes)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "request succeeded but deserialization failed")
+		return nil, nil, fmt.Errorf("request succeeded but deserialization failed: %w", err)
 	}
 	return ret, entIDsToTKs(notFound), nil
 }
 
 // LoadSerializedEntity is same as LoadEntity, but doesn't deserialize the
 // loaded entity.
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func LoadSerializedEntity(networkID string, entityType string, entityKey string, criteria EntityLoadCriteria) (NetworkEntity, error) {
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func LoadSerializedEntity(ctx context.Context, networkID string, entityType string, entityKey string, criteria EntityLoadCriteria) (NetworkEntity, error) {
 	ret := NetworkEntity{}
 	loaded, notFound, err := LoadSerializedEntities(
+		ctx,
 		networkID,
 		nil, nil, nil,
 		storage2.TKs{{Type: entityType, Key: entityKey}},
@@ -558,6 +554,7 @@ func LoadSerializedEntity(networkID string, entityType string, entityKey string,
 // LoadSerializedEntities is same as LoadEntities, but doesn't deserialize
 // the loaded entities.
 func LoadSerializedEntities(
+	ctx context.Context,
 	networkID string,
 	typeFilter *string,
 	keyFilter *string,
@@ -565,7 +562,7 @@ func LoadSerializedEntities(
 	ids storage2.TKs,
 	criteria EntityLoadCriteria,
 ) (NetworkEntities, storage2.TKs, error) {
-	protoEnts, notFound, err := loadEntities(networkID, typeFilter, keyFilter, physicalID, ids, criteria)
+	protoEnts, notFound, err := loadEntities(ctx, networkID, typeFilter, keyFilter, physicalID, ids, criteria)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -574,6 +571,7 @@ func LoadSerializedEntities(
 }
 
 func loadEntities(
+	ctx context.Context,
 	networkID string,
 	typeFilter *string,
 	keyFilter *string,
@@ -587,7 +585,7 @@ func loadEntities(
 	}
 
 	res, err := client.LoadEntities(
-		context.Background(),
+		ctx,
 		&protos.LoadEntitiesRequest{
 			NetworkID: networkID,
 			Filter: &storage.EntityLoadFilter{
@@ -607,15 +605,16 @@ func loadEntities(
 }
 
 // LoadInternalEntity calls LoadEntity with the internal network ID.
-// If not found, returns ErrNotFound from magma/orc8r/lib/go/errors.
-func LoadInternalEntity(entityType string, entityKey string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntity, error) {
-	return LoadEntity(storage.InternalNetworkID, entityType, entityKey, criteria, serdes)
+// If not found, returns ErrNotFound from magma/orc8r/lib/go/merrors.
+func LoadInternalEntity(ctx context.Context, entityType string, entityKey string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntity, error) {
+	return LoadEntity(ctx, storage.InternalNetworkID, entityType, entityKey, criteria, serdes)
 }
 
 // DoesEntityExist returns a boolean that indicated whether the entity specified
 // exists in the network
-func DoesEntityExist(networkID, entityType, entityKey string) (bool, error) {
+func DoesEntityExist(ctx context.Context, networkID, entityType, entityKey string) (bool, error) {
 	found, _, err := loadEntities(
+		ctx,
 		networkID,
 		nil, nil, nil,
 		storage2.TKs{{Type: entityType, Key: entityKey}},
@@ -632,11 +631,12 @@ func DoesEntityExist(networkID, entityType, entityKey string) (bool, error) {
 
 // DoEntitiesExist returns a boolean that indicated whether all entities
 // specified exist in the network
-func DoEntitiesExist(networkID string, ids storage2.TKs) (bool, error) {
+func DoEntitiesExist(ctx context.Context, networkID string, ids storage2.TKs) (bool, error) {
 	if len(ids) == 0 {
 		return true, nil
 	}
 	found, _, err := loadEntities(
+		ctx,
 		networkID,
 		nil, nil, nil,
 		ids,
@@ -652,19 +652,22 @@ func DoEntitiesExist(networkID string, ids storage2.TKs) (bool, error) {
 }
 
 // DoesInternalEntityExist calls DoesEntityExist with the internal networkID
-func DoesInternalEntityExist(entityType, entityKey string) (bool, error) {
-	return DoesEntityExist(storage.InternalNetworkID, entityType, entityKey)
+func DoesInternalEntityExist(ctx context.Context, entityType, entityKey string) (bool, error) {
+	return DoesEntityExist(ctx, storage.InternalNetworkID, entityType, entityKey)
 }
 
-// LoadAllEntitiesOfType fetches all entities of specified type in a network
-func LoadAllEntitiesOfType(networkID string, entityType string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntities, error) {
+// LoadAllEntitiesOfType fetches all entities of specified type in a network.
+// Loads can be paginated by specifying a page size and token in the entity
+// load criteria. To exhaustively read all pages, clients must continue
+// querying until an empty page token is received in the load result.
+func LoadAllEntitiesOfType(ctx context.Context, networkID string, entityType string, criteria EntityLoadCriteria, serdes serde.Registry) (NetworkEntities, string, error) {
 	client, err := getNBConfiguratorClient()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	res, err := client.LoadEntities(
-		context.Background(),
+		ctx,
 		&protos.LoadEntitiesRequest{
 			NetworkID: networkID,
 			Filter: &storage.EntityLoadFilter{
@@ -674,19 +677,40 @@ func LoadAllEntitiesOfType(networkID string, entityType string, criteria EntityL
 		},
 	)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	ret, err := (NetworkEntities{}).fromProtos(res.Entities, serdes)
 	if err != nil {
-		return nil, errors.Wrap(err, "request succeeded but deserialization failed")
+		return nil, "", fmt.Errorf("request succeeded but deserialization failed: %w", err)
 	}
 
-	return ret, nil
+	return ret, res.NextPageToken, nil
+}
+
+// CountEntitiesOfType provides total count of entities of this type
+func CountEntitiesOfType(ctx context.Context, networkID string, entityType string) (uint64, error) {
+	client, err := getNBConfiguratorClient()
+	if err != nil {
+		return 0, err
+	}
+	res, err := client.CountEntities(
+		ctx,
+		&protos.LoadEntitiesRequest{
+			NetworkID: networkID,
+			Filter: &storage.EntityLoadFilter{
+				TypeFilter: &wrappers.StringValue{Value: entityType},
+			},
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.Count, nil
 }
 
 func getNBConfiguratorClient() (protos.NorthboundConfiguratorClient, error) {
-	conn, err := registry.GetConnection(ServiceName)
+	conn, err := registry.GetConnection(ServiceName, commonProtos.ServiceType_PROTECTED)
 	if err != nil {
 		initErr := merrors.NewInitError(err, ServiceName)
 		glog.Error(initErr)
@@ -695,16 +719,16 @@ func getNBConfiguratorClient() (protos.NorthboundConfiguratorClient, error) {
 	return protos.NewNorthboundConfiguratorClient(conn), err
 }
 
-func GetMconfigFor(hardwareID string) (*protos.GetMconfigResponse, error) {
+func GetMconfigFor(ctx context.Context, hardwareID string) (*protos.GetMconfigResponse, error) {
 	client, err := getSBConfiguratorClient()
 	if err != nil {
 		return nil, err
 	}
-	return client.GetMconfigInternal(context.Background(), &protos.GetMconfigRequest{HardwareID: hardwareID})
+	return client.GetMconfigInternal(ctx, &protos.GetMconfigRequest{HardwareID: hardwareID})
 }
 
 func getSBConfiguratorClient() (protos.SouthboundConfiguratorClient, error) {
-	conn, err := registry.GetConnection(ServiceName)
+	conn, err := registry.GetConnection(ServiceName, commonProtos.ServiceType_SOUTHBOUND)
 	if err != nil {
 		initErr := merrors.NewInitError(err, ServiceName)
 		glog.Error(initErr)

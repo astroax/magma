@@ -14,8 +14,9 @@
 # HSS Config
 #
 # ---
-#subscribers:
+# subscribers:
 #  <imsi>:
 #    <auth_key>: - required (hex string)
 #    <non_3gpp_enabled>: - optional (bool)
+#    <lte_auth_next_seq>: - optional (int)
 subscribers:

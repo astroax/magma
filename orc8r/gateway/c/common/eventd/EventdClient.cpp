@@ -10,17 +10,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "EventdClient.h"
+#include "orc8r/gateway/c/common/eventd/EventdClient.hpp"
 
-#include "ServiceRegistrySingleton.h"
+#include <grpcpp/channel.h>
+#include <orc8r/protos/common.pb.h>       // for Void
+#include <orc8r/protos/eventd.grpc.pb.h>  // for EventService::Stub
+#include <utility>                        // for move
 
-using grpc::ClientContext;
-using grpc::Status;
-using magma::orc8r::Event;
-using magma::orc8r::EventService;
-using magma::orc8r::Void;
+#include "orc8r/gateway/c/common/service_registry/ServiceRegistrySingleton.hpp"  // for ServiceRegistrySin...
+
+namespace grpc {
+class Status;
+}  // namespace grpc
+namespace magma {
+namespace orc8r {
+class Event;
+}
+}  // namespace magma
 
 namespace magma {
+
+using orc8r::Event;
+using orc8r::EventService;
+using orc8r::Void;
 
 AsyncEventdClient& AsyncEventdClient::getInstance() {
   static AsyncEventdClient instance;
@@ -30,14 +42,14 @@ AsyncEventdClient& AsyncEventdClient::getInstance() {
 AsyncEventdClient::AsyncEventdClient() {
   std::shared_ptr<Channel> channel;
   channel = ServiceRegistrySingleton::Instance()->GetGrpcChannel(
-          "eventd", ServiceRegistrySingleton::LOCAL);
+      "eventd", ServiceRegistrySingleton::LOCAL);
   stub_ = EventService::NewStub(channel);
 }
 
 void AsyncEventdClient::log_event(
     const Event& request, std::function<void(Status status, Void)> callback) {
   auto local_response =
-      new AsyncLocalResponse<Void>(std::move(callback), RESPONSE_TIMEOUT);
+      new AsyncLocalResponse<Void>(std::move(callback), RESPONSE_TIMEOUT_SEC);
   local_response->set_response_reader(std::move(
       stub_->AsyncLogEvent(local_response->get_context(), request, &queue_)));
 }

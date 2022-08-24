@@ -17,12 +17,13 @@ import (
 	"context"
 	"strings"
 
+	"github.com/golang/glog"
+
 	state_protos "magma/orc8r/cloud/go/services/state/protos"
 	state_types "magma/orc8r/cloud/go/services/state/types"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/lib/go/merrors"
+	lib_protos "magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/golang/glog"
 )
 
 // remoteIndexer identifies a remote state indexer.
@@ -86,11 +87,6 @@ func (r *remoteIndexer) Index(networkID string, states state_types.SerializedSta
 	if len(states) == 0 {
 		return nil, nil
 	}
-	var reporterHWID string
-	for _, st := range states {
-		reporterHWID = st.ReporterID
-		break
-	}
 
 	c, err := r.getIndexerClient()
 	if err != nil {
@@ -102,9 +98,33 @@ func (r *remoteIndexer) Index(networkID string, states state_types.SerializedSta
 		return nil, err
 	}
 	res, err := c.Index(context.Background(), &state_protos.IndexRequest{
-		States:       pStates,
-		NetworkId:    networkID,
-		ReporterHwid: reporterHWID,
+		States:    pStates,
+		NetworkId: networkID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return state_types.MakeStateErrors(res.StateErrors), nil
+}
+
+func (r *remoteIndexer) DeIndex(networkID string, states state_types.SerializedStatesByID) (state_types.StateErrors, error) {
+	if len(states) == 0 {
+		return nil, nil
+	}
+
+	c, err := r.getIndexerClient()
+	if err != nil {
+		return nil, err
+	}
+
+	pStates, err := state_types.MakeProtoStates(states)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.DeIndex(context.Background(), &state_protos.DeIndexRequest{
+		States:    pStates,
+		NetworkId: networkID,
 	})
 	if err != nil {
 		return nil, err
@@ -114,7 +134,7 @@ func (r *remoteIndexer) Index(networkID string, states state_types.SerializedSta
 }
 
 func (r *remoteIndexer) getIndexerClient() (state_protos.IndexerClient, error) {
-	conn, err := registry.GetConnection(r.service)
+	conn, err := registry.GetConnection(r.service, lib_protos.ServiceType_PROTECTED)
 	if err != nil {
 		initErr := merrors.NewInitError(err, r.service)
 		glog.Error(initErr)

@@ -6,52 +6,67 @@ package models
 // Editing this file might prove futile when you re-run the swagger generate command
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 
-	strfmt "github.com/go-openapi/strfmt"
-
 	"github.com/go-openapi/errors"
+	"github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
 	"github.com/go-openapi/validate"
 )
 
 // NetworkEpcConfigs EPC (evolved packet core) cellular configuration for a network
+//
 // swagger:model network_epc_configs
 type NetworkEpcConfigs struct {
 
 	// cloud subscriberdb enabled
+	// Example: false
 	CloudSubscriberdbEnabled bool `json:"cloud_subscriberdb_enabled,omitempty"`
 
+	// Network configuration flag for congestion control on EPC
+	// Example: true
+	CongestionControlEnabled *bool `json:"congestion_control_enabled,omitempty"`
+
 	// default rule id
+	// Example: default_rule_1
 	DefaultRuleID string `json:"default_rule_id,omitempty"`
 
+	// Enables 5G Standalone (SA) at a network level
+	// Example: true
+	Enable5gFeatures *bool `json:"enable5g_features,omitempty"`
+
 	// gx gy relay enabled
+	// Example: false
 	// Required: true
 	GxGyRelayEnabled *bool `json:"gx_gy_relay_enabled"`
 
 	// hss relay enabled
+	// Example: false
 	// Required: true
 	HssRelayEnabled *bool `json:"hss_relay_enabled"`
 
 	// lte auth amf
+	// Example: gAA=
 	// Required: true
 	// Format: byte
 	LteAuthAmf strfmt.Base64 `json:"lte_auth_amf"`
 
 	// lte auth op
+	// Example: EREREREREREREREREREREQ==
 	// Required: true
-	// Max Length: 16
-	// Min Length: 15
 	// Format: byte
 	LteAuthOp strfmt.Base64 `json:"lte_auth_op"`
 
 	// mcc
+	// Example: 001
 	// Required: true
 	// Pattern: ^(\d{3})$
 	Mcc string `json:"mcc"`
 
 	// mnc
+	// Example: 01
 	// Required: true
 	// Pattern: ^(\d{2,3})$
 	Mnc string `json:"mnc"`
@@ -60,12 +75,26 @@ type NetworkEpcConfigs struct {
 	Mobility *NetworkEpcConfigsMobility `json:"mobility,omitempty"`
 
 	// Configuration for network services. Services will be instantiated in the listed order.
+	// Example: ["policy_enforcement"]
 	NetworkServices []string `json:"network_services,omitempty"`
+
+	// List of IMEIs restricted in the network
+	RestrictedImeis []*Imei `json:"restricted_imeis,omitempty"`
+
+	// List of PLMN IDs restricted in the network
+	RestrictedPlmns []*PlmnConfig `json:"restricted_plmns,omitempty"`
+
+	// Mapping service areas to tacs in the network
+	ServiceAreaMaps map[string]TacList `json:"service_area_maps,omitempty"`
 
 	// sub profiles
 	SubProfiles map[string]NetworkEpcConfigsSubProfilesAnon `json:"sub_profiles,omitempty"`
 
+	// subscriberdb sync interval
+	SubscriberdbSyncInterval SubscriberdbSyncInterval `json:"subscriberdb_sync_interval,omitempty"`
+
 	// tac
+	// Example: 1
 	// Required: true
 	// Maximum: 65535
 	// Minimum: 1
@@ -108,7 +137,23 @@ func (m *NetworkEpcConfigs) Validate(formats strfmt.Registry) error {
 		res = append(res, err)
 	}
 
+	if err := m.validateRestrictedImeis(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.validateRestrictedPlmns(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.validateServiceAreaMaps(formats); err != nil {
+		res = append(res, err)
+	}
+
 	if err := m.validateSubProfiles(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.validateSubscriberdbSyncInterval(formats); err != nil {
 		res = append(res, err)
 	}
 
@@ -146,8 +191,6 @@ func (m *NetworkEpcConfigs) validateLteAuthAmf(formats strfmt.Registry) error {
 		return err
 	}
 
-	// Format "byte" (base64 string) is already validated when unmarshalled
-
 	return nil
 }
 
@@ -157,26 +200,16 @@ func (m *NetworkEpcConfigs) validateLteAuthOp(formats strfmt.Registry) error {
 		return err
 	}
 
-	if err := validate.MinLength("lte_auth_op", "body", string(m.LteAuthOp), 15); err != nil {
-		return err
-	}
-
-	if err := validate.MaxLength("lte_auth_op", "body", string(m.LteAuthOp), 16); err != nil {
-		return err
-	}
-
-	// Format "byte" (base64 string) is already validated when unmarshalled
-
 	return nil
 }
 
 func (m *NetworkEpcConfigs) validateMcc(formats strfmt.Registry) error {
 
-	if err := validate.RequiredString("mcc", "body", string(m.Mcc)); err != nil {
+	if err := validate.RequiredString("mcc", "body", m.Mcc); err != nil {
 		return err
 	}
 
-	if err := validate.Pattern("mcc", "body", string(m.Mcc), `^(\d{3})$`); err != nil {
+	if err := validate.Pattern("mcc", "body", m.Mcc, `^(\d{3})$`); err != nil {
 		return err
 	}
 
@@ -185,11 +218,11 @@ func (m *NetworkEpcConfigs) validateMcc(formats strfmt.Registry) error {
 
 func (m *NetworkEpcConfigs) validateMnc(formats strfmt.Registry) error {
 
-	if err := validate.RequiredString("mnc", "body", string(m.Mnc)); err != nil {
+	if err := validate.RequiredString("mnc", "body", m.Mnc); err != nil {
 		return err
 	}
 
-	if err := validate.Pattern("mnc", "body", string(m.Mnc), `^(\d{2,3})$`); err != nil {
+	if err := validate.Pattern("mnc", "body", m.Mnc, `^(\d{2,3})$`); err != nil {
 		return err
 	}
 
@@ -197,7 +230,6 @@ func (m *NetworkEpcConfigs) validateMnc(formats strfmt.Registry) error {
 }
 
 func (m *NetworkEpcConfigs) validateMobility(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.Mobility) { // not required
 		return nil
 	}
@@ -206,6 +238,8 @@ func (m *NetworkEpcConfigs) validateMobility(formats strfmt.Registry) error {
 		if err := m.Mobility.Validate(formats); err != nil {
 			if ve, ok := err.(*errors.Validation); ok {
 				return ve.ValidateName("mobility")
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("mobility")
 			}
 			return err
 		}
@@ -227,14 +261,13 @@ func init() {
 }
 
 func (m *NetworkEpcConfigs) validateNetworkServicesItemsEnum(path, location string, value string) error {
-	if err := validate.Enum(path, location, value, networkEpcConfigsNetworkServicesItemsEnum); err != nil {
+	if err := validate.EnumCase(path, location, value, networkEpcConfigsNetworkServicesItemsEnum, true); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (m *NetworkEpcConfigs) validateNetworkServices(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.NetworkServices) { // not required
 		return nil
 	}
@@ -251,8 +284,80 @@ func (m *NetworkEpcConfigs) validateNetworkServices(formats strfmt.Registry) err
 	return nil
 }
 
-func (m *NetworkEpcConfigs) validateSubProfiles(formats strfmt.Registry) error {
+func (m *NetworkEpcConfigs) validateRestrictedImeis(formats strfmt.Registry) error {
+	if swag.IsZero(m.RestrictedImeis) { // not required
+		return nil
+	}
 
+	for i := 0; i < len(m.RestrictedImeis); i++ {
+		if swag.IsZero(m.RestrictedImeis[i]) { // not required
+			continue
+		}
+
+		if m.RestrictedImeis[i] != nil {
+			if err := m.RestrictedImeis[i].Validate(formats); err != nil {
+				if ve, ok := err.(*errors.Validation); ok {
+					return ve.ValidateName("restricted_imeis" + "." + strconv.Itoa(i))
+				} else if ce, ok := err.(*errors.CompositeError); ok {
+					return ce.ValidateName("restricted_imeis" + "." + strconv.Itoa(i))
+				}
+				return err
+			}
+		}
+
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) validateRestrictedPlmns(formats strfmt.Registry) error {
+	if swag.IsZero(m.RestrictedPlmns) { // not required
+		return nil
+	}
+
+	for i := 0; i < len(m.RestrictedPlmns); i++ {
+		if swag.IsZero(m.RestrictedPlmns[i]) { // not required
+			continue
+		}
+
+		if m.RestrictedPlmns[i] != nil {
+			if err := m.RestrictedPlmns[i].Validate(formats); err != nil {
+				if ve, ok := err.(*errors.Validation); ok {
+					return ve.ValidateName("restricted_plmns" + "." + strconv.Itoa(i))
+				} else if ce, ok := err.(*errors.CompositeError); ok {
+					return ce.ValidateName("restricted_plmns" + "." + strconv.Itoa(i))
+				}
+				return err
+			}
+		}
+
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) validateServiceAreaMaps(formats strfmt.Registry) error {
+	if swag.IsZero(m.ServiceAreaMaps) { // not required
+		return nil
+	}
+
+	for k := range m.ServiceAreaMaps {
+
+		if err := m.ServiceAreaMaps[k].Validate(formats); err != nil {
+			if ve, ok := err.(*errors.Validation); ok {
+				return ve.ValidateName("service_area_maps" + "." + k)
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("service_area_maps" + "." + k)
+			}
+			return err
+		}
+
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) validateSubProfiles(formats strfmt.Registry) error {
 	if swag.IsZero(m.SubProfiles) { // not required
 		return nil
 	}
@@ -264,10 +369,32 @@ func (m *NetworkEpcConfigs) validateSubProfiles(formats strfmt.Registry) error {
 		}
 		if val, ok := m.SubProfiles[k]; ok {
 			if err := val.Validate(formats); err != nil {
+				if ve, ok := err.(*errors.Validation); ok {
+					return ve.ValidateName("sub_profiles" + "." + k)
+				} else if ce, ok := err.(*errors.CompositeError); ok {
+					return ce.ValidateName("sub_profiles" + "." + k)
+				}
 				return err
 			}
 		}
 
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) validateSubscriberdbSyncInterval(formats strfmt.Registry) error {
+	if swag.IsZero(m.SubscriberdbSyncInterval) { // not required
+		return nil
+	}
+
+	if err := m.SubscriberdbSyncInterval.Validate(formats); err != nil {
+		if ve, ok := err.(*errors.Validation); ok {
+			return ve.ValidateName("subscriberdb_sync_interval")
+		} else if ce, ok := err.(*errors.CompositeError); ok {
+			return ce.ValidateName("subscriberdb_sync_interval")
+		}
+		return err
 	}
 
 	return nil
@@ -279,11 +406,148 @@ func (m *NetworkEpcConfigs) validateTac(formats strfmt.Registry) error {
 		return err
 	}
 
-	if err := validate.MinimumInt("tac", "body", int64(m.Tac), 1, false); err != nil {
+	if err := validate.MinimumUint("tac", "body", uint64(m.Tac), 1, false); err != nil {
 		return err
 	}
 
-	if err := validate.MaximumInt("tac", "body", int64(m.Tac), 65535, false); err != nil {
+	if err := validate.MaximumUint("tac", "body", uint64(m.Tac), 65535, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ContextValidate validate this network epc configs based on the context it is used
+func (m *NetworkEpcConfigs) ContextValidate(ctx context.Context, formats strfmt.Registry) error {
+	var res []error
+
+	if err := m.contextValidateMobility(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.contextValidateRestrictedImeis(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.contextValidateRestrictedPlmns(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.contextValidateServiceAreaMaps(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.contextValidateSubProfiles(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.contextValidateSubscriberdbSyncInterval(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
+	return nil
+}
+
+func (m *NetworkEpcConfigs) contextValidateMobility(ctx context.Context, formats strfmt.Registry) error {
+
+	if m.Mobility != nil {
+		if err := m.Mobility.ContextValidate(ctx, formats); err != nil {
+			if ve, ok := err.(*errors.Validation); ok {
+				return ve.ValidateName("mobility")
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("mobility")
+			}
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) contextValidateRestrictedImeis(ctx context.Context, formats strfmt.Registry) error {
+
+	for i := 0; i < len(m.RestrictedImeis); i++ {
+
+		if m.RestrictedImeis[i] != nil {
+			if err := m.RestrictedImeis[i].ContextValidate(ctx, formats); err != nil {
+				if ve, ok := err.(*errors.Validation); ok {
+					return ve.ValidateName("restricted_imeis" + "." + strconv.Itoa(i))
+				} else if ce, ok := err.(*errors.CompositeError); ok {
+					return ce.ValidateName("restricted_imeis" + "." + strconv.Itoa(i))
+				}
+				return err
+			}
+		}
+
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) contextValidateRestrictedPlmns(ctx context.Context, formats strfmt.Registry) error {
+
+	for i := 0; i < len(m.RestrictedPlmns); i++ {
+
+		if m.RestrictedPlmns[i] != nil {
+			if err := m.RestrictedPlmns[i].ContextValidate(ctx, formats); err != nil {
+				if ve, ok := err.(*errors.Validation); ok {
+					return ve.ValidateName("restricted_plmns" + "." + strconv.Itoa(i))
+				} else if ce, ok := err.(*errors.CompositeError); ok {
+					return ce.ValidateName("restricted_plmns" + "." + strconv.Itoa(i))
+				}
+				return err
+			}
+		}
+
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) contextValidateServiceAreaMaps(ctx context.Context, formats strfmt.Registry) error {
+
+	for k := range m.ServiceAreaMaps {
+
+		if err := m.ServiceAreaMaps[k].ContextValidate(ctx, formats); err != nil {
+			if ve, ok := err.(*errors.Validation); ok {
+				return ve.ValidateName("service_area_maps" + "." + k)
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("service_area_maps" + "." + k)
+			}
+			return err
+		}
+
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) contextValidateSubProfiles(ctx context.Context, formats strfmt.Registry) error {
+
+	for k := range m.SubProfiles {
+
+		if val, ok := m.SubProfiles[k]; ok {
+			if err := val.ContextValidate(ctx, formats); err != nil {
+				return err
+			}
+		}
+
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigs) contextValidateSubscriberdbSyncInterval(ctx context.Context, formats strfmt.Registry) error {
+
+	if err := m.SubscriberdbSyncInterval.ContextValidate(ctx, formats); err != nil {
+		if ve, ok := err.(*errors.Validation); ok {
+			return ve.ValidateName("subscriberdb_sync_interval")
+		} else if ce, ok := err.(*errors.CompositeError); ok {
+			return ce.ValidateName("subscriberdb_sync_interval")
+		}
 		return err
 	}
 
@@ -309,16 +573,20 @@ func (m *NetworkEpcConfigs) UnmarshalBinary(b []byte) error {
 }
 
 // NetworkEpcConfigsMobility Configuration for IP Allocation (Mobility).
+//
 // swagger:model NetworkEpcConfigsMobility
 type NetworkEpcConfigsMobility struct {
 
 	// enable multi apn ip allocation
+	// Example: true
 	EnableMultiApnIPAllocation bool `json:"enable_multi_apn_ip_allocation,omitempty"`
 
 	// enable static ip assignments
+	// Example: true
 	EnableStaticIPAssignments bool `json:"enable_static_ip_assignments,omitempty"`
 
 	// ip allocation mode
+	// Example: NAT
 	// Required: true
 	// Enum: [NAT STATIC DHCP_PASSTHROUGH DHCP_BROADCAST]
 	IPAllocationMode string `json:"ip_allocation_mode"`
@@ -388,7 +656,7 @@ const (
 
 // prop value enum
 func (m *NetworkEpcConfigsMobility) validateIPAllocationModeEnum(path, location string, value string) error {
-	if err := validate.Enum(path, location, value, networkEpcConfigsMobilityTypeIPAllocationModePropEnum); err != nil {
+	if err := validate.EnumCase(path, location, value, networkEpcConfigsMobilityTypeIPAllocationModePropEnum, true); err != nil {
 		return err
 	}
 	return nil
@@ -396,7 +664,7 @@ func (m *NetworkEpcConfigsMobility) validateIPAllocationModeEnum(path, location 
 
 func (m *NetworkEpcConfigsMobility) validateIPAllocationMode(formats strfmt.Registry) error {
 
-	if err := validate.RequiredString("mobility"+"."+"ip_allocation_mode", "body", string(m.IPAllocationMode)); err != nil {
+	if err := validate.RequiredString("mobility"+"."+"ip_allocation_mode", "body", m.IPAllocationMode); err != nil {
 		return err
 	}
 
@@ -409,7 +677,6 @@ func (m *NetworkEpcConfigsMobility) validateIPAllocationMode(formats strfmt.Regi
 }
 
 func (m *NetworkEpcConfigsMobility) validateNat(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.Nat) { // not required
 		return nil
 	}
@@ -418,6 +685,8 @@ func (m *NetworkEpcConfigsMobility) validateNat(formats strfmt.Registry) error {
 		if err := m.Nat.Validate(formats); err != nil {
 			if ve, ok := err.(*errors.Validation); ok {
 				return ve.ValidateName("mobility" + "." + "nat")
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("mobility" + "." + "nat")
 			}
 			return err
 		}
@@ -427,7 +696,6 @@ func (m *NetworkEpcConfigsMobility) validateNat(formats strfmt.Registry) error {
 }
 
 func (m *NetworkEpcConfigsMobility) validateReservedAddresses(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.ReservedAddresses) { // not required
 		return nil
 	}
@@ -444,7 +712,6 @@ func (m *NetworkEpcConfigsMobility) validateReservedAddresses(formats strfmt.Reg
 }
 
 func (m *NetworkEpcConfigsMobility) validateStatic(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.Static) { // not required
 		return nil
 	}
@@ -453,6 +720,58 @@ func (m *NetworkEpcConfigsMobility) validateStatic(formats strfmt.Registry) erro
 		if err := m.Static.Validate(formats); err != nil {
 			if ve, ok := err.(*errors.Validation); ok {
 				return ve.ValidateName("mobility" + "." + "static")
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("mobility" + "." + "static")
+			}
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ContextValidate validate this network epc configs mobility based on the context it is used
+func (m *NetworkEpcConfigsMobility) ContextValidate(ctx context.Context, formats strfmt.Registry) error {
+	var res []error
+
+	if err := m.contextValidateNat(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.contextValidateStatic(ctx, formats); err != nil {
+		res = append(res, err)
+	}
+
+	if len(res) > 0 {
+		return errors.CompositeValidationError(res...)
+	}
+	return nil
+}
+
+func (m *NetworkEpcConfigsMobility) contextValidateNat(ctx context.Context, formats strfmt.Registry) error {
+
+	if m.Nat != nil {
+		if err := m.Nat.ContextValidate(ctx, formats); err != nil {
+			if ve, ok := err.(*errors.Validation); ok {
+				return ve.ValidateName("mobility" + "." + "nat")
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("mobility" + "." + "nat")
+			}
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *NetworkEpcConfigsMobility) contextValidateStatic(ctx context.Context, formats strfmt.Registry) error {
+
+	if m.Static != nil {
+		if err := m.Static.ContextValidate(ctx, formats); err != nil {
+			if ve, ok := err.(*errors.Validation); ok {
+				return ve.ValidateName("mobility" + "." + "static")
+			} else if ce, ok := err.(*errors.CompositeError); ok {
+				return ce.ValidateName("mobility" + "." + "static")
 			}
 			return err
 		}
@@ -480,6 +799,7 @@ func (m *NetworkEpcConfigsMobility) UnmarshalBinary(b []byte) error {
 }
 
 // NetworkEpcConfigsMobilityNat network epc configs mobility nat
+//
 // swagger:model NetworkEpcConfigsMobilityNat
 type NetworkEpcConfigsMobilityNat struct {
 
@@ -502,23 +822,27 @@ func (m *NetworkEpcConfigsMobilityNat) Validate(formats strfmt.Registry) error {
 }
 
 func (m *NetworkEpcConfigsMobilityNat) validateIPBlocks(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.IPBlocks) { // not required
 		return nil
 	}
 
 	for i := 0; i < len(m.IPBlocks); i++ {
 
-		if err := validate.MinLength("mobility"+"."+"nat"+"."+"ip_blocks"+"."+strconv.Itoa(i), "body", string(m.IPBlocks[i]), 5); err != nil {
+		if err := validate.MinLength("mobility"+"."+"nat"+"."+"ip_blocks"+"."+strconv.Itoa(i), "body", m.IPBlocks[i], 5); err != nil {
 			return err
 		}
 
-		if err := validate.MaxLength("mobility"+"."+"nat"+"."+"ip_blocks"+"."+strconv.Itoa(i), "body", string(m.IPBlocks[i]), 49); err != nil {
+		if err := validate.MaxLength("mobility"+"."+"nat"+"."+"ip_blocks"+"."+strconv.Itoa(i), "body", m.IPBlocks[i], 49); err != nil {
 			return err
 		}
 
 	}
 
+	return nil
+}
+
+// ContextValidate validates this network epc configs mobility nat based on context it is used
+func (m *NetworkEpcConfigsMobilityNat) ContextValidate(ctx context.Context, formats strfmt.Registry) error {
 	return nil
 }
 
@@ -541,10 +865,12 @@ func (m *NetworkEpcConfigsMobilityNat) UnmarshalBinary(b []byte) error {
 }
 
 // NetworkEpcConfigsMobilityStatic network epc configs mobility static
+//
 // swagger:model NetworkEpcConfigsMobilityStatic
 type NetworkEpcConfigsMobilityStatic struct {
 
 	// ip blocks by tac
+	// Example: {"1":["192.168.0.0/16"],"2":["172.10.0.0/16","172.20.0.0/16"]}
 	IPBlocksByTac map[string][]string `json:"ip_blocks_by_tac,omitempty"`
 }
 
@@ -563,7 +889,6 @@ func (m *NetworkEpcConfigsMobilityStatic) Validate(formats strfmt.Registry) erro
 }
 
 func (m *NetworkEpcConfigsMobilityStatic) validateIPBlocksByTac(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.IPBlocksByTac) { // not required
 		return nil
 	}
@@ -572,11 +897,11 @@ func (m *NetworkEpcConfigsMobilityStatic) validateIPBlocksByTac(formats strfmt.R
 
 		for i := 0; i < len(m.IPBlocksByTac[k]); i++ {
 
-			if err := validate.MinLength("mobility"+"."+"static"+"."+"ip_blocks_by_tac"+"."+k+"."+strconv.Itoa(i), "body", string(m.IPBlocksByTac[k][i]), 5); err != nil {
+			if err := validate.MinLength("mobility"+"."+"static"+"."+"ip_blocks_by_tac"+"."+k+"."+strconv.Itoa(i), "body", m.IPBlocksByTac[k][i], 5); err != nil {
 				return err
 			}
 
-			if err := validate.MaxLength("mobility"+"."+"static"+"."+"ip_blocks_by_tac"+"."+k+"."+strconv.Itoa(i), "body", string(m.IPBlocksByTac[k][i]), 49); err != nil {
+			if err := validate.MaxLength("mobility"+"."+"static"+"."+"ip_blocks_by_tac"+"."+k+"."+strconv.Itoa(i), "body", m.IPBlocksByTac[k][i], 49); err != nil {
 				return err
 			}
 
@@ -584,6 +909,11 @@ func (m *NetworkEpcConfigsMobilityStatic) validateIPBlocksByTac(formats strfmt.R
 
 	}
 
+	return nil
+}
+
+// ContextValidate validates this network epc configs mobility static based on context it is used
+func (m *NetworkEpcConfigsMobilityStatic) ContextValidate(ctx context.Context, formats strfmt.Registry) error {
 	return nil
 }
 
@@ -606,15 +936,18 @@ func (m *NetworkEpcConfigsMobilityStatic) UnmarshalBinary(b []byte) error {
 }
 
 // NetworkEpcConfigsSubProfilesAnon network epc configs sub profiles anon
+//
 // swagger:model NetworkEpcConfigsSubProfilesAnon
 type NetworkEpcConfigsSubProfilesAnon struct {
 
 	// max dl bit rate
+	// Example: 20000000
 	// Required: true
 	// Minimum: > 0
 	MaxDlBitRate uint64 `json:"max_dl_bit_rate"`
 
 	// max ul bit rate
+	// Example: 100000000
 	// Required: true
 	// Minimum: > 0
 	MaxUlBitRate uint64 `json:"max_ul_bit_rate"`
@@ -644,7 +977,7 @@ func (m *NetworkEpcConfigsSubProfilesAnon) validateMaxDlBitRate(formats strfmt.R
 		return err
 	}
 
-	if err := validate.MinimumInt("max_dl_bit_rate", "body", int64(m.MaxDlBitRate), 0, true); err != nil {
+	if err := validate.MinimumUint("max_dl_bit_rate", "body", m.MaxDlBitRate, 0, true); err != nil {
 		return err
 	}
 
@@ -657,10 +990,15 @@ func (m *NetworkEpcConfigsSubProfilesAnon) validateMaxUlBitRate(formats strfmt.R
 		return err
 	}
 
-	if err := validate.MinimumInt("max_ul_bit_rate", "body", int64(m.MaxUlBitRate), 0, true); err != nil {
+	if err := validate.MinimumUint("max_ul_bit_rate", "body", m.MaxUlBitRate, 0, true); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// ContextValidate validates this network epc configs sub profiles anon based on context it is used
+func (m *NetworkEpcConfigsSubProfilesAnon) ContextValidate(ctx context.Context, formats strfmt.Registry) error {
 	return nil
 }
 

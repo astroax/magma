@@ -14,41 +14,45 @@ limitations under the License.
 package main
 
 import (
+	"github.com/golang/glog"
+
 	"magma/orc8r/cloud/go/blobstore"
-	"magma/orc8r/cloud/go/obsidian"
-	"magma/orc8r/cloud/go/obsidian/swagger"
-	swagger_protos "magma/orc8r/cloud/go/obsidian/swagger/protos"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/service"
 	"magma/orc8r/cloud/go/services/ctraced"
 	"magma/orc8r/cloud/go/services/ctraced/obsidian/handlers"
+	servicers "magma/orc8r/cloud/go/services/ctraced/servicers/southbound"
 	ctraced_storage "magma/orc8r/cloud/go/services/ctraced/storage"
+	"magma/orc8r/cloud/go/services/obsidian"
+	swagger_protos "magma/orc8r/cloud/go/services/obsidian/swagger/protos"
+	swagger_servicers "magma/orc8r/cloud/go/services/obsidian/swagger/servicers/protected"
 	"magma/orc8r/cloud/go/sqorc"
 	"magma/orc8r/cloud/go/storage"
-
-	"github.com/golang/glog"
+	"magma/orc8r/lib/go/protos"
 )
 
 func main() {
 	// Create service
 	srv, err := service.NewOrchestratorService(orc8r.ModuleName, ctraced.ServiceName)
 	if err != nil {
-		glog.Fatalf("Error creating ctraced service: %s", err)
+		glog.Fatalf("Error creating ctraced service: %+v", err)
 	}
-
-	swagger_protos.RegisterSwaggerSpecServer(srv.GrpcServer, swagger.NewSpecServicerFromFile(ctraced.ServiceName))
 
 	// Init storage
-	db, err := sqorc.Open(storage.SQLDriver, storage.DatabaseSource)
+	db, err := sqorc.Open(storage.GetSQLDriver(), storage.GetDatabaseSource())
 	if err != nil {
-		glog.Fatalf("Error opening db connection: %v", err)
+		glog.Fatalf("Error opening db connection: %+v", err)
 	}
-	fact := blobstore.NewSQLBlobStorageFactory(ctraced.LookupTableBlobstore, db, sqorc.GetSqlBuilder())
+	fact := blobstore.NewSQLStoreFactory(ctraced.LookupTableBlobstore, db, sqorc.GetSqlBuilder())
 	err = fact.InitializeFactory()
 	if err != nil {
-		glog.Fatalf("Error initializing ctraced table: %v", err)
+		glog.Fatalf("Error initializing ctraced table: %+v", err)
 	}
 	ctracedBlobstore := ctraced_storage.NewCtracedBlobstore(fact)
+
+	// Init gRPC servicer
+	protos.RegisterCallTraceControllerServer(srv.GrpcServer, servicers.NewCallTraceServicer(ctracedBlobstore))
+	swagger_protos.RegisterSwaggerSpecServer(srv.ProtectedGrpcServer, swagger_servicers.NewSpecServicerFromFile(ctraced.ServiceName))
 
 	gwClient := handlers.NewGwCtracedClient()
 	obsidian.AttachHandlers(srv.EchoServer, handlers.GetObsidianHandlers(gwClient, ctracedBlobstore))
@@ -56,6 +60,6 @@ func main() {
 	// Run service
 	err = srv.Run()
 	if err != nil {
-		glog.Fatalf("Error running ctraced service: %s", err)
+		glog.Fatalf("Error running ctraced service: %+v", err)
 	}
 }

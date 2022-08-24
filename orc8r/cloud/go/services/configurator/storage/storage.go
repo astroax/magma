@@ -16,11 +16,13 @@ package storage
 import (
 	"context"
 	"fmt"
-
-	"magma/orc8r/cloud/go/storage"
+	"sort"
 
 	"github.com/golang/glog"
 	"github.com/thoas/go-funk"
+	"google.golang.org/protobuf/proto"
+
+	"magma/orc8r/cloud/go/storage"
 )
 
 // ConfiguratorStorageFactory creates ConfiguratorStorage implementations bound
@@ -53,16 +55,16 @@ type ConfiguratorStorage interface {
 	// LoadNetworks returns a set of networks corresponding to the provided
 	// load criteria. Any networks which aren't found are excluded from the
 	// returned value.
-	LoadNetworks(filter NetworkLoadFilter, loadCriteria NetworkLoadCriteria) (NetworkLoadResult, error)
+	LoadNetworks(filter *NetworkLoadFilter, loadCriteria *NetworkLoadCriteria) (*NetworkLoadResult, error)
 
 	// LoadAllNetworks returns all networks registered
-	LoadAllNetworks(loadCriteria NetworkLoadCriteria) ([]Network, error)
+	LoadAllNetworks(loadCriteria *NetworkLoadCriteria) ([]*Network, error)
 
 	// CreateNetwork creates a new network. The created network is returned.
-	CreateNetwork(network Network) (Network, error)
+	CreateNetwork(network *Network) (*Network, error)
 
 	// UpdateNetworks updates a set of networks.
-	UpdateNetworks(updates []NetworkUpdateCriteria) error
+	UpdateNetworks(updates []*NetworkUpdateCriteria) error
 
 	// =======================================================================
 	// Entity Operations
@@ -71,17 +73,25 @@ type ConfiguratorStorage interface {
 	// LoadEntities returns a set of entities corresponding to the provided
 	// load criteria. Any entities which aren't found are excluded from the
 	// returned value.
-	LoadEntities(networkID string, filter EntityLoadFilter, loadCriteria EntityLoadCriteria) (EntityLoadResult, error)
+
+	// Loads can be paginated by specifying a page size and token in the entity
+	// load criteria. To exhaustively read all pages, clients must continue
+	// querying until an empty page token is received in the load result.
+	LoadEntities(networkID string, filter *EntityLoadFilter, loadCriteria *EntityLoadCriteria) (*EntityLoadResult, error)
+
+	// CountEntities returns the count of entities corresponding to the provided
+	// load filter.
+	CountEntities(networkID string, filter *EntityLoadFilter) (*EntityCountResult, error)
 
 	// CreateEntity creates a new entity. The created entity is returned
 	// with system-generated fields filled in.
-	CreateEntity(networkID string, entity NetworkEntity) (NetworkEntity, error)
+	CreateEntity(networkID string, entity *NetworkEntity) (*NetworkEntity, error)
 
 	// UpdateEntity updates an entity.
 	// The updates to the specified entity will be returned as a NetworkEntity
 	// object. Apart from identity fields, only fields which were updated will
 	// be filled out, with system-generated IDs included.
-	UpdateEntity(networkID string, update EntityUpdateCriteria) (NetworkEntity, error)
+	UpdateEntity(networkID string, update *EntityUpdateCriteria) (*NetworkEntity, error)
 
 	// =======================================================================
 	// Graph Operations
@@ -90,7 +100,7 @@ type ConfiguratorStorage interface {
 	// LoadGraphForEntity returns the full DAG which contains the requested
 	// entity. The load criteria fields on associations are ignored, and the
 	// returned entities will always have both association fields filled out.
-	LoadGraphForEntity(networkID string, entityID EntityID, loadCriteria EntityLoadCriteria) (EntityGraph, error)
+	LoadGraphForEntity(networkID string, entityID *EntityID, loadCriteria *EntityLoadCriteria) (*EntityGraph, error)
 }
 
 // RollbackLogOnError calls Rollback on the provided ConfiguratorStorage and
@@ -98,7 +108,7 @@ type ConfiguratorStorage interface {
 func RollbackLogOnError(store ConfiguratorStorage) {
 	err := store.Rollback()
 	if err != nil {
-		glog.Errorf("error while rolling back tx: %s", err)
+		glog.Errorf("Error while rolling back tx: %+v", err)
 	}
 }
 
@@ -107,7 +117,7 @@ func RollbackLogOnError(store ConfiguratorStorage) {
 func CommitLogOnError(store ConfiguratorStorage) {
 	err := store.Commit()
 	if err != nil {
-		glog.Errorf("error while committing tx: %s", err)
+		glog.Errorf("Error while committing tx: %+v", err)
 	}
 }
 
@@ -121,37 +131,79 @@ const internalNetworkDescription = "Internal network to hold non-network entitie
 // FullNetworkLoadCriteria is a utility variable to specify a full network load
 var FullNetworkLoadCriteria = NetworkLoadCriteria{LoadMetadata: true, LoadConfigs: true}
 
-func (m *EntityID) ToTypeAndKey() storage.TypeAndKey {
-	return storage.TypeAndKey{Type: m.Type, Key: m.Key}
+func (m *EntityID) ToTK() storage.TK {
+	return storage.TK{Type: m.Type, Key: m.Key}
 }
 
-func (m *EntityID) FromTypeAndKey(tk storage.TypeAndKey) *EntityID {
+func (m *EntityID) FromTK(tk storage.TK) *EntityID {
 	m.Type = tk.Type
 	m.Key = tk.Key
 	return m
+}
+
+func SortIDs(ids []*EntityID) {
+	sort.Slice(ids, func(i, j int) bool {
+		return ids[i].ToTK().IsLessThan(ids[j].ToTK())
+	})
+}
+
+func SortEntities(ents []*NetworkEntity) {
+	sort.Slice(ents, func(i, j int) bool {
+		return ents[i].GetTK().String() < ents[j].GetTK().String()
+	})
 }
 
 func (m *NetworkEntity) GetID() *EntityID {
 	return &EntityID{Type: m.Type, Key: m.Key}
 }
 
-func (m *NetworkEntity) GetTypeAndKey() storage.TypeAndKey {
-	return m.GetID().ToTypeAndKey()
+func (m *NetworkEntity) GetTK() storage.TK {
+	return m.GetID().ToTK()
 }
 
-func (m NetworkEntity) GetGraphEdges() []*GraphEdge {
-	myID := m.GetID()
-	existingAssocs := map[storage.TypeAndKey]bool{}
+func (m *NetworkEntity) GetGraphEdges() []*GraphEdge {
+	mCopy := proto.Clone(m).(*NetworkEntity)
+	myID := mCopy.GetID()
+	existingAssocs := map[storage.TK]bool{}
 
-	ret := make([]*GraphEdge, 0, len(m.Associations))
-	for _, assoc := range m.Associations {
-		if _, exists := existingAssocs[assoc.ToTypeAndKey()]; exists {
+	edges := make([]*GraphEdge, 0, len(mCopy.Associations))
+	for _, assoc := range mCopy.Associations {
+		if _, exists := existingAssocs[assoc.ToTK()]; exists {
 			continue
 		}
-		ret = append(ret, &GraphEdge{From: myID, To: assoc})
-		existingAssocs[assoc.ToTypeAndKey()] = true
+		edges = append(edges, &GraphEdge{From: myID, To: assoc})
+		existingAssocs[assoc.ToTK()] = true
 	}
-	return ret
+
+	return edges
+}
+
+type EntitiesByPK map[string]*NetworkEntity
+
+type EntitiesByTK map[storage.TK]*NetworkEntity
+
+func (e EntitiesByTK) ByPK() EntitiesByPK {
+	byPK := make(map[string]*NetworkEntity, len(e))
+	for _, ent := range e {
+		byPK[ent.Pk] = ent
+	}
+	return byPK
+}
+
+func (e EntitiesByTK) PKs() []string {
+	pks := make([]string, 0, len(e))
+	for _, ent := range e {
+		pks = append(pks, ent.Pk)
+	}
+	return pks
+}
+
+func (e EntitiesByTK) Ents() []*NetworkEntity {
+	ents := make([]*NetworkEntity, 0, len(e))
+	for _, ent := range e {
+		ents = append(ents, ent)
+	}
+	return ents
 }
 
 // IsLoadAllEntities return true if the EntityLoadFilter is specifying to load
@@ -166,15 +218,14 @@ var FullEntityLoadCriteria = EntityLoadCriteria{
 	LoadConfig:         true,
 	LoadAssocsToThis:   true,
 	LoadAssocsFromThis: true,
-	LoadPermissions:    true,
 }
 
 func (m *EntityUpdateCriteria) GetID() *EntityID {
 	return &EntityID{Type: m.Type, Key: m.Key}
 }
 
-func (m *EntityUpdateCriteria) GetTypeAndKey() storage.TypeAndKey {
-	return storage.TypeAndKey{Type: m.Type, Key: m.Key}
+func (m *EntityUpdateCriteria) GetTK() storage.TK {
+	return storage.TK{Type: m.Type, Key: m.Key}
 }
 
 func (m *EntityUpdateCriteria) getEdgesToCreate() []*EntityID {
@@ -185,5 +236,5 @@ func (m *EntityUpdateCriteria) getEdgesToCreate() []*EntityID {
 }
 
 func (m *GraphEdge) ToString() string {
-	return fmt.Sprintf("%s, %s", m.From.ToTypeAndKey(), m.To.ToTypeAndKey())
+	return fmt.Sprintf("%s, %s", m.From.ToTK(), m.To.ToTK())
 }

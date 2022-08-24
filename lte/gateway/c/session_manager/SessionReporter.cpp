@@ -10,23 +10,39 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <iostream>
+#include "lte/gateway/c/session_manager/SessionReporter.hpp"
+
 #include <glog/logging.h>
-#include "ServiceRegistrySingleton.h"
-#include "SessionReporter.h"
-#include "magma_logging.h"
-#include "GrpcMagmaUtils.h"
+#include <grpcpp/channel.h>
+#include <grpcpp/impl/codegen/status.h>
+#include <lte/protos/session_manager.grpc.pb.h>
+#include <lte/protos/session_manager.pb.h>
+#include <iostream>
+#include <string>
+#include <utility>
+
+#include "lte/gateway/c/session_manager/GrpcMagmaUtils.hpp"
+#include "orc8r/gateway/c/common/logging/magma_logging.hpp"
+
+namespace folly {
+class EventBase;
+}  // namespace folly
+namespace google {
+namespace protobuf {
+class Message;
+}  // namespace protobuf
+}  // namespace google
 
 namespace magma {
 
-template<class ResponseType>
+template <class ResponseType>
 AsyncEvbResponse<ResponseType>::AsyncEvbResponse(
     folly::EventBase* base,
     std::function<void(grpc::Status, ResponseType)> callback,
     uint32_t timeout_sec)
     : AsyncGRPCResponse<ResponseType>(callback, timeout_sec), base_(base) {}
 
-template<class ResponseType>
+template <class ResponseType>
 void AsyncEvbResponse<ResponseType>::handle_response() {
   base_->runInEventBaseThread([this]() {
     this->callback_(this->status_, this->response_);
@@ -48,8 +64,8 @@ SessionReporter::get_terminate_logging_cb(
   };
 }
 
-SessionReporterImpl::SessionReporterImpl(
-    folly::EventBase* base, std::shared_ptr<grpc::Channel> channel)
+SessionReporterImpl::SessionReporterImpl(folly::EventBase* base,
+                                         std::shared_ptr<grpc::Channel> channel)
     : base_(base), stub_(CentralSessionController::NewStub(channel)) {}
 
 void SessionReporterImpl::report_updates(
@@ -59,8 +75,8 @@ void SessionReporterImpl::report_updates(
 
   auto controller_response = new AsyncEvbResponse<UpdateSessionResponse>(
       base_, callback, RESPONSE_TIMEOUT);
-  controller_response->set_response_reader(std::move(stub_->AsyncUpdateSession(
-      controller_response->get_context(), request, &queue_)));
+  controller_response->set_response_reader(stub_->AsyncUpdateSession(
+      controller_response->get_context(), request, &queue_));
 }
 
 void SessionReporterImpl::report_create_session(
@@ -69,8 +85,8 @@ void SessionReporterImpl::report_create_session(
   PrintGrpcMessage(static_cast<const google::protobuf::Message&>(request));
   auto controller_response = new AsyncEvbResponse<CreateSessionResponse>(
       base_, callback, RESPONSE_TIMEOUT);
-  controller_response->set_response_reader(std::move(stub_->AsyncCreateSession(
-      controller_response->get_context(), request, &queue_)));
+  controller_response->set_response_reader(stub_->AsyncCreateSession(
+      controller_response->get_context(), request, &queue_));
 }
 
 void SessionReporterImpl::report_terminate_session(
@@ -80,8 +96,8 @@ void SessionReporterImpl::report_terminate_session(
   auto controller_response = new AsyncEvbResponse<SessionTerminateResponse>(
       base_, callback, RESPONSE_TIMEOUT);
   controller_response->set_response_reader(
-      std::move(stub_->AsyncTerminateSession(
-          controller_response->get_context(), request, &queue_)));
+      std::move(stub_->AsyncTerminateSession(controller_response->get_context(),
+                                             request, &queue_)));
 }
 
 }  // namespace magma

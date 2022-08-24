@@ -22,8 +22,8 @@ import (
 	"magma/feg/cloud/go/protos"
 	"magma/feg/cloud/go/services/feg_relay"
 	"magma/feg/cloud/go/services/feg_relay/gw_to_feg_relay"
-	nh_servicers "magma/feg/cloud/go/services/feg_relay/gw_to_feg_relay/servicers"
-	"magma/feg/cloud/go/services/feg_relay/servicers"
+	nh_servicers "magma/feg/cloud/go/services/feg_relay/gw_to_feg_relay/servicers/southbound"
+	fegrelay_servicers "magma/feg/cloud/go/services/feg_relay/servicers/southbound"
 	lteprotos "magma/lte/cloud/go/protos"
 	"magma/orc8r/cloud/go/service"
 )
@@ -36,17 +36,22 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error creating Feg Proxy service: %s", err)
 	}
-	servicer, err := servicers.NewFegToGwRelayServer()
+	servicer, err := fegrelay_servicers.NewFegToGwRelayServer()
 
 	if err != nil {
 		glog.Fatalf("Failed to create FegToGwRelayServer: %v", err)
 		return
 	}
+
+	// Register responders FEG -> AGW
+	lteprotos.RegisterSessionProxyResponderServer(srv.GrpcServer, servicer)
+	lteprotos.RegisterAbortSessionResponderServer(srv.GrpcServer, servicer)
+	protos.RegisterS8ProxyResponderServer(srv.GrpcServer, servicer)
+
+	// Register services AGW -> FEG
 	protos.RegisterS6AGatewayServiceServer(srv.GrpcServer, servicer)
 	protos.RegisterCSFBGatewayServiceServer(srv.GrpcServer, servicer)
 	protos.RegisterSwxGatewayServiceServer(srv.GrpcServer, servicer)
-	lteprotos.RegisterSessionProxyResponderServer(srv.GrpcServer, servicer)
-	lteprotos.RegisterAbortSessionResponderServer(srv.GrpcServer, servicer)
 
 	// Register Neutral Host Routing services
 	nhServicer := nh_servicers.NewRelayRouter()
@@ -55,7 +60,7 @@ func main() {
 	protos.RegisterHelloServer(srv.GrpcServer, nhServicer)
 	lteprotos.RegisterCentralSessionControllerServer(srv.GrpcServer, nhServicer)
 
-	// S8 Proxy NH Router
+	// Register S8 Proxy Neutral Host Routing services
 	s8nhServicer := nh_servicers.NewS8RelayRouter(&nhServicer.Router)
 	protos.RegisterS8ProxyServer(srv.GrpcServer, s8nhServicer)
 

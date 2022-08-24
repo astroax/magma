@@ -14,8 +14,12 @@ limitations under the License.
 package streamer
 
 import (
+	"context"
 	"fmt"
 	"sort"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
 
 	"magma/lte/cloud/go/lte"
 	lte_protos "magma/lte/cloud/go/protos"
@@ -23,29 +27,22 @@ import (
 	"magma/lte/cloud/go/services/policydb/obsidian/models"
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/storage"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/lib/go/merrors"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
-	"github.com/pkg/errors"
 )
 
 // TODO: need to stream down the infinite credit charging keys from here
 
 type RatingGroupsProvider struct{}
 
-func (p *RatingGroupsProvider) GetStreamName() string {
-	return lte.RatingGroupStreamName
-}
-
-func (p *RatingGroupsProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
-	gwEnt, err := configurator.LoadEntityForPhysicalID(gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
+func (p *RatingGroupsProvider) GetUpdates(ctx context.Context, gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
+	gwEnt, err := configurator.LoadEntityForPhysicalID(ctx, gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
 	if err != nil {
 		return nil, err
 	}
 
-	ratingGroupEnts, err := configurator.LoadAllEntitiesOfType(
+	ratingGroupEnts, _, err := configurator.LoadAllEntitiesOfType(
+		ctx,
 		gwEnt.NetworkID, lte.RatingGroupEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true},
 		serdes.Entity,
@@ -89,17 +86,14 @@ func ratingGroupsToUpdates(ratingGroups []*lte_protos.RatingGroup) ([]*protos.Da
 
 type PoliciesProvider struct{}
 
-func (p *PoliciesProvider) GetStreamName() string {
-	return lte.PolicyStreamName
-}
-
-func (p *PoliciesProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
-	gw, err := configurator.LoadEntityForPhysicalID(gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
+func (p *PoliciesProvider) GetUpdates(ctx context.Context, gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
+	gw, err := configurator.LoadEntityForPhysicalID(ctx, gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
 	if err != nil {
 		return nil, err
 	}
 
-	rules, err := configurator.LoadAllEntitiesOfType(
+	rules, _, err := configurator.LoadAllEntitiesOfType(
+		ctx,
 		gw.NetworkID, lte.PolicyRuleEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true},
 		serdes.Entity,
@@ -107,7 +101,7 @@ func (p *PoliciesProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*
 	if err != nil {
 		return nil, err
 	}
-	qosProfiles, err := loadQosProfiles(gw.NetworkID)
+	qosProfiles, err := loadQosProfiles(ctx, gw.NetworkID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,9 +115,9 @@ func (p *PoliciesProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*
 
 // loadQosProfiles returns all policy_qos_profile ents, keyed by the key of
 // their parent policy rule ent, once for each parent.
-func loadQosProfiles(networkID string) (map[string]configurator.NetworkEntity, error) {
-	profiles, err := configurator.LoadAllEntitiesOfType(
-		networkID, lte.PolicyQoSProfileEntityType,
+func loadQosProfiles(ctx context.Context, networkID string) (map[string]configurator.NetworkEntity, error) {
+	profiles, _, err := configurator.LoadAllEntitiesOfType(
+		ctx, networkID, lte.PolicyQoSProfileEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsToThis: true},
 		serdes.Entity,
 	)
@@ -170,17 +164,14 @@ func rulesToUpdates(rules []*lte_protos.PolicyRule) ([]*protos.DataUpdate, error
 
 type BaseNamesProvider struct{}
 
-func (p *BaseNamesProvider) GetStreamName() string {
-	return lte.BaseNameStreamName
-}
-
-func (p *BaseNamesProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
-	gwEnt, err := configurator.LoadEntityForPhysicalID(gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
+func (p *BaseNamesProvider) GetUpdates(ctx context.Context, gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
+	gwEnt, err := configurator.LoadEntityForPhysicalID(ctx, gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
 	if err != nil {
 		return nil, err
 	}
 
-	bnEnts, err := configurator.LoadAllEntitiesOfType(
+	bnEnts, _, err := configurator.LoadAllEntitiesOfType(
+		ctx,
 		gwEnt.NetworkID, lte.BaseNameEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsFromThis: true, LoadAssocsToThis: true},
 		serdes.Entity,
@@ -217,41 +208,37 @@ func bnsToUpdates(bns []*lte_protos.ChargingRuleBaseNameRecord) ([]*protos.DataU
 
 type ApnRuleMappingsProvider struct{}
 
-func (p *ApnRuleMappingsProvider) GetStreamName() string {
-	return lte.ApnRuleMappingsStreamName
-}
-
 // GetUpdates implements GetUpdates for the rule mappings stream provider
-func (p *ApnRuleMappingsProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
-	gwEnt, err := configurator.LoadEntityForPhysicalID(gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
+func (p *ApnRuleMappingsProvider) GetUpdates(ctx context.Context, gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
+	gwEnt, err := configurator.LoadEntityForPhysicalID(ctx, gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
 	if err != nil {
 		return nil, err
 	}
 
 	loadCrit := configurator.EntityLoadCriteria{LoadAssocsFromThis: true}
-	subEnts, err := configurator.LoadAllEntitiesOfType(gwEnt.NetworkID, lte.SubscriberEntityType, loadCrit, serdes.Entity)
+	subEnts, _, err := configurator.LoadAllEntitiesOfType(ctx, gwEnt.NetworkID, lte.SubscriberEntityType, loadCrit, serdes.Entity)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load subscribers")
+		return nil, fmt.Errorf("failed to load subscribers: %w", err)
 	}
 
 	ret := make([]*protos.DataUpdate, 0, len(subEnts))
 
 	for _, subEnt := range subEnts {
-		subscriberPolicySet, err := getSubscriberPolicySet(gwEnt.NetworkID, subEnt)
+		subscriberPolicySet, err := getSubscriberPolicySet(ctx, gwEnt.NetworkID, subEnt)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to build subscriber policy sets")
+			return nil, fmt.Errorf("failed to build subscriber policy sets: %w", err)
 		}
 		marshaled, err := proto.Marshal(subscriberPolicySet)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to marshal subscriber policy sets")
+			return nil, fmt.Errorf("failed to marshal subscriber policy sets: %w", err)
 		}
 		ret = append(ret, &protos.DataUpdate{Key: subEnt.Key, Value: marshaled})
 	}
 	return ret, nil
 }
 
-func getSubscriberPolicySet(networkID string, subscriberEnt configurator.NetworkEntity) (*lte_protos.SubscriberPolicySet, error) {
-	apnPolicyProfileTks := []storage.TypeAndKey{}
+func getSubscriberPolicySet(ctx context.Context, networkID string, subscriberEnt configurator.NetworkEntity) (*lte_protos.SubscriberPolicySet, error) {
+	apnPolicyProfileTks := storage.TKs{}
 	globalPolicies := []string{}
 	globalBaseNames := []string{}
 
@@ -270,7 +257,7 @@ func getSubscriberPolicySet(networkID string, subscriberEnt configurator.Network
 
 	// Load in all the ApnPolicyProfile ents, they only
 	// have incoming/outogoing assocs
-	apnPolicyProfileEnts, err := loadApnPolicyProfileEnts(networkID, apnPolicyProfileTks)
+	apnPolicyProfileEnts, err := loadApnPolicyProfileEnts(ctx, networkID, apnPolicyProfileTks)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +267,7 @@ func getSubscriberPolicySet(networkID string, subscriberEnt configurator.Network
 	for _, ent := range apnPolicyProfileEnts {
 		apnPolicySet, err := buildApnPolicySet(ent)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to get SubscriberPolicySet")
+			return nil, fmt.Errorf("failed to get SubscriberPolicySet: %w", err)
 		}
 		rulesPerApn = append(rulesPerApn, apnPolicySet)
 	}
@@ -292,13 +279,13 @@ func getSubscriberPolicySet(networkID string, subscriberEnt configurator.Network
 	}, nil
 }
 
-func loadApnPolicyProfileEnts(networkID string, tks []storage.TypeAndKey) (configurator.NetworkEntities, error) {
+func loadApnPolicyProfileEnts(ctx context.Context, networkID string, tks storage.TKs) (configurator.NetworkEntities, error) {
 	if len(tks) == 0 {
 		return configurator.NetworkEntities{}, nil
 	}
 	loadCrit := configurator.EntityLoadCriteria{LoadAssocsFromThis: true}
 	typeFilter := lte.APNPolicyProfileEntityType
-	apnPolicyProfileEnts, _, err := configurator.LoadEntities(networkID, &typeFilter, nil, nil, tks, loadCrit, serdes.Entity)
+	apnPolicyProfileEnts, _, err := configurator.LoadEntities(ctx, networkID, &typeFilter, nil, nil, tks, loadCrit, serdes.Entity)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +297,7 @@ func buildApnPolicySet(apnPolicyProfileEnt configurator.NetworkEntity) (*lte_pro
 	var apn string
 	apn, err := models.GetAPN(apnPolicyProfileEnt.Key)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to build ApnPolicySet")
+		return nil, fmt.Errorf("failed to build ApnPolicySet: %w", err)
 	}
 
 	for _, tk := range apnPolicyProfileEnt.Associations {
@@ -333,16 +320,12 @@ func sortUpdates(updates []*protos.DataUpdate) {
 
 type NetworkWideRulesProvider struct{}
 
-func (p *NetworkWideRulesProvider) GetStreamName() string {
-	return lte.NetworkWideRulesStreamName
-}
-
-func (p *NetworkWideRulesProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
-	gwEnt, err := configurator.LoadEntityForPhysicalID(gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
+func (p *NetworkWideRulesProvider) GetUpdates(ctx context.Context, gatewayId string, extraArgs *any.Any) ([]*protos.DataUpdate, error) {
+	gwEnt, err := configurator.LoadEntityForPhysicalID(ctx, gatewayId, configurator.EntityLoadCriteria{}, serdes.Entity)
 	if err != nil {
 		return nil, err
 	}
-	iNetworkSubscriberConfig, err := configurator.LoadNetworkConfig(gwEnt.NetworkID, lte.NetworkSubscriberConfigType, serdes.Network)
+	iNetworkSubscriberConfig, err := configurator.LoadNetworkConfig(ctx, gwEnt.NetworkID, lte.NetworkSubscriberConfigType, serdes.Network)
 	if err == merrors.ErrNotFound {
 		return []*protos.DataUpdate{}, nil
 	}
@@ -361,7 +344,7 @@ func (p *NetworkWideRulesProvider) GetUpdates(gatewayId string, extraArgs *any.A
 
 	marshaledPolicies, err := proto.Marshal(assignedPolicies)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal active policies")
+		return nil, fmt.Errorf("failed to marshal active policies: %w", err)
 	}
 	return []*protos.DataUpdate{{Key: "", Value: marshaledPolicies}}, nil
 }

@@ -12,11 +12,12 @@ limitations under the License.
 """
 
 from lte.protos.policydb_pb2 import RedirectInformation
-
 from magma.common.redis.client import get_default_client
 from magma.common.redis.containers import RedisHashDict
-from magma.common.redis.serializers import get_proto_deserializer, \
-    get_proto_serializer
+from magma.common.redis.serializers import (
+    get_proto_deserializer,
+    get_proto_serializer,
+)
 
 
 class RedirectDict(RedisHashDict):
@@ -33,7 +34,8 @@ class RedirectDict(RedisHashDict):
             client,
             self._DICT_HASH,
             get_proto_serializer(),
-            get_proto_deserializer(RedirectInformation))
+            get_proto_deserializer(RedirectInformation),
+        )
 
     def __missing__(self, key):
         """Instead of throwing a key error, return None when key not found"""

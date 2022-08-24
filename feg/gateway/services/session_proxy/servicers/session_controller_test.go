@@ -14,9 +14,15 @@ limitations under the License.
 package servicers_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/golang/protobuf/ptypes/timestamp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/thoas/go-funk"
 
 	fegprotos "magma/feg/cloud/go/protos"
 	"magma/feg/gateway/diameter"
@@ -31,13 +37,8 @@ import (
 	"magma/feg/gateway/services/session_proxy/servicers"
 	"magma/gateway/mconfig"
 	"magma/lte/cloud/go/protos"
+	"magma/orc8r/cloud/go/test_utils"
 	orcprotos "magma/orc8r/lib/go/protos"
-
-	"github.com/golang/protobuf/ptypes/timestamp"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/thoas/go-funk"
-	"golang.org/x/net/context"
 )
 
 const (
@@ -143,7 +144,7 @@ func TestStartSessionGyFail(t *testing.T) {
 		activationTime := time.Unix(1, 0)
 		deactivationTime := time.Unix(2, 0)
 		ruleInstalls := []*gx.RuleInstallAVP{
-			&gx.RuleInstallAVP{
+			{
 				RuleNames:            []string{"static_rule_1"},
 				RuleActivationTime:   &activationTime,
 				RuleDeactivationTime: &deactivationTime,
@@ -155,6 +156,7 @@ func TestStartSessionGyFail(t *testing.T) {
 			SessionID:      request.SessionID,
 			RequestNumber:  request.RequestNumber,
 			RuleInstallAVP: ruleInstalls,
+			Online:         1,
 		}
 	}).Once()
 
@@ -201,7 +203,7 @@ func standardUsageTest(
 	ctx := context.Background()
 	mockPolicyDBClient := policyDb.(*mockPolicyDB.PolicyDBClient)
 
-	// Create a structure to store the pointers to the type assertions. his is needed later to
+	// Create a structure to store the pointers to the type assertions. This is needed later to
 	// be used on Enable/Disable. If it were not saved here the reference of the type to be
 	// asserted will be different than the reference of the type inside the srv
 	mocksGxs := make([]*mockGx.PolicyClient, 0, len(controllerParams))
@@ -244,11 +246,11 @@ func standardUsageTest(
 		activationTime := time.Unix(1, 0)
 		deactivationTime := time.Unix(2, 0)
 		ruleInstalls := []*gx.RuleInstallAVP{
-			&gx.RuleInstallAVP{
+			{
 				RuleNames:     []string{"static_rule_1", "static_rule_2"},
 				RuleBaseNames: []string{"base_10"},
 				RuleDefinitions: []*gx.RuleDefinition{
-					&gx.RuleDefinition{
+					{
 						RuleName:            "dyn_rule_20",
 						RatingGroup:         &rg20,
 						ServiceIdentifier:   &si20,
@@ -261,7 +263,7 @@ func standardUsageTest(
 							"permit in ip from any to 0.0.0.1",
 						},
 					},
-					&gx.RuleDefinition{
+					{
 						RuleName:    "dyn_rule_21",
 						RatingGroup: &rg21,
 						Precedence:  200,
@@ -277,6 +279,7 @@ func standardUsageTest(
 			SessionID:      request.SessionID,
 			RequestNumber:  request.RequestNumber,
 			RuleInstallAVP: ruleInstalls,
+			Online:         1,
 		}
 	}).Once()
 
@@ -284,13 +287,13 @@ func standardUsageTest(
 	mockPolicyDBClient.On("GetRuleIDsForBaseNames", []string{"base_10"}).Return([]string{"base_rule_1", "base_rule_2"})
 	mockPolicyDBClient.On("GetChargingKeysForRules", mock.Anything, mock.Anything).Return(
 		[]policydb.ChargingKey{
-			policydb.ChargingKey{RatingGroup: 1},
-			policydb.ChargingKey{RatingGroup: 2},
-			policydb.ChargingKey{RatingGroup: 10},
-			policydb.ChargingKey{RatingGroup: 11},
-			policydb.ChargingKey{RatingGroup: 11},
-			policydb.ChargingKey{RatingGroup: 20, ServiceIdTracking: true, ServiceIdentifier: 201},
-			policydb.ChargingKey{RatingGroup: 21}}, nil).Once()
+			{RatingGroup: 1},
+			{RatingGroup: 2},
+			{RatingGroup: 10},
+			{RatingGroup: 11},
+			{RatingGroup: 11},
+			{RatingGroup: 20, ServiceIdTracking: true, ServiceIdentifier: 201},
+			{RatingGroup: 21}}, nil).Once()
 	// no omnipresent rules
 	mockPolicyDBClient.On("GetOmnipresentRules").Return([]string{}, []string{}).Once()
 
@@ -321,6 +324,7 @@ func standardUsageTest(
 		},
 		AccessTimezone: &protos.Timezone{OffsetMinutes: 3600},
 	})
+	assert.NoError(t, err)
 	mocksGx.AssertExpectations(t)
 	mocksGy.AssertExpectations(t)
 	mockPolicyDBClient.AssertExpectations(t)
@@ -335,6 +339,7 @@ func standardUsageTest(
 	}
 	assert.ElementsMatch(t, allRuleIDs, []string{"static_rule_1", "static_rule_2", "base_rule_1", "base_rule_2"})
 
+	emptyRedirect := &protos.RedirectInformation{Support: 0, AddressType: 0, ServerAddress: ""}
 	for _, rule := range createResponse.DynamicRules {
 		if rule.PolicyRule.Id == "dyn_rule_20" {
 			assert.Equal(t, protos.RedirectInformation_ENABLED, rule.PolicyRule.Redirect.Support)
@@ -345,7 +350,7 @@ func standardUsageTest(
 			assert.Equal(t, &timestamp.Timestamp{Seconds: 1}, rule.ActivationTime)
 			assert.Equal(t, &timestamp.Timestamp{Seconds: 2}, rule.DeactivationTime)
 		} else if rule.PolicyRule.Id == "dyn_rule_21" {
-			assert.Empty(t, rule.PolicyRule.Redirect)
+			test_utils.AssertMessagesEqual(t, emptyRedirect, rule.PolicyRule.Redirect)
 			assert.Nil(t, rule.PolicyRule.Qos)
 			assert.Equal(t, &timestamp.Timestamp{Seconds: 1}, rule.ActivationTime)
 			assert.Equal(t, &timestamp.Timestamp{Seconds: 2}, rule.DeactivationTime)
@@ -375,7 +380,7 @@ func standardUsageTest(
 	// updates
 	mocksGy.On("SendCreditControlRequest", mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI1_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGyResponse).Times(2)
+	).Return(nil).Run(returnDefaultGyResponse).Times(1)
 
 	updateResponse, _ := srv.UpdateSession(ctx,
 		&protos.UpdateSessionRequest{
@@ -442,7 +447,7 @@ func TestSessionCreateWithOmnipresentRules(t *testing.T) {
 		done := args.Get(1).(chan interface{})
 		request := args.Get(2).(*gx.CreditControlRequest)
 		ruleInstalls := []*gx.RuleInstallAVP{
-			&gx.RuleInstallAVP{
+			{
 				RuleNames:     []string{"static_rule_1", "static_rule_2"},
 				RuleBaseNames: []string{"base_10"},
 			},
@@ -453,6 +458,7 @@ func TestSessionCreateWithOmnipresentRules(t *testing.T) {
 			SessionID:      request.SessionID,
 			RequestNumber:  request.RequestNumber,
 			RuleInstallAVP: ruleInstalls,
+			Online:         1,
 		}
 	}).Once()
 	mockPolicyDBClient.On("GetRuleIDsForBaseNames", []string{"base_10"}).Return([]string{"base_rule_1", "base_rule_2"})
@@ -542,8 +548,10 @@ func TestSessionControllerTimeouts(t *testing.T) {
 	mockConfig := getTestConfig()
 
 	// set small timeouts for this test to force timeout quicker
-	mockConfig[0].RequestTimeout = time.Millisecond
-	mockConfig[1].RequestTimeout = time.Millisecond
+	mockConfig[0].RequestTimeoutGx = time.Millisecond
+	mockConfig[0].RequestTimeoutGy = time.Millisecond
+	mockConfig[1].RequestTimeoutGx = time.Millisecond
+	mockConfig[1].RequestTimeoutGy = time.Millisecond
 
 	mockControlParams := getMockControllerParams(mockConfig)
 	mockPolicyDBClient := &mockPolicyDB.PolicyDBClient{}
@@ -577,7 +585,7 @@ func TestSessionControllerTimeouts(t *testing.T) {
 				ResultCode:    uint32(diameter.SuccessCode),
 				SessionID:     request.SessionID,
 				RequestNumber: request.RequestNumber,
-				Credits: []*gy.ReceivedCredits{&gy.ReceivedCredits{
+				Credits: []*gy.ReceivedCredits{{
 					RatingGroup:  request.Credits[0].RatingGroup,
 					GrantedUnits: &credit_control.GrantedServiceUnit{TotalOctets: &units},
 					ValidityTime: 3600,
@@ -586,20 +594,20 @@ func TestSessionControllerTimeouts(t *testing.T) {
 		}
 	}).Return(nil).Times(2)
 
-	// This is the answer comming from the second server. NOTE THIS MAY NEED TO BE CHANGED IF idx1 and idx2 are the same
+	// This is the answer coming from the second server. NOTE THIS MAY NEED TO BE CHANGED IF idx1 and idx2 are the same
 	mocksGy_2.On("SendCreditControlRequest", mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI2_NOPREFIX, credit_control.CRTUpdate)),
 	).Return(nil).Run(func(args mock.Arguments) {
 		done := args.Get(1).(chan interface{})
 		request := args.Get(2).(*gy.CreditControlRequest)
-		if request.RequestNumber%2 == 0 {
+		if request.RequestNumber%1 == 0 {
 			return
 		} else {
 			done <- &gy.CreditControlAnswer{
 				ResultCode:    uint32(diameter.SuccessCode),
 				SessionID:     request.SessionID,
 				RequestNumber: request.RequestNumber,
-				Credits: []*gy.ReceivedCredits{&gy.ReceivedCredits{
+				Credits: []*gy.ReceivedCredits{{
 					RatingGroup:  request.Credits[0].RatingGroup,
 					GrantedUnits: &credit_control.GrantedServiceUnit{TotalOctets: &units},
 					ValidityTime: 3600,
@@ -608,11 +616,14 @@ func TestSessionControllerTimeouts(t *testing.T) {
 		}
 	}).Return(nil).Times(1)
 
+	// create a different session id update to force 2 different requests
+	modUsageUpdate := createUsageUpdate(IMSI1, 1, 2, protos.CreditUsage_TERMINATED)
+	modUsageUpdate.SessionId = fmt.Sprintf("%s-9999", IMSI1)
 	updateResponse, _ := srv.UpdateSession(ctx, &protos.UpdateSessionRequest{
 		Updates: []*protos.CreditUsageUpdate{
 			createUsageUpdate(IMSI1, 1, 1, protos.CreditUsage_QUOTA_EXHAUSTED),
-			createUsageUpdate(IMSI2, 2, 2, protos.CreditUsage_TERMINATED),
-			createUsageUpdate(IMSI1, 1, 2, protos.CreditUsage_TERMINATED),
+			createUsageUpdate(IMSI2, 2, 1, protos.CreditUsage_TERMINATED),
+			modUsageUpdate,
 		},
 	})
 	mocksGy_1.AssertExpectations(t)
@@ -760,20 +771,20 @@ func TestGxUsageMonitoring(t *testing.T) {
 	mocksGy_1.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI1_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGyResponse).Times(2)
+	).Return(nil).Run(returnDefaultGyResponse).Times(1)
 	mocksGx_1.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGxCCRMatcher(IMSI1_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(2)
+	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(1)
 
 	mocksGy_2.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI2_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGyResponse).Times(2)
+	).Return(nil).Run(returnDefaultGyResponse).Times(1)
 	mocksGx_2.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGxCCRMatcher(IMSI2_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(2)
+	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(1)
 
 	updateSessionRequest := &protos.UpdateSessionRequest{
 		Updates: []*protos.CreditUsageUpdate{
@@ -1041,20 +1052,20 @@ func TestGetHealthStatus(t *testing.T) {
 	mocksGy_1.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI1_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGyResponse).Times(2)
+	).Return(nil).Run(returnDefaultGyResponse).Times(1)
 	mocksGx_1.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGxCCRMatcher(IMSI1_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(2)
+	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(1)
 
 	mocksGy_2.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI2_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGyResponse).Times(2)
+	).Return(nil).Run(returnDefaultGyResponse).Times(1)
 	mocksGx_2.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGxCCRMatcher(IMSI2_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(2)
+	).Return(nil).Run(returnDefaultGxUpdateResponse).Times(1)
 
 	updateResponse, err := srv.UpdateSession(ctx, &protos.UpdateSessionRequest{
 		Updates: []*protos.CreditUsageUpdate{
@@ -1086,20 +1097,20 @@ func TestGetHealthStatus(t *testing.T) {
 	mocksGy_1.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI1_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGyResponse).Times(2)
+	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGyResponse).Times(1)
 	mocksGx_1.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGxCCRMatcher(IMSI1_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGxUpdateResponse).Times(2)
+	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGxUpdateResponse).Times(1)
 
 	mocksGy_2.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGyCCRMatcher(IMSI2_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGyResponse).Times(2)
+	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGyResponse).Times(1)
 	mocksGx_2.On("SendCreditControlRequest",
 		mock.Anything, mock.Anything,
 		mock.MatchedBy(getGxCCRMatcher(IMSI2_NOPREFIX, credit_control.CRTUpdate)),
-	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGxUpdateResponse).Times(2)
+	).Return(fmt.Errorf("Failed to establish new diameter connection; will retry upon first request.")).Run(returnDefaultGxUpdateResponse).Times(1)
 
 	updateResponse, err = srv.UpdateSession(ctx, &protos.UpdateSessionRequest{
 		Updates: []*protos.CreditUsageUpdate{
@@ -1131,7 +1142,7 @@ func genSessionID(imsi string) string {
 	return fmt.Sprintf("%s-1234", imsi)
 }
 
-// getMockMultiplexor loads mockMux with random controlers per each imsi and Imsi without prefix and
+// getMockMultiplexor loads mockMux with random controllers per each imsi and Imsi without prefix and
 // session id (this way we don't need to parse IMSIs at all)
 func getMockMultiplexor(numServers int) multiplex.Multiplexor {
 	mockMux := &MockMultiplexor{
@@ -1171,7 +1182,8 @@ func getTestConfig() []*servicers.SessionControllerConfig {
 				Addr:     fmt.Sprintf("127.0.0.1:%s", pcrf_port),
 				Protocol: "tcp"},
 			},
-			RequestTimeout: 3 * time.Second,
+			RequestTimeoutGx: 3 * time.Second,
+			RequestTimeoutGy: 3 * time.Second,
 		}
 		serverCfg[i] = srv
 	}
@@ -1393,9 +1405,9 @@ func returnDynamicRuleInstallGxUpdateResponse(ruleName string) func(args mock.Ar
 			RequestNumber: request.RequestNumber,
 			UsageMonitors: monitors,
 			RuleInstallAVP: []*gx.RuleInstallAVP{
-				&gx.RuleInstallAVP{
+				{
 					RuleDefinitions: []*gx.RuleDefinition{
-						&gx.RuleDefinition{
+						{
 							RuleName: ruleName,
 							//RatingGroup: swag.Uint32(20),
 						},
@@ -1479,7 +1491,7 @@ func TestSessionControllerUseGyForAuthOnlySuccess(t *testing.T) {
 		done := args.Get(1).(chan interface{})
 		request := args.Get(2).(*gx.CreditControlRequest)
 		ruleInstalls := []*gx.RuleInstallAVP{
-			&gx.RuleInstallAVP{
+			{
 				RuleNames:            []string{"static_rule_1"},
 				RuleActivationTime:   &activationTime,
 				RuleDeactivationTime: &deactivationTime,
@@ -1550,7 +1562,7 @@ func TestSessionControllerUseGyForAuthOnlyNoRatingGroup(t *testing.T) {
 		request := args.Get(2).(*gx.CreditControlRequest)
 
 		ruleInstalls := []*gx.RuleInstallAVP{
-			&gx.RuleInstallAVP{
+			{
 				RuleNames:       []string{"static_rule_1"},
 				RuleDefinitions: []*gx.RuleDefinition{},
 			},
@@ -1625,7 +1637,7 @@ func TestSessionControllerUseGyForAuthOnlyCreditLimitReached(t *testing.T) {
 		request := args.Get(2).(*gx.CreditControlRequest)
 
 		ruleInstalls := []*gx.RuleInstallAVP{
-			&gx.RuleInstallAVP{
+			{
 				RuleNames:       []string{"static_rule_1"},
 				RuleDefinitions: []*gx.RuleDefinition{},
 			},
@@ -1672,7 +1684,7 @@ func returnGySuccessCreditLimitReached(args mock.Arguments) {
 	done := args.Get(1).(chan interface{})
 	request := args.Get(2).(*gy.CreditControlRequest)
 	credits := []*gy.ReceivedCredits{
-		&gy.ReceivedCredits{
+		{
 			ResultCode: diameter.DiameterCreditLimitReached,
 		},
 	}
@@ -1705,7 +1717,7 @@ func TestSessionControllerUseGyForAuthOnlySubscriberBarred(t *testing.T) {
 		request := args.Get(2).(*gx.CreditControlRequest)
 
 		ruleInstalls := []*gx.RuleInstallAVP{
-			&gx.RuleInstallAVP{
+			{
 				RuleNames:       []string{"static_rule_1"},
 				RuleDefinitions: []*gx.RuleDefinition{},
 			},
@@ -1716,6 +1728,7 @@ func TestSessionControllerUseGyForAuthOnlySubscriberBarred(t *testing.T) {
 			SessionID:      request.SessionID,
 			RequestNumber:  request.RequestNumber,
 			RuleInstallAVP: ruleInstalls,
+			Online:         1,
 		}
 	}).Once()
 
@@ -1752,7 +1765,7 @@ func returnGySuccessSubscriberBarred(args mock.Arguments) {
 	done := args.Get(1).(chan interface{})
 	request := args.Get(2).(*gy.CreditControlRequest)
 	credits := []*gy.ReceivedCredits{
-		&gy.ReceivedCredits{
+		{
 			ResultCode: diameter.DiameterRatingFailed,
 		},
 	}
@@ -1769,7 +1782,7 @@ func returnGxSuccessRevalidationTimer(args mock.Arguments) {
 	done := args.Get(1).(chan interface{})
 	request := args.Get(2).(*gx.CreditControlRequest)
 	ruleInstalls := []*gx.RuleInstallAVP{
-		&gx.RuleInstallAVP{
+		{
 			RuleNames: []string{"static_rule_1"},
 		},
 	}

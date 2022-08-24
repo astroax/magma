@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"magma/orc8r/cloud/go/services/directoryd"
-	"magma/orc8r/lib/go/registry"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+
+	"magma/orc8r/cloud/go/services/directoryd"
+	"magma/orc8r/lib/go/registry"
 )
 
 const (
@@ -35,8 +35,10 @@ const (
 	GwPipelined           GwServiceType = "pipelined"
 	GwSubscriberDB        GwServiceType = "subscriberdb"
 	GwS6aService          GwServiceType = "s6a_service"
+	GwS6aAsyncService     GwServiceType = "s6a_async_service"
 	GwSgsService          GwServiceType = "sgs_service"
 	GwSessiondService     GwServiceType = "sessiond"
+	GwS8Service           GwServiceType = "s8_service"
 	GwSpgwService         GwServiceType = "spgw_service"
 	GwAbortSessionService GwServiceType = "abort_session_service"
 	GwAAAService          GwServiceType = "aaa_server"
@@ -63,6 +65,7 @@ var services = []GwServiceType{
 	GwS6aService,
 	GwSgsService,
 	GwSessiondService,
+	GwS8Service,
 	GwSpgwService,
 	GwAbortSessionService,
 	GwAAAService,
@@ -83,8 +86,8 @@ func SetPort(port int) error {
 // SyncRPCHTTPServer instance, which is in the same process
 // of the Dispatcher grpc server who has an open bidirectional
 // stream with the gateway with hwId.
-func GetServiceAddressForGateway(hwId string) (string, error) {
-	hostName, err := directoryd.GetHostnameForHWID(hwId)
+func GetServiceAddressForGateway(ctx context.Context, hwId string) (string, error) {
+	hostName, err := directoryd.GetHostnameForHWID(ctx, hwId)
 	if err != nil {
 		fmt.Printf("err getting hostName in GetServiceAddressForGateway for hwId %v: %v\n", hwId, err)
 		return "", err
@@ -104,7 +107,7 @@ func GetServiceAddressForGateway(hwId string) (string, error) {
 func GetGatewayConnection(service GwServiceType, hwId string) (*grpc.ClientConn, context.Context, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), registry.GrpcMaxTimeoutSec*time.Second)
 	defer cancel()
-	addr, err := GetServiceAddressForGateway(hwId)
+	addr, err := GetServiceAddressForGateway(ctx, hwId)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -122,7 +125,6 @@ func GetGatewayConnection(service GwServiceType, hwId string) (*grpc.ClientConn,
 	customHeader := metadata.New(map[string]string{GatewayIdHeaderKey: hwId})
 	ctxToRet := metadata.NewOutgoingContext(context.Background(), customHeader)
 	return conn, ctxToRet, nil
-
 }
 
 func ListAllGwServices() []GwServiceType {

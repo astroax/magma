@@ -10,31 +10,40 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-
+from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import Any, Optional
 
-from abc import ABC, abstractmethod
+from magma.enodebd.data_models.data_model import InvalidTrParamPath
 from magma.enodebd.data_models.data_model_parameters import ParameterName
 from magma.enodebd.device_config.configuration_init import build_desired_config
 from magma.enodebd.exceptions import ConfigurationError, Tr069Error
 from magma.enodebd.logger import EnodebdLogger as logger
-from magma.enodebd.state_machines.acs_state_utils import \
-    does_inform_have_event, get_all_objects_to_add, get_all_objects_to_delete, \
-    get_all_param_values_to_set, get_obj_param_values_to_set, \
-    get_object_params_to_get, get_optional_param_to_check, \
-    get_param_values_to_set, get_params_to_get, \
-    parse_get_parameter_values_response, process_inform_message
+from magma.enodebd.state_machines.acs_state_utils import (
+    does_inform_have_event,
+    get_all_objects_to_add,
+    get_all_objects_to_delete,
+    get_all_param_values_to_set,
+    get_firmware_upgrade_download_config,
+    get_obj_param_values_to_set,
+    get_object_params_to_get,
+    get_optional_param_to_check,
+    get_param_values_to_set,
+    get_params_to_get,
+    parse_get_parameter_values_response,
+    process_inform_message,
+    should_transition_to_firmware_upgrade_download,
+)
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
 from magma.enodebd.state_machines.timer import StateMachineTimer
 from magma.enodebd.tr069 import models
 
 AcsMsgAndTransition = namedtuple(
-    'AcsMsgAndTransition', ['msg', 'next_state']
+    'AcsMsgAndTransition', ['msg', 'next_state'],
 )
 
 AcsReadMsgResult = namedtuple(
-    'AcsReadMsgResult', ['msg_handled', 'next_state']
+    'AcsReadMsgResult', ['msg_handled', 'next_state'],
 )
 
 
@@ -49,6 +58,7 @@ class EnodebAcsState(ABC):
 
     In the constructor, set up state transitions.
     """
+
     def __init__(self):
         self._acs = None
 
@@ -70,7 +80,8 @@ class EnodebAcsState(ABC):
         """
         raise ConfigurationError(
             '%s should implement read_msg() if it '
-            'needs to handle message reading' % self.__class__.__name__)
+            'needs to handle message reading' % self.__class__.__name__,
+        )
 
     def get_msg(self, message: Any) -> AcsMsgAndTransition:
         """
@@ -83,7 +94,8 @@ class EnodebAcsState(ABC):
         """
         raise ConfigurationError(
             '%s should implement get_msg() if it '
-            'needs to produce messages' % self.__class__.__name__)
+            'needs to produce messages' % self.__class__.__name__,
+        )
 
     @property
     def acs(self) -> EnodebAcsStateMachine:
@@ -109,6 +121,7 @@ class WaitInformState(EnodebAcsState):
     enodebd whether the eNB is just sending another Inform, or if a different
     eNB was plugged into the same interface.
     """
+
     def __init__(
         self,
         acs: EnodebAcsStateMachine,
@@ -128,10 +141,13 @@ class WaitInformState(EnodebAcsState):
         """
         if not isinstance(message, models.Inform):
             return AcsReadMsgResult(False, None)
-        process_inform_message(message, self.acs.data_model,
-                               self.acs.device_cfg)
+        process_inform_message(
+            message, self.acs.data_model,
+            self.acs.device_cfg,
+        )
         if does_inform_have_event(message, '1 BOOT'):
             return AcsReadMsgResult(True, self.boot_transition)
+
         return AcsReadMsgResult(True, None)
 
     def get_msg(self, message: Any) -> AcsMsgAndTransition:
@@ -145,11 +161,175 @@ class WaitInformState(EnodebAcsState):
         return 'Waiting for an Inform'
 
 
+class CheckFirmwareUpgradeDownloadState(EnodebAcsState):
+    """
+    This state is a purely transition state that acts as a decision block in the state machine graph.
+    It detects whether or not a download request should be initiated for a given eNB
+    based on the eNB software version reported and enodebd firmware upgrade configuration.
+    """
+
+    def __init__(
+        self,
+        acs: EnodebAcsStateMachine,
+        when_download: str,
+        when_skip: str,
+    ):
+        super().__init__()
+        self.acs = acs
+        self.download_transition = when_download
+        self.skip_transition = when_skip
+
+    def state_description(self) -> str:
+        return 'Checking for Firmware Download'
+
+    def enter(self):
+        if should_transition_to_firmware_upgrade_download(self.acs):
+            self.acs.transition(self.download_transition)
+        else:
+            self.acs.transition(self.skip_transition)
+
+
+class FirmwareUpgradeDownloadState(EnodebAcsState):
+    """
+    This state initiates the Firmware Upgrade download flow.
+
+    A Download request is being sent with Firmware Upgrade data to the eNB.
+    """
+
+    FIRMWARE_FILE_TYPE = "1 Firmware Upgrade Image"
+
+    def __init__(
+        self,
+        acs: EnodebAcsStateMachine,
+        when_done: str,
+    ):
+        super().__init__()
+        self.acs = acs
+        self.done_transition = when_done
+
+    def state_description(self) -> str:
+        return 'Expect Empty HTTP POST and request Firmware Download'
+
+    def read_msg(self, message: Any) -> AcsReadMsgResult:
+        """
+        Expect Dummy Input.
+        """
+        if not isinstance(message, models.DummyInput):
+            return AcsReadMsgResult(False, None)
+        return AcsReadMsgResult(True, None)
+
+    def get_msg(self, message: Any) -> AcsMsgAndTransition:
+        """ Reply with Download Request """
+        download_params_dict = self._get_download_parameters()
+        request = self._build_download_request(download_params_dict)
+
+        return AcsMsgAndTransition(request, self.done_transition)
+
+    def _get_download_parameters(self):
+        """
+        Get download request parameters.
+
+        We take them now from the service config yaml. But in the future this function could
+        be rewritten to use per eNB config (mconfig).
+        """
+        fw_upgrade_config = get_firmware_upgrade_download_config(self.acs)
+        target_software_version = fw_upgrade_config.get('version', "")
+        target_software_version_url = fw_upgrade_config.get('url', "")
+        username = fw_upgrade_config.get('username', "")
+        password = fw_upgrade_config.get('password', "")
+        md5 = fw_upgrade_config.get('md5', None)
+        rawmode = fw_upgrade_config.get('rawmode', None)
+
+        download_params_dict = {
+            "target_software_version": target_software_version,
+            "target_software_version_url": target_software_version_url,
+            "username": username,
+            "password": password,
+            "md5": md5,
+            "rawmode": rawmode,
+        }
+
+        return download_params_dict
+
+    def _build_download_request(self, download_params_dict: dict):
+        request = models.Download()
+        request.CommandKey = download_params_dict['target_software_version']
+        request.FileType = self.FIRMWARE_FILE_TYPE
+        request.URL = download_params_dict['target_software_version_url']
+        request.Username = download_params_dict['username']
+        request.Password = download_params_dict['password']
+        # The ACS MAY set this value to zero. The CPE MUST interpret a zero value to
+        # mean that that the ACS has provided no information about the file size. In this
+        # case, the CPE MUST attempt to proceed with the download under the
+        # presumption that sufficient space is available, though during the course of
+        # download, the CPE might determine otherwise.
+        request.FileSize = 0
+        request.TargetFileName = ""
+        request.DelaySeconds = 0
+        request.SuccessURL = ""
+        request.FailureURL = ""
+
+        # Baicells specific settings
+        if download_params_dict['md5'] is not None:
+            request.Md5 = download_params_dict['md5']
+        if download_params_dict['rawmode'] is not None:
+            request.RawMode = bool(download_params_dict['rawmode'])
+        return request
+
+
+class WaitForFirmwareUpgradeDownloadResponse(EnodebAcsState):
+    """
+    This state reacts to a reply from the eNB after a Download request has been sent.
+
+    When a DownloadReponse object is received, that means the Download request was accepted
+    and a firmware download is in progress.
+    However, if there is already a download requested pending on the eNB, issuing a Download request
+    may cause the eNB to return a Fault code 9017. It is a generic download failure code that
+    seemed to indicate on FreedomFi One/Sercomm eNBs that a download of the same CommandKey is already
+    in progress.
+
+    In such a case, we can proceed to a skip state.
+    """
+
+    def __init__(
+        self,
+        acs: EnodebAcsStateMachine,
+        when_done: str,
+        when_skip: str,
+    ):
+        super().__init__()
+        self.acs = acs
+        self.done_transition = when_done
+        self.skip_transition = when_skip
+
+    def state_description(self) -> str:
+        return 'Wait for DownloadResponse and send HTTP OK'
+
+    def read_msg(self, message: Any) -> AcsReadMsgResult:
+        """
+        Expect DownloadResponse.
+
+        If a download is already in progress, eNB may return 9017 Fault code.
+        It seems to indicate that a download of the same file/commandkey is already
+        in progress, so eNB cannot process new download requests.
+        """
+        if isinstance(message, models.Fault) and message.FaultCode == 9017:
+            logger.warning(
+                "<WaitForDownloadResponse> Received Fault <%s>, ignoring and skipping", message,
+            )
+            return AcsReadMsgResult(True, self.skip_transition)
+        if not isinstance(message, models.DownloadResponse):
+            return AcsReadMsgResult(False, None)
+        self.acs.start_fw_upgrade_timeout()
+        return AcsReadMsgResult(True, self.done_transition)
+
+
 class GetRPCMethodsState(EnodebAcsState):
     """
     After the first Inform message from boot, it is expected that the eNB
     will try to learn the RPC methods of the ACS.
     """
+
     def __init__(self, acs: EnodebAcsStateMachine, when_done: str, when_skip: str):
         super().__init__()
         self.acs = acs
@@ -169,7 +349,7 @@ class GetRPCMethodsState(EnodebAcsState):
         resp.MethodList = models.MethodList()
         RPC_METHODS = ['Inform', 'GetRPCMethods', 'TransferComplete']
         resp.MethodList.arrayType = 'xsd:string[%d]' \
-                                          % len(RPC_METHODS)
+            % len(RPC_METHODS)
         resp.MethodList.string = RPC_METHODS
         return AcsMsgAndTransition(resp, self.done_transition)
 
@@ -200,9 +380,11 @@ class BaicellsRemWaitState(EnodebAcsState):
 
     def enter(self):
         self.rem_timer = StateMachineTimer(self.CONFIG_DELAY_AFTER_BOOT)
-        logger.info('Holding off of eNB configuration for %s seconds. '
-                     'Will resume after eNB REM process has finished. ',
-                     self.CONFIG_DELAY_AFTER_BOOT)
+        logger.info(
+            'Holding off of eNB configuration for %s seconds. '
+            'Will resume after eNB REM process has finished. ',
+            self.CONFIG_DELAY_AFTER_BOOT,
+        )
 
     def exit(self):
         self.rem_timer = None
@@ -210,20 +392,26 @@ class BaicellsRemWaitState(EnodebAcsState):
     def read_msg(self, message: Any) -> AcsReadMsgResult:
         if not isinstance(message, models.Inform):
             return AcsReadMsgResult(False, None)
-        process_inform_message(message, self.acs.data_model,
-                               self.acs.device_cfg)
+        process_inform_message(
+            message, self.acs.data_model,
+            self.acs.device_cfg,
+        )
         return AcsReadMsgResult(True, None)
 
     def get_msg(self, message: Any) -> AcsMsgAndTransition:
-        if self.rem_timer.is_done():
-            return AcsMsgAndTransition(models.DummyInput(),
-                                       self.done_transition)
+        if self.rem_timer and self.rem_timer.is_done():
+            return AcsMsgAndTransition(
+                models.DummyInput(),
+                self.done_transition,
+            )
         return AcsMsgAndTransition(models.DummyInput(), None)
 
     def state_description(self) -> str:
-        remaining = self.rem_timer.seconds_remaining()
-        return 'Waiting for eNB REM to run for %d more seconds before ' \
-               'resuming with configuration.' % remaining
+        if self.rem_timer:
+            remaining = self.rem_timer.seconds_remaining()
+            return 'Waiting for eNB REM to run for %d more seconds before ' \
+                   'resuming with configuration.' % remaining
+        return 'rem_timer is None'
 
 
 class WaitEmptyMessageState(EnodebAcsState):
@@ -246,10 +434,25 @@ class WaitEmptyMessageState(EnodebAcsState):
         rest of the provisioning process
         """
         if not isinstance(message, models.DummyInput):
-            return AcsReadMsgResult(False, None)
-        if get_optional_param_to_check(self.acs.data_model) is None:
-            return AcsReadMsgResult(True, self.done_transition)
-        return AcsReadMsgResult(True, self.unknown_param_transition)
+            logger.debug("Ignoring message %s", str(type(message)))
+            return AcsReadMsgResult(msg_handled=False, next_state=None)
+        if self.unknown_param_transition:
+            if get_optional_param_to_check(self.acs.data_model):
+                return AcsReadMsgResult(
+                    msg_handled=True,
+                    next_state=self.unknown_param_transition,
+                )
+        return AcsReadMsgResult(
+            msg_handled=True,
+            next_state=self.done_transition,
+        )
+
+    def get_msg(self, message: Any) -> AcsMsgAndTransition:
+        """
+        Return a dummy message waiting for the empty message from CPE
+        """
+        request = models.DummyInput()
+        return AcsMsgAndTransition(msg=request, next_state=None)
 
     def state_description(self) -> str:
         return 'Waiting for empty message from eNodeB'
@@ -282,18 +485,24 @@ class CheckOptionalParamsState(EnodebAcsState):
     def read_msg(self, message: Any) -> AcsReadMsgResult:
         """ Process either GetParameterValuesResponse or a Fault """
         if type(message) == models.Fault:
-            self.acs.data_model.set_parameter_presence(self.optional_param,
-                                                       False)
+            self.acs.data_model.set_parameter_presence(
+                self.optional_param,
+                False,
+            )
         elif type(message) == models.GetParameterValuesResponse:
             name_to_val = parse_get_parameter_values_response(
                 self.acs.data_model,
                 message,
             )
-            logger.debug('Received CPE parameter values: %s',
-                          str(name_to_val))
+            logger.debug(
+                'Received CPE parameter values: %s',
+                str(name_to_val),
+            )
             for name, val in name_to_val.items():
-                self.acs.data_model.set_parameter_presence(self.optional_param,
-                                                           True)
+                self.acs.data_model.set_parameter_presence(
+                    self.optional_param,
+                    True,
+                )
                 magma_val = self.acs.data_model.transform_for_magma(name, val)
                 self.acs.device_cfg.set_parameter(name, magma_val)
         else:
@@ -356,6 +565,7 @@ class WaitGetTransientParametersState(EnodebAcsState):
     Periodically read eNodeB status. Note: keep frequency low to avoid
     backing up large numbers of read operations if enodebd is busy
     """
+
     def __init__(
             self,
             acs: EnodebAcsStateMachine,
@@ -365,6 +575,7 @@ class WaitGetTransientParametersState(EnodebAcsState):
             when_add: str,
             when_set: str,
             when_skip: str,
+            request_all_params: bool = False,
     ):
         super().__init__()
         self.acs = acs
@@ -374,41 +585,63 @@ class WaitGetTransientParametersState(EnodebAcsState):
         self.add_obj_transition = when_add
         self.set_transition = when_set
         self.skip_transition = when_skip
+        self.request_all_params = request_all_params
 
     def read_msg(self, message: Any) -> AcsReadMsgResult:
         if not isinstance(message, models.GetParameterValuesResponse):
             return AcsReadMsgResult(False, None)
         # Current values of the fetched parameters
-        name_to_val = parse_get_parameter_values_response(self.acs.data_model,
-                                                          message)
+        name_to_val = parse_get_parameter_values_response(
+            self.acs.data_model,
+            message,
+        )
         logger.debug('Fetched Transient Params: %s', str(name_to_val))
 
         # Update device configuration
         for name in name_to_val:
             magma_val = \
-                self.acs.data_model.transform_for_magma(name,
-                                                        name_to_val[name])
+                self.acs.data_model.transform_for_magma(
+                    name,
+                    name_to_val[name],
+                )
             self.acs.device_cfg.set_parameter(name, magma_val)
 
         return AcsReadMsgResult(True, self.get_next_state())
 
     def get_next_state(self) -> str:
         should_get_params = \
-            len(get_params_to_get(self.acs.device_cfg,
-                                  self.acs.data_model)) > 0
+            len(
+                get_params_to_get(
+                    self.acs.device_cfg,
+                    self.acs.data_model,
+                    request_all_params=self.request_all_params,
+                ),
+            ) > 0
         if should_get_params:
             return self.done_transition
         should_get_obj_params = \
-            len(get_object_params_to_get(self.acs.desired_cfg,
-                                         self.acs.device_cfg,
-                                         self.acs.data_model)) > 0
+            len(
+                get_object_params_to_get(
+                    self.acs.desired_cfg,
+                    self.acs.device_cfg,
+                    self.acs.data_model,
+                ),
+            ) > 0
         if should_get_obj_params:
             return self.get_obj_params_transition
-        elif len(get_all_objects_to_delete(self.acs.desired_cfg,
-                                           self.acs.device_cfg)) > 0:
+        elif len(
+            get_all_objects_to_delete(
+                self.acs.desired_cfg,
+                self.acs.device_cfg,
+            ),
+        ) > 0:
             return self.rm_obj_transition
-        elif len(get_all_objects_to_add(self.acs.desired_cfg,
-                                        self.acs.device_cfg)) > 0:
+        elif len(
+            get_all_objects_to_add(
+                self.acs.desired_cfg,
+                self.acs.device_cfg,
+            ),
+        ) > 0:
             return self.add_obj_transition
         return self.skip_transition
 
@@ -421,6 +654,7 @@ class GetParametersState(EnodebAcsState):
     Get the value of most parameters of the eNB that are defined in the data
     model. Object parameters are excluded.
     """
+
     def __init__(
         self,
         acs: EnodebAcsStateMachine,
@@ -455,8 +689,10 @@ class GetParametersState(EnodebAcsState):
         """
 
         # Get the names of regular parameters
-        names = get_params_to_get(self.acs.device_cfg, self.acs.data_model,
-                                  self.request_all_params)
+        names = get_params_to_get(
+            self.acs.device_cfg, self.acs.data_model,
+            self.request_all_params,
+        )
 
         # Generate the request
         request = models.GetParameterValues()
@@ -466,7 +702,9 @@ class GetParametersState(EnodebAcsState):
         request.ParameterNames.string = []
         for name in names:
             path = self.acs.data_model.get_parameter(name).path
-            request.ParameterNames.string.append(path)
+            if path is not InvalidTrParamPath:
+                # Only get data elements backed by tr69 path
+                request.ParameterNames.string.append(path)
 
         return AcsMsgAndTransition(request, self.done_transition)
 
@@ -484,8 +722,10 @@ class WaitGetParametersState(EnodebAcsState):
         """ Process GetParameterValuesResponse """
         if not isinstance(message, models.GetParameterValuesResponse):
             return AcsReadMsgResult(False, None)
-        name_to_val = parse_get_parameter_values_response(self.acs.data_model,
-                                                          message)
+        name_to_val = parse_get_parameter_values_response(
+            self.acs.data_model,
+            message,
+        )
         logger.debug('Received CPE parameter values: %s', str(name_to_val))
         for name, val in name_to_val.items():
             magma_val = self.acs.data_model.transform_for_magma(name, val)
@@ -497,16 +737,20 @@ class WaitGetParametersState(EnodebAcsState):
 
 
 class GetObjectParametersState(EnodebAcsState):
-    def __init__(self, acs: EnodebAcsStateMachine, when_done: str):
+    def __init__(self, acs: EnodebAcsStateMachine, when_done: str, request_all_params: bool = False):
         super().__init__()
         self.acs = acs
         self.done_transition = when_done
+        self.request_all_params = request_all_params
 
     def get_msg(self, message: Any) -> AcsMsgAndTransition:
         """ Respond with GetParameterValuesRequest """
-        names = get_object_params_to_get(self.acs.desired_cfg,
-                                         self.acs.device_cfg,
-                                         self.acs.data_model)
+        names = get_object_params_to_get(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+            self.acs.data_model,
+            self.request_all_params,
+        )
 
         # Generate the request
         request = models.GetParameterValues()
@@ -559,11 +803,15 @@ class WaitGetObjectParametersState(EnodebAcsState):
         while True:
             obj_name = ParameterName.PLMN_N % (num_plmns + 1)
             if obj_name not in obj_to_params or len(obj_to_params[obj_name]) == 0:
-                logger.warning("eNB has PLMN %s but not defined in model",
-                    obj_name)
+                logger.warning(
+                    "eNB has PLMN %s but not defined in model",
+                    obj_name,
+                )
                 break
             param_name_list = obj_to_params[obj_name]
-            obj_path = self.acs.data_model.get_parameter(param_name_list[0]).path
+            obj_path = self.acs.data_model.get_parameter(
+                param_name_list[0],
+            ).path
             if obj_path not in path_to_val:
                 break
             if not self.acs.device_cfg.has_object(obj_name):
@@ -574,15 +822,21 @@ class WaitGetObjectParametersState(EnodebAcsState):
                 value = path_to_val[path]
                 magma_val = \
                     self.acs.data_model.transform_for_magma(name, value)
-                self.acs.device_cfg.set_parameter_for_object(name, magma_val,
-                                                             obj_name)
+                self.acs.device_cfg.set_parameter_for_object(
+                    name, magma_val,
+                    obj_name,
+                )
         num_plmns_reported = \
-                int(self.acs.device_cfg.get_parameter(ParameterName.NUM_PLMNS))
+            int(self.acs.device_cfg.get_parameter(ParameterName.NUM_PLMNS))
         if num_plmns != num_plmns_reported:
-            logger.warning("eNB reported %d PLMNs but found %d",
-                    num_plmns_reported, num_plmns)
-            self.acs.device_cfg.set_parameter(ParameterName.NUM_PLMNS,
-                                              num_plmns)
+            logger.warning(
+                "eNB reported %d PLMNs but found %d",
+                num_plmns_reported, num_plmns,
+            )
+            self.acs.device_cfg.set_parameter(
+                ParameterName.NUM_PLMNS,
+                num_plmns,
+            )
 
         # Now we can have the desired state
         if self.acs.desired_cfg is None:
@@ -594,15 +848,27 @@ class WaitGetObjectParametersState(EnodebAcsState):
                 self.acs.config_postprocessor,
             )
 
-        if len(get_all_objects_to_delete(self.acs.desired_cfg,
-                                         self.acs.device_cfg)) > 0:
+        if len(
+            get_all_objects_to_delete(
+                self.acs.desired_cfg,
+                self.acs.device_cfg,
+            ),
+        ) > 0:
             return AcsReadMsgResult(True, self.rm_obj_transition)
-        elif len(get_all_objects_to_add(self.acs.desired_cfg,
-                                        self.acs.device_cfg)) > 0:
+        elif len(
+            get_all_objects_to_add(
+                self.acs.desired_cfg,
+                self.acs.device_cfg,
+            ),
+        ) > 0:
             return AcsReadMsgResult(True, self.add_obj_transition)
-        elif len(get_all_param_values_to_set(self.acs.desired_cfg,
-                                             self.acs.device_cfg,
-                                             self.acs.data_model)) > 0:
+        elif len(
+            get_all_param_values_to_set(
+                self.acs.desired_cfg,
+                self.acs.device_cfg,
+                self.acs.data_model,
+            ),
+        ) > 0:
             return AcsReadMsgResult(True, self.set_params_transition)
         return AcsReadMsgResult(True, self.skip_transition)
 
@@ -630,8 +896,10 @@ class DeleteObjectsState(EnodebAcsState):
             - Object name (string)
         """
         request = models.DeleteObject()
-        self.deleted_param = get_all_objects_to_delete(self.acs.desired_cfg,
-                                                       self.acs.device_cfg)[0]
+        self.deleted_param = get_all_objects_to_delete(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+        )[0]
         request.ObjectName = \
             self.acs.data_model.get_parameter(self.deleted_param).path
         return AcsMsgAndTransition(request, None)
@@ -644,21 +912,31 @@ class DeleteObjectsState(EnodebAcsState):
         """
         if type(message) == models.DeleteObjectResponse:
             if message.Status != 0:
-                raise Tr069Error('Received DeleteObjectResponse with '
-                                 'Status=%d' % message.Status)
+                raise Tr069Error(
+                    'Received DeleteObjectResponse with '
+                    'Status=%d' % message.Status,
+                )
         elif type(message) == models.Fault:
-            raise Tr069Error('Received Fault in response to DeleteObject '
-                             '(faultstring = %s)' % message.FaultString)
+            raise Tr069Error(
+                'Received Fault in response to DeleteObject '
+                '(faultstring = %s)' % message.FaultString,
+            )
         else:
             return AcsReadMsgResult(False, None)
 
         self.acs.device_cfg.delete_object(self.deleted_param)
-        obj_list_to_delete = get_all_objects_to_delete(self.acs.desired_cfg,
-                                                       self.acs.device_cfg)
+        obj_list_to_delete = get_all_objects_to_delete(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+        )
         if len(obj_list_to_delete) > 0:
             return AcsReadMsgResult(True, None)
-        if len(get_all_objects_to_add(self.acs.desired_cfg,
-                                      self.acs.device_cfg)) == 0:
+        if len(
+            get_all_objects_to_add(
+                self.acs.desired_cfg,
+                self.acs.device_cfg,
+            ),
+        ) == 0:
             return AcsReadMsgResult(True, self.skip_transition)
         return AcsReadMsgResult(True, self.add_obj_transition)
 
@@ -675,8 +953,10 @@ class AddObjectsState(EnodebAcsState):
 
     def get_msg(self, message: Any) -> AcsMsgAndTransition:
         request = models.AddObject()
-        self.added_param = get_all_objects_to_add(self.acs.desired_cfg,
-                                                  self.acs.device_cfg)[0]
+        self.added_param = get_all_objects_to_add(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+        )[0]
         desired_param = self.acs.data_model.get_parameter(self.added_param)
         desired_path = desired_param.path
         path_parts = desired_path.split('.')
@@ -692,17 +972,23 @@ class AddObjectsState(EnodebAcsState):
     def read_msg(self, message: Any) -> AcsReadMsgResult:
         if type(message) == models.AddObjectResponse:
             if message.Status != 0:
-                raise Tr069Error('Received AddObjectResponse with '
-                                 'Status=%d' % message.Status)
+                raise Tr069Error(
+                    'Received AddObjectResponse with '
+                    'Status=%d' % message.Status,
+                )
         elif type(message) == models.Fault:
-            raise Tr069Error('Received Fault in response to AddObject '
-                             '(faultstring = %s)' % message.FaultString)
+            raise Tr069Error(
+                'Received Fault in response to AddObject '
+                '(faultstring = %s)' % message.FaultString,
+            )
         else:
             return AcsReadMsgResult(False, None)
         instance_n = message.InstanceNumber
         self.acs.device_cfg.add_object(self.added_param % instance_n)
-        obj_list_to_add = get_all_objects_to_add(self.acs.desired_cfg,
-                                                 self.acs.device_cfg)
+        obj_list_to_add = get_all_objects_to_add(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+        )
         if len(obj_list_to_add) > 0:
             return AcsReadMsgResult(True, None)
         return AcsReadMsgResult(True, self.done_transition)
@@ -720,14 +1006,26 @@ class SetParameterValuesState(EnodebAcsState):
     def get_msg(self, message: Any) -> AcsMsgAndTransition:
         request = models.SetParameterValues()
         request.ParameterList = models.ParameterValueList()
-        param_values = get_all_param_values_to_set(self.acs.desired_cfg,
-                                                   self.acs.device_cfg,
-                                                   self.acs.data_model)
+        param_values = get_all_param_values_to_set(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+            self.acs.data_model,
+        )
         request.ParameterList.arrayType = 'cwmp:ParameterValueStruct[%d]' \
-                                          % len(param_values)
+            % len(param_values)
         request.ParameterList.ParameterValueStruct = []
-        logger.debug('Sending TR069 request to set CPE parameter values: %s',
-                      str(param_values))
+        logger.debug(
+            'Sending TR069 request to set CPE parameter values: %s',
+            str(param_values),
+        )
+        # TODO: Match key response when we support having multiple outstanding
+        # calls.
+        if self.acs.has_version_key:
+            request.ParameterKey = models.ParameterKeyType()
+            request.ParameterKey.Data =\
+                "SetParameter-{:10.0f}".format(self.acs.parameter_version_key)
+            request.ParameterKey.type = 'xsd:string'
+
         for name, value in param_values.items():
             param_info = self.acs.data_model.get_parameter(name)
             type_ = param_info.type
@@ -746,8 +1044,10 @@ class SetParameterValuesState(EnodebAcsState):
                 name_value.Value.type = 'xsd:string'
                 name_value.Value.Data = str(enb_value)
             else:
-                raise Tr069Error('Unsupported type for %s: %s' %
-                                 (name, type_))
+                raise Tr069Error(
+                    'Unsupported type for %s: %s' %
+                    (name, type_),
+                )
             if param_info.is_invasive:
                 self.acs.are_invasive_changes_applied = False
             request.ParameterList.ParameterValueStruct.append(name_value)
@@ -767,15 +1067,19 @@ class SetParameterValuesNotAdminState(EnodebAcsState):
     def get_msg(self, message: Any) -> AcsMsgAndTransition:
         request = models.SetParameterValues()
         request.ParameterList = models.ParameterValueList()
-        param_values = get_all_param_values_to_set(self.acs.desired_cfg,
-                                                   self.acs.device_cfg,
-                                                   self.acs.data_model,
-                                                   exclude_admin=True)
+        param_values = get_all_param_values_to_set(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+            self.acs.data_model,
+            exclude_admin=True,
+        )
         request.ParameterList.arrayType = 'cwmp:ParameterValueStruct[%d]' \
                                           % len(param_values)
         request.ParameterList.ParameterValueStruct = []
-        logger.debug('Sending TR069 request to set CPE parameter values: %s',
-                      str(param_values))
+        logger.debug(
+            'Sending TR069 request to set CPE parameter values: %s',
+            str(param_values),
+        )
         for name, value in param_values.items():
             param_info = self.acs.data_model.get_parameter(name)
             type_ = param_info.type
@@ -794,8 +1098,10 @@ class SetParameterValuesNotAdminState(EnodebAcsState):
                 name_value.Value.type = 'xsd:string'
                 name_value.Value.Data = str(enb_value)
             else:
-                raise Tr069Error('Unsupported type for %s: %s' %
-                                 (name, type_))
+                raise Tr069Error(
+                    'Unsupported type for %s: %s' %
+                    (name, type_),
+                )
             if param_info.is_invasive:
                 self.acs.are_invasive_changes_applied = False
             request.ParameterList.ParameterValueStruct.append(name_value)
@@ -812,30 +1118,43 @@ class WaitSetParameterValuesState(EnodebAcsState):
         acs: EnodebAcsStateMachine,
         when_done: str,
         when_apply_invasive: str,
+        status_non_zero_allowed: bool = False,
     ):
         super().__init__()
         self.acs = acs
         self.done_transition = when_done
         self.apply_invasive_transition = when_apply_invasive
+        # Set Params can legally return zero and non zero status
+        # Per tr-196, if there are errors the method should return a fault.
+        # Make flag optional to compensate for existing radios returning non
+        # zero on error.
+        self.status_non_zero_allowed = status_non_zero_allowed
 
     def read_msg(self, message: Any) -> AcsReadMsgResult:
         if type(message) == models.SetParameterValuesResponse:
-            if message.Status != 0:
-                raise Tr069Error('Received SetParameterValuesResponse with '
-                                 'Status=%d' % message.Status)
+            if not self.status_non_zero_allowed:
+                if message.Status != 0:
+                    raise Tr069Error(
+                        'Received SetParameterValuesResponse with '
+                        'Status=%d' % message.Status,
+                    )
             self._mark_as_configured()
             if not self.acs.are_invasive_changes_applied:
                 return AcsReadMsgResult(True, self.apply_invasive_transition)
             return AcsReadMsgResult(True, self.done_transition)
         elif type(message) == models.Fault:
-            logger.error('Received Fault in response to SetParameterValues, '
-                          'Code (%s), Message (%s)', message.FaultCode,
-                          message.FaultString)
+            logger.error(
+                'Received Fault in response to SetParameterValues, '
+                'Code (%s), Message (%s)', message.FaultCode,
+                message.FaultString,
+            )
             if message.SetParameterValuesFault is not None:
                 for fault in message.SetParameterValuesFault:
-                    logger.error('SetParameterValuesFault Param: %s, '
-                                  'Code: %s, String: %s', fault.ParameterName,
-                                  fault.FaultCode, fault.FaultString)
+                    logger.error(
+                        'SetParameterValuesFault Param: %s, '
+                        'Code: %s, String: %s', fault.ParameterName,
+                        fault.FaultCode, fault.FaultString,
+                    )
         return AcsReadMsgResult(False, None)
 
     def _mark_as_configured(self) -> None:
@@ -845,24 +1164,32 @@ class WaitSetParameterValuesState(EnodebAcsState):
         set the parameter values to.
         """
         # Values of parameters
-        name_to_val = get_param_values_to_set(self.acs.desired_cfg,
-                                              self.acs.device_cfg,
-                                              self.acs.data_model)
+        name_to_val = get_param_values_to_set(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+            self.acs.data_model,
+        )
         for name, val in name_to_val.items():
             magma_val = self.acs.data_model.transform_for_magma(name, val)
             self.acs.device_cfg.set_parameter(name, magma_val)
 
         # Values of object parameters
-        obj_to_name_to_val = get_obj_param_values_to_set(self.acs.desired_cfg,
-                                                         self.acs.device_cfg,
-                                                         self.acs.data_model)
+        obj_to_name_to_val = get_obj_param_values_to_set(
+            self.acs.desired_cfg,
+            self.acs.device_cfg,
+            self.acs.data_model,
+        )
         for obj_name, name_to_val in obj_to_name_to_val.items():
             for name, val in name_to_val.items():
-                logger.debug('Set obj: %s, name: %s, val: %s', str(obj_name),
-                              str(name), str(val))
+                logger.debug(
+                    'Set obj: %s, name: %s, val: %s', str(obj_name),
+                    str(name), str(val),
+                )
                 magma_val = self.acs.data_model.transform_for_magma(name, val)
-                self.acs.device_cfg.set_parameter_for_object(name, magma_val,
-                                                             obj_name)
+                self.acs.device_cfg.set_parameter_for_object(
+                    name, magma_val,
+                    obj_name,
+                )
         logger.info('Successfully configured CPE parameters!')
 
     def state_description(self) -> str:
@@ -871,6 +1198,7 @@ class WaitSetParameterValuesState(EnodebAcsState):
 
 class EndSessionState(EnodebAcsState):
     """ To end a TR-069 session, send an empty HTTP response """
+
     def __init__(self, acs: EnodebAcsStateMachine):
         super().__init__()
         self.acs = acs
@@ -895,7 +1223,7 @@ class EndSessionState(EnodebAcsState):
         return 'Completed provisioning eNB. Awaiting new Inform.'
 
 
-class BaicellsSendRebootState(EnodebAcsState):
+class EnbSendRebootState(EnodebAcsState):
     def __init__(self, acs: EnodebAcsStateMachine, when_done: str):
         super().__init__()
         self.acs = acs
@@ -912,8 +1240,10 @@ class BaicellsSendRebootState(EnodebAcsState):
             return AcsReadMsgResult(False, None)
         elif isinstance(message, models.Inform):
             self.prev_msg_was_inform = True
-            process_inform_message(message, self.acs.data_model,
-                                   self.acs.device_cfg)
+            process_inform_message(
+                message, self.acs.data_model,
+                self.acs.device_cfg,
+            )
             return AcsReadMsgResult(True, None)
         self.prev_msg_was_inform = False
         return AcsReadMsgResult(True, None)
@@ -951,8 +1281,10 @@ class SendRebootState(EnodebAcsState):
             return AcsReadMsgResult(False, None)
         elif isinstance(message, models.Inform):
             self.prev_msg_was_inform = True
-            process_inform_message(message, self.acs.data_model,
-                                   self.acs.device_cfg)
+            process_inform_message(
+                message, self.acs.data_model,
+                self.acs.device_cfg,
+            )
             return AcsReadMsgResult(True, None)
         self.prev_msg_was_inform = False
         return AcsReadMsgResult(True, None)
@@ -1021,14 +1353,18 @@ class WaitInformMRebootState(EnodebAcsState):
         self.timeout_timer = StateMachineTimer(self.REBOOT_TIMEOUT)
 
         def check_timer() -> None:
-            if self.timeout_timer.is_done():
+            if self.timeout_timer and self.timeout_timer.is_done():
                 self.acs.transition(self.timeout_transition)
-                raise Tr069Error('Did not receive Inform response after '
-                                 'rebooting')
+                raise Tr069Error(
+                    'Did not receive Inform response after '
+                    'rebooting',
+                )
 
         self.timer_handle = \
-            self.acs.event_loop.call_later(self.REBOOT_TIMEOUT,
-                                           check_timer)
+            self.acs.event_loop.call_later(
+                self.REBOOT_TIMEOUT,
+                check_timer,
+            )
 
     def exit(self):
         self.timer_handle.cancel()
@@ -1038,10 +1374,14 @@ class WaitInformMRebootState(EnodebAcsState):
         if not isinstance(message, models.Inform):
             return AcsReadMsgResult(False, None)
         if not does_inform_have_event(message, self.INFORM_EVENT_CODE):
-            raise Tr069Error('Did not receive M Reboot event code in '
-                             'Inform')
-        process_inform_message(message, self.acs.data_model,
-                               self.acs.device_cfg)
+            raise Tr069Error(
+                'Did not receive M Reboot event code in '
+                'Inform',
+            )
+        process_inform_message(
+            message, self.acs.data_model,
+            self.acs.device_cfg,
+        )
         return AcsReadMsgResult(True, self.done_transition)
 
     def state_description(self) -> str:
@@ -1069,12 +1409,14 @@ class WaitRebootDelayState(EnodebAcsState):
         self.config_timer = StateMachineTimer(self.SHORT_CONFIG_DELAY)
 
         def check_timer() -> None:
-            if self.config_timer.is_done():
+            if self.config_timer and self.config_timer.is_done():
                 self.acs.transition(self.done_transition)
 
         self.timer_handle = \
-            self.acs.event_loop.call_later(self.SHORT_CONFIG_DELAY,
-                                           check_timer)
+            self.acs.event_loop.call_later(
+                self.SHORT_CONFIG_DELAY,
+                check_timer,
+            )
 
     def exit(self):
         self.timer_handle.cancel()
@@ -1099,8 +1441,10 @@ class ErrorState(EnodebAcsState):
     target state when an Inform is received.
     """
 
-    def __init__(self, acs: EnodebAcsStateMachine,
-                 inform_transition_target: Optional[str] = None):
+    def __init__(
+        self, acs: EnodebAcsStateMachine,
+        inform_transition_target: Optional[str] = None,
+    ):
         super().__init__()
         self.acs = acs
         self.inform_transition_target = inform_transition_target
@@ -1113,10 +1457,77 @@ class ErrorState(EnodebAcsState):
             return AcsMsgAndTransition(models.DummyInput(), None)
 
         if isinstance(message, models.Inform):
-            return AcsMsgAndTransition(models.DummyInput(),
-                                       self.inform_transition_target)
+            return AcsMsgAndTransition(
+                models.DummyInput(),
+                self.inform_transition_target,
+            )
         return AcsMsgAndTransition(models.DummyInput(), None)
 
     def state_description(self) -> str:
         return 'Error state - awaiting manual restart of enodebd service or ' \
                'an Inform to be received from the eNB'
+
+
+class NotifyDPState(EnodebAcsState, ABC):
+    """ Notify DP ...
+
+    For Baicells QRTB we can expect an inform message on
+    End Session state, either a queued one or a periodic one
+     """
+
+    def __init__(
+            self,
+            acs: EnodebAcsStateMachine,
+            when_inform: str,
+    ):
+        super().__init__()
+        self.acs = acs
+        self.inform_transition = when_inform
+
+    @abstractmethod
+    def enter(self):
+        """
+        Perform additional actions on state enter
+        """
+        pass
+
+    def read_msg(self, message: Any) -> AcsReadMsgResult:
+        """
+        Send an empty response if a device sends an empty HTTP message
+
+        If its an inform, try to process it. It could be a queued
+        inform or a periodic one.
+
+        Args:
+            message (Any): TR069 message
+
+        Returns:
+            AcsReadMsgResult
+        """
+        if isinstance(message, models.DummyInput):
+            return AcsReadMsgResult(msg_handled=True, next_state=None)
+        elif isinstance(message, models.Inform):
+            return AcsReadMsgResult(msg_handled=True, next_state=self.inform_transition)
+        return AcsReadMsgResult(msg_handled=False, next_state=None)
+
+    def get_msg(self, message: Any) -> AcsMsgAndTransition:
+        """
+        Send back a message to enb
+
+        Args:
+            message (Any): TR069 message
+
+        Returns:
+            AcsMsgAndTransition
+        """
+        request = models.DummyInput()
+        return AcsMsgAndTransition(msg=request, next_state=None)
+
+    def state_description(self) -> str:
+        """
+        Describe the state
+
+        Returns:
+            str
+        """
+        return 'Notifying DP. Awaiting new Inform.'

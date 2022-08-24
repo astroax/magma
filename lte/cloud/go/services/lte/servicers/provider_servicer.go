@@ -21,7 +21,7 @@ import (
 	policydb_streamer "magma/lte/cloud/go/services/policydb/streamer"
 	subscriber_streamer "magma/lte/cloud/go/services/subscriberdb/streamer"
 	streamer_protos "magma/orc8r/cloud/go/services/streamer/protos"
-	"magma/orc8r/cloud/go/services/streamer/providers"
+	stream_provider "magma/orc8r/cloud/go/services/streamer/providers/servicers/protected"
 	"magma/orc8r/lib/go/protos"
 )
 
@@ -32,7 +32,7 @@ func NewProviderServicer() streamer_protos.StreamProviderServer {
 }
 
 func (s *providerServicer) GetUpdates(ctx context.Context, req *protos.StreamRequest) (*protos.DataUpdateBatch, error) {
-	var streamer providers.StreamProvider
+	var streamer stream_provider.StreamProvider
 	switch req.GetStreamName() {
 	case lte.SubscriberStreamName:
 		streamer = &subscriber_streamer.SubscribersProvider{}
@@ -50,7 +50,7 @@ func (s *providerServicer) GetUpdates(ctx context.Context, req *protos.StreamReq
 		return nil, fmt.Errorf("GetUpdates failed: unknown stream name provided: %s", req.GetStreamName())
 	}
 
-	updates, err := streamer.GetUpdates(req.GetGatewayId(), req.GetExtraArgs())
+	updates, err := streamer.GetUpdates(ctx, req.GetGatewayId(), req.GetExtraArgs())
 	if err != nil {
 		return &protos.DataUpdateBatch{}, err
 	}

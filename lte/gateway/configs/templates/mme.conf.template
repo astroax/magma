@@ -30,12 +30,22 @@ MME :
     EPS_NETWORK_FEATURE_SUPPORT_LOCATION_SERVICES_VIA_EPC            = "no";    # DO NOT CHANGE
     EPS_NETWORK_FEATURE_SUPPORT_EXTENDED_SERVICE_REQUEST             = "no";    # DO NOT CHANGE
 
-    # Display statistics about whole system (expressed in seconds)
-    MME_STATISTIC_TIMER                       = 10;
+    # Report/Display MME statistics (expressed in seconds)
+    STATS_TIMER_SEC                    = 60;
 
     USE_STATELESS = "{{ use_stateless }}";
     USE_HA = "{{ use_ha }}";
     ENABLE_GTPU_PRIVATE_IP_CORRECTION = "{{ enable_gtpu_private_ip_correction }}";
+    ENABLE5G_FEATURES = "{{ enable5g_features }}";
+
+    # Congestion control configuration parameters
+    CONGESTION_CONTROL_ENABLED = "{{ congestion_control_enabled }}";
+    # Congestion control thresholds (expressed in microseconds)
+    S1AP_ZMQ_TH = {{ s1ap_zmq_th_us }};
+    MME_APP_ZMQ_CONGEST_TH = {{ mme_app_zmq_congest_th_us }};
+    MME_APP_ZMQ_AUTH_TH = {{ mme_app_zmq_auth_th_us }};
+    MME_APP_ZMQ_IDENT_TH = {{ mme_app_zmq_ident_th_us }};
+    MME_APP_ZMQ_SMC_TH = {{ mme_app_zmq_smc_th_us }};
 
     INTERTASK_INTERFACE :
     {
@@ -52,9 +62,9 @@ MME :
     # ------- SCTP definitions
     SCTP :
     {
-        # Number of streams to use in input/output
-        SCTP_INSTREAMS  = 8;
-        SCTP_OUTSTREAMS = 8;
+        # Path to sctpd up and downstream unix domain sockets
+        SCTP_UPSTREAM_SOCK = "unix:///tmp/sctpd_upstream.sock";
+        SCTP_DOWNSTREAM_SOCK = "unix:///tmp/sctpd_downstream.sock";
     };
 
     # ------- S1AP definitions
@@ -92,6 +102,37 @@ MME :
          {% endfor %}
     );
 
+    # List of restricted PLMNs
+    # By default this list is empty
+    # Max number of restricted plmn is 10
+    RESTRICTED_PLMN_LIST = (
+        # PlmnConfig values can be found at magma/lte/protos/mconfig/mconfigs.proto
+        {% for plmn_config in restrictedPlmns -%}
+        {
+          MCC        = "{{ plmn_config.mcc }}"
+          MNC        = "{{ plmn_config.mnc }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    );
+
+    # List of blocked IMEIs
+    # By default this list is empty
+    # Stored in a hash table on mme side
+    # Length of IMEI=15 digits, length of IMEISV=16 digits
+    BLOCKED_IMEI_LIST = (
+        # Sample IMEI: TAC(8 digits) + SNR (6 digits)
+        #{ IMEI_TAC="99000482"; SNR="351037"}
+        # Sample IMEI without SNR: TAC(8 digits)
+        #{ IMEI_TAC="99000482";}
+        # ImeiConfig values can be found at magma/lte/protos/mconfig/mconfigs.proto
+        {% for imei_config in restrictedImeis -%}
+        {
+          IMEI_TAC   = "{{ imei_config.tac }}"
+          SNR        = "{{ imei_config.snr }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    );
+
     CSFB :
     {
         NON_EPS_SERVICE_CONTROL = "{{ non_eps_service_control }}";
@@ -99,7 +140,6 @@ MME :
         CSFB_MNC = "{{ csfb_mnc }}";
         LAC = "{{ lac }}";
     };
-
 
     NAS :
     {
@@ -203,11 +243,13 @@ MME :
         # we don't advise wireless interfaces
         MME_INTERFACE_NAME_FOR_S1_MME         = "{{ s1ap_iface_name }}";
         MME_IPV4_ADDRESS_FOR_S1_MME           = "{{ s1ap_ip }}";
+        MME_IPV6_ADDRESS_FOR_S1_MME           = "{{ s1ap_ipv6 }}";
 
         # MME binded interface for S11 communication (GTPV2-C)
         MME_INTERFACE_NAME_FOR_S11_MME        = "{{ s11_iface_name }}";
         MME_IPV4_ADDRESS_FOR_S11_MME          = "{{ mme_s11_ip }}";
         MME_PORT_FOR_S11_MME                  = 2123;
+        MME_S1_IPV6_ENABLED                   = "{{ s1ap_ipv6_enabled }}";
     };
 
     LOGGING :
@@ -239,6 +281,7 @@ MME :
         S11_LOG_LEVEL      = "{{ oai_log_level }}";
         S6A_LOG_LEVEL      = "{{ oai_log_level }}";
         UTIL_LOG_LEVEL     = "{{ oai_log_level }}";
+        SERVICE303_LOG_LEVEL     = "{{ oai_log_level }}";
         MSC_LOG_LEVEL      = "ERROR";
         ITTI_LOG_LEVEL     = "ERROR";
         MME_SCENARIO_PLAYER_LOG_LEVEL = "ERROR";
@@ -255,8 +298,61 @@ MME :
     };
 
     S-GW :
-   {
-    # S-GW binded interface for S11 communication (GTPV2-C), if none selected the ITTI message interface is used
-       SGW_IPV4_ADDRESS_FOR_S11              = "{{ remote_sgw_ip }}";
-   };
+    {
+        # S-GW binded interface for S11 communication (GTPV2-C), if none selected the ITTI message interface is used
+        SGW_IPV4_ADDRESS_FOR_S11              = "{{ remote_sgw_ip }}";
+    };
+
+
+    FEDERATED_MODE_MAP = (
+        # ModeMapItem values can be found at magma/lte/protos/mconfig/mconfigs.proto
+        {% for fed_map in federated_mode_map -%}
+        {
+          MODE        = "{{ fed_map.mode }}"
+          PLMN        = "{{ fed_map.plmn }}"
+          IMSI_RANGE  = "{{ fed_map.imsi_range }}"
+          APN         = "{{ fed_map.apn }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+   );
+
+   SRVC_AREA_CODE_2_TACS_MAP = (
+     {% for sac2tac in service_area_map -%}
+     {
+       SAC = {{sac2tac.sac}}
+       TACS_PER_SAC = {{sac2tac.tac}}
+     }{% if not loop.last %},{% endif %}
+     {% endfor %}
+   );
+
+   ACCEPT_COMBINED_ATTACH_TAU_WO_CSFB = "{{ accept_combined_attach_tau_wo_csfb }}";
+   SENTRY_CONFIG = {
+     {% if sentry_config %}
+       # Sentry.io configuration sent from the Orc8r
+       SAMPLE_RATE      = {{ sentry_config.sample_rate }};
+       UPLOAD_MME_LOG   = "{{ sentry_config.upload_mme_log }}";
+       URL_NATIVE       = "{{ sentry_config.url_native }}"
+     {%- endif %}
+   }
+};
+
+AMF :
+{
+    # DNS address communicated to UEs
+    DEFAULT_DNS_IPV4_ADDRESS     = "{{ ipv4_dns }}";
+    DEFAULT_DNS_SEC_IPV4_ADDRESS = "{{ ipv4_sec_dns }}";
+    AMF_NAME = "{{ amf_name }}";
+    DEFAULT_DNN = "{{ default_dnn }}";
+    AUTHENTICATION_MAX_RETRY = "{{ auth_retry_max_count }}";
+    AUTHENTICATION_TIMER_EXPIRY = "{{ auth_retry_interval }}";
+    PLMN_SUPPORT_LIST = (
+       { MCC="{{ mcc }}" ; MNC="{{ mnc }}"; AMF_DEFAULT_SLICE_SERVICE_TYPE="{{ amf_default_slice_service_type }}" ; AMF_DEFAULT_SLICE_DIFFERENTIATOR="{{ amf_default_slice_differentiator }}"; }
+    );
+
+    # AMF served GUAMFIs
+    # AMF code DEFAULT  size = 8 bits
+    # AMF GROUP ID size = 16 bits
+    GUAMFI_LIST = (
+     { MCC="{{ mcc }}" ; MNC="{{ mnc }}"; AMF_REGION_ID="{{ amf_region_id }}" ; AMF_SET_ID="{{ amf_set_id }}"; AMF_POINTER="{{ amf_pointer }}"}
+    );
 };

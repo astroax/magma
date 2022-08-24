@@ -16,6 +16,7 @@ limitations under the License.
 package servicers
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
 	"github.com/fiorix/go-diameter/v4/diam/dict"
 	"github.com/fiorix/go-diameter/v4/diam/sm"
-	"golang.org/x/net/context"
+	"github.com/golang/glog"
 
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/diameter"
@@ -33,9 +34,21 @@ import (
 	orcprotos "magma/orc8r/lib/go/protos"
 )
 
+// Flag definitions
+type FlagBit int
+
+const (
+	EmptyFlagBit FlagBit = 0
+	FlagBit1     FlagBit = 1 << 1
+	FlagBit5     FlagBit = 1 << 5
+	FlagBit8     FlagBit = 1 << 8
+	FlagBit9     FlagBit = 1 << 9
+	FlagBit27    FlagBit = 1 << 27
+)
+
 const (
 	ULR_RAT_TYPE     = 1004
-	ULR_FLAGS        = 1<<1 | 1<<5
+	ULR_FLAGS        = FlagBit1 | FlagBit5 // 29.272 Table 7.3.7/1: ULR-Flags S6a/S6d-Indicator (bit 1), and Initial-AttachIndicator (bit 5)
 	TIMEOUT_SECONDS  = 10
 	MAX_DIAM_RETRIES = 1
 )
@@ -52,7 +65,6 @@ type s6aProxy struct {
 	connMan        *diameter.ConnectionManager
 	requestTracker *diameter.RequestTracker
 	healthTracker  *metrics.S6aHealthTracker
-	originStateID  uint32
 }
 
 func NewS6aProxy(
@@ -90,6 +102,10 @@ func NewS6aProxy(
 		clientCfg.WatchdogInterval = diameter.DefaultWatchdogIntervalSeconds
 	}
 
+	if clientCfg.RequestTimeout == 0 {
+		clientCfg.RequestTimeout = diameter.DefaultRequestTimeoutSeconds
+	}
+
 	smClient := &sm.Client{
 		Dict:               dict.Default,
 		Handler:            mux,
@@ -120,7 +136,6 @@ func NewS6aProxy(
 		connMan:        connMan,
 		requestTracker: diameter.NewRequestTracker(),
 		healthTracker:  metrics.NewS6aHealthTracker(),
-		originStateID:  originStateID,
 	}
 	mux.HandleIdx(
 		diam.CommandIndex{AppID: diam.TGPP_S6A_APP_ID, Code: diam.AuthenticationInformation, Request: false},
@@ -153,7 +168,9 @@ func (s *s6aProxy) AuthenticationInformation(
 ) {
 	airStartTime := time.Now()
 	res, err := s.AuthenticationInformationImpl(req)
-	if err == nil {
+	if err != nil {
+		glog.V(2).Infof("Error on AuthenticationInformationImpl: %s", err)
+	} else {
 		metrics.AIRLatency.Observe(float64(time.Since(airStartTime)) / float64(time.Millisecond))
 	}
 	metrics.UpdateS6aRecentRequestMetrics(err)
@@ -167,7 +184,9 @@ func (s *s6aProxy) UpdateLocation(
 ) {
 	ulrStartTime := time.Now()
 	res, err := s.UpdateLocationImpl(req)
-	if err == nil {
+	if err != nil {
+		glog.V(2).Infof("Error on UpdateLocationImpl: %s", err)
+	} else {
 		metrics.ULRLatency.Observe(float64(time.Since(ulrStartTime)) / float64(time.Millisecond))
 	}
 	metrics.UpdateS6aRecentRequestMetrics(err)
@@ -178,6 +197,9 @@ func (s *s6aProxy) UpdateLocation(
 // waits (blocks) for PUA & returns its RPC representation
 func (s *s6aProxy) PurgeUE(ctx context.Context, req *protos.PurgeUERequest) (*protos.PurgeUEAnswer, error) {
 	res, err := s.PurgeUEImpl(req)
+	if err != nil {
+		glog.V(2).Infof("Error on PurgeUEImpl: %s", err)
+	}
 	metrics.UpdateS6aRecentRequestMetrics(err)
 	return res, err
 }
@@ -208,7 +230,7 @@ func (s *s6aProxy) GetHealthStatus(ctx context.Context, req *orcprotos.Void) (*p
 	if err != nil {
 		return &protos.HealthStatus{
 			Health:        protos.HealthStatus_UNHEALTHY,
-			HealthMessage: fmt.Sprintf("Error occured while retrieving health metrics: %s", err),
+			HealthMessage: fmt.Sprintf("Error occurred while retrieving health metrics: %s", err),
 		}, err
 	}
 	deltaMetrics, err := s.healthTracker.Metrics.GetDelta(currentMetrics)

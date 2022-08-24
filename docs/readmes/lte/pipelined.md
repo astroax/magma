@@ -4,6 +4,7 @@ title: Pipelined
 hide_title: true
 ---
 # Pipelined
+
 ## Overview
 
 Pipelined is the control application that programs rules in the Open vSwitch (OVS). In implementation, Pipelined is a set of network services that are chained together. These services can be chained and enabled/disabled through the REST API in orchestrator.
@@ -13,8 +14,9 @@ Pipelined is the control application that programs rules in the Open vSwitch (OV
 [Open vSwitch (OVS)](http://docs.openvswitch.org/en/latest/intro/what-is-ovs/) is a virtual switch that implements the [OpenFlow](https://en.wikipedia.org/wiki/OpenFlow) protocol. Pipelined services program rules in OVS to implement basic PCEF functionality for user plane traffic.
 
 The OpenFlow pipeline of OVS contains 255 flow tables. Pipelined splits the tables into two categories:
- - Main table (Table 1 - 20)
- - Scratch table (Table 21 - 254)
+
+- Main table (Table 1 - 20)
+- Scratch table (Table 21 - 254)
 
 ![OpenFlow Pipeline](https://github.com/facebookincubator/magma/blob/master/docs/readmes/assets/openflow-pipeline.png?raw=true)
 
@@ -31,11 +33,12 @@ Each flow table is programmed by a single service through OpenFlow and it can co
 Pipelined services are implemented as Ryu applications (controllers) under the hood. Ryu apps are single-threaded entities that communicate using an event model. Generally, each controller is assigned a table and manages the its flows.
 
 ## Services
+
 ### Static Services
 
-Static services include mandatory services (such as OAI and inout) which are always enabled, and services with a set table number. Static services can be configured in the YAML config.
+Static services include mandatory services (such as OAI, ingress, middle and egress) which are always enabled, and services with a set table number. Static services can be configured in the YAML config.
 
-```
+```text
     GTP port            Local Port
      Uplink              Downlink
         |                   |
@@ -52,7 +55,7 @@ Static services include mandatory services (such as OAI and inout) which are alw
                   V
     -------------------------------
     |      Table 1 (PHYSICAL)     |
-    |           inout             |
+    |          ingress            |
     |- sets direction bit         |
     -------------------------------
                   |
@@ -82,7 +85,7 @@ Static services include mandatory services (such as OAI and inout) which are alw
                   V
     -------------------------------
     |      Table 10 (SPECIAL)     |
-    |           inout             |
+    |           middle            |
     |- Forwards uplink traffic to |
     |  LOCAL port                 |
     |- Forwards downlink traffic  |
@@ -96,7 +99,7 @@ Static services include mandatory services (such as OAI and inout) which are alw
                   V
     -------------------------------
     |      Table 20 (SPECIAL)     |
-    |           inout             |
+    |           egress            |
     |- Forwards uplink traffic to |
     |  LOCAL port                 |
     |- Forwards downlink traffic  |
@@ -107,7 +110,6 @@ Static services include mandatory services (such as OAI and inout) which are alw
         V                   V
     GTP port            Local Port
     downlink              uplink
-
 ```
 
 ### Service types
@@ -116,14 +118,13 @@ Services(controllers) are split into two: Physical and Logical.
 Physical controllers: arpd, access_control.
 Logical controllers: dpi, enforcement.
 
-
 ### Configurable Services
 
 These services can be enabled and ordered from orchestrator cloud. `mconfig` is used to stream the list of enabled service to gateway.
 
 Table numbers are dynamically assigned to these services and depenedent on the order.
 
-```
+```text
     -------------------------------
     |          Table X            |
     |            DPI              |
@@ -161,17 +162,22 @@ Register |    Type    |         Use          |           Set by
 metadata | Write-once | Stores IMSI          | Table 0 (GTP application)
 reg0     | Scratch    | Temporary Arithmetic | Any
 reg3     | Scratch    | Temporary Arithmetic | Any
-reg1     | Global     | Direction bit        | Table 1 (inout application)
+reg1     | Global     | Direction bit        | Table 1 (ingress app)
 reg2     | Local      | Policy number        | Enforcement app
 reg10    | Global     | App ID               | DPI app
 reg4     | Local      | Policy version number| Enforcement app
 reg6     | Global     | Passthrough flag     | Ue Mac app
 reg7     | Local      | Vlan Tag             | Vlan learn app
+reg8     | Global     | Tunnel port          | MME
+reg9     | Global     | Tunnel ID            | MME
+reg12    | Local      | Proxy Tag            | HE
+reg11    | Local      | Session ID           | 5G stats
 
 ### Resilience
 
 Pipelined service is restart resilient and can seamlessly recover from service restarts.
 This is achieved by:
+
   1) Querying all flows on controller startup. This is done through a separate startup flow controller that will handle querying all initial stats.
   2) Comparing the flows received from step 1, with the flows obtained from sessiond setup() call
   3) Activating new flows that are not present
@@ -179,7 +185,7 @@ This is achieved by:
 This works because ovs secure fail mode doesn't remove flows whenever the controller disconnects.
 
 Note:
-Currently we reinsert some flows instead of doing the diff logic on them(f.e. enforcement redirection flows as they need async dhcp request resolution, other tables that don't hold and session data(inout, ue_mac, etc.) but this will be added later).
+Currently we reinsert some flows instead of doing the diff logic on them(f.e. enforcement redirection flows as they need async dhcp request resolution, other tables that don't hold and session data(ingress, middle, egress, ue_mac, etc.) but this will be added later).
 
 ## Testing
 
@@ -192,21 +198,20 @@ Some scripts in `/lte/gateway/python/scripts` may come in handy for testing. The
     - Example:
 
 ```bash
-$ ./pipelined_cli.py enforcement activate_dynamic_rule --imsi IMSI12345 --rule_id rule1 --priority 110 --hard_timeout 60
+./pipelined_cli.py enforcement activate_dynamic_rule --imsi IMSI12345 --rule_id rule1 --priority 110 --hard_timeout 60
 ```
 
 ```bash
-$ venvsudo ./pipelined_cli.py enforcement display_flows
+venvsudo ./pipelined_cli.py enforcement display_flows
 ```
 
 - `fake_user.py` can be used to debug Pipelined without an eNodeB. It creates a fake_user OVS port and an interface with the same name and IP (10.10.10.10). Any traffic sent through the interface would traverse the pipeline, as if its sent from a user ip (192.168.128.200 by default).
     - Example:
 
 ```bash
-$ ./fake_user.py create --imsi IMSI12345
-$ sudo curl --interface fake_user -vvv --ipv4 http://www.google.com > /dev/null
+./fake_user.py create --imsi IMSI12345
+sudo curl --interface fake_user -vvv --ipv4 http://www.google.com > /dev/null
 ```
-
 
 ### Unit Tests
 

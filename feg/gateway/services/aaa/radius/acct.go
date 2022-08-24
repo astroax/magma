@@ -22,6 +22,7 @@ import (
 	"layeh.com/radius"
 	"layeh.com/radius/rfc2865"
 	"layeh.com/radius/rfc2866"
+	"layeh.com/radius/rfc2869"
 	"layeh.com/radius/rfc6911"
 
 	"magma/feg/gateway/services/aaa/client"
@@ -133,8 +134,12 @@ func (s *AcctServer) ServeRADIUS(w radius.ResponseWriter, r *radius.Request) {
 			}
 		}
 		stopRequest := &protos.StopRequest{
-			Cause: protos.StopRequest_NAS_REQUEST,
-			Ctx:   aaaCtx,
+			Cause:        protos.StopRequest_NAS_REQUEST,
+			Ctx:          aaaCtx,
+			OctetsIn:     uint32(rfc2866.AcctInputOctets_Get(p)),
+			OctetsOut:    uint32(rfc2866.AcctOutputOctets_Get(p)),
+			GigawordsIn:  uint32(rfc2869.AcctInputGigawords_Get(p)),
+			GigawordsOut: uint32(rfc2869.AcctOutputGigawords_Get(p)),
 		}
 		_, err = s.accounting.Stop(r.Context(), stopRequest)
 		if err != nil {
@@ -159,11 +164,13 @@ func (s *AcctServer) ServeRADIUS(w radius.ResponseWriter, r *radius.Request) {
 
 func makeUpdateReq(aaaCtx *protos.Context, p *radius.Packet) *protos.UpdateRequest {
 	u := &protos.UpdateRequest{
-		OctetsIn:   uint32(rfc2866.AcctInputOctets_Get(p)),
-		OctetsOut:  uint32(rfc2866.AcctOutputOctets_Get(p)),
-		PacketsIn:  uint32(rfc2866.AcctInputPackets_Get(p)),
-		PacketsOut: uint32(rfc2866.AcctOutputPackets_Get(p)),
-		Ctx:        aaaCtx,
+		OctetsIn:     uint32(rfc2866.AcctInputOctets_Get(p)),
+		OctetsOut:    uint32(rfc2866.AcctOutputOctets_Get(p)),
+		PacketsIn:    uint32(rfc2866.AcctInputPackets_Get(p)),
+		PacketsOut:   uint32(rfc2866.AcctOutputPackets_Get(p)),
+		Ctx:          aaaCtx,
+		GigawordsIn:  uint32(rfc2869.AcctInputGigawords_Get(p)),
+		GigawordsOut: uint32(rfc2869.AcctOutputGigawords_Get(p)),
 	}
 	glog.V(2).Infof("Interim Update: %v", u)
 	return u

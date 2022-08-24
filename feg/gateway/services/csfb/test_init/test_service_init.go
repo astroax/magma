@@ -21,12 +21,12 @@ import (
 	"strings"
 	"testing"
 
-	"magma/feg/cloud/go/protos"
-	"magma/feg/gateway/services/csfb/servicers"
-
 	"github.com/ishidawataru/sctp"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
+
+	"magma/feg/cloud/go/protos"
+	"magma/feg/gateway/services/csfb/servicers"
 )
 
 func GetConnToTestFedGWServiceServer(t *testing.T, connectionInterface servicers.ClientConnectionInterface) *grpc.ClientConn {
@@ -54,6 +54,7 @@ func GetMockVLRListenerAndPort(t *testing.T) (*sctp.SCTPListener, int) {
 	//gets the default configuration (servicers.DefaultVLRIPAddress)
 	config := servicers.GetCsfbConfig()
 	ipStr, portNumber, err := servicers.SplitIP(config.Client.ServerAddress)
+	assert.NoError(t, err)
 	assert.Equal(t, servicers.DefaultVLRIPAddress, ipStr)
 	assert.Equal(t, servicers.DefaultVLRPort, portNumber)
 

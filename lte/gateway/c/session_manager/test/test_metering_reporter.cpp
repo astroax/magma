@@ -10,14 +10,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <chrono>
-#include <thread>
-
 #include <gtest/gtest.h>
+#include <metrics.pb.h>
+#include <orc8r/protos/metricsd.pb.h>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
 
-#include "MeteringReporter.h"
-#include "MetricsSingleton.h"
-#include "MagmaService.h"
+#include "lte/gateway/c/session_manager/MeteringReporter.hpp"
+#include "lte/gateway/c/session_manager/StoredState.hpp"
+#include "lte/gateway/c/session_manager/Types.hpp"
+#include "orc8r/gateway/c/common/service303/MagmaService.hpp"
 
 using magma::orc8r::MetricsContainer;
 using ::testing::Test;
@@ -26,50 +30,54 @@ namespace magma {
 
 class MeteringReporterTest : public ::testing::Test {
  protected:
-  bool is_equal(
-      io::prometheus::client::LabelPair label_pair, const char*& name,
-      const char*& value) {
+  virtual void SetUp() {
+    reporter = std::make_shared<MeteringReporter>();
+    magma_service =
+        std::make_shared<service303::MagmaService>("test_service", "1.0");
+  }
+  bool is_equal(io::prometheus::client::LabelPair label_pair, const char*& name,
+                const char*& value) {
     return label_pair.name().compare(name) == 0 &&
            label_pair.value().compare(value) == 0;
   }
+
+ protected:
+  std::shared_ptr<service303::MagmaService> magma_service;
+  std::shared_ptr<MeteringReporter> reporter;
 };
 
 TEST_F(MeteringReporterTest, test_reporting) {
-  auto IMSI_LABEL       = "IMSI";
+  auto IMSI_LABEL = "IMSI";
   auto SESSION_ID_LABEL = "session_id";
-  auto DIRECTION_LABEL  = "direction";
+  auto DIRECTION_LABEL = "direction";
 
-  auto IMSI           = "imsi";
-  auto SESSION_ID     = "session_1";
+  auto IMSI = "imsi";
+  auto SESSION_ID = "session_1";
   auto MONITORING_KEY = "mk1";
-  auto DIRECTION_UP   = "up";
+  auto DIRECTION_UP = "up";
   auto DIRECTION_DOWN = "down";
 
-  auto UPLOADED_BYTES   = 5;
+  auto UPLOADED_BYTES = 5;
   auto DOWNLOADED_BYTES = 7;
 
   auto uc = get_default_update_criteria();
   SessionCreditUpdateCriteria credit_uc{};
-  credit_uc.bucket_deltas[USED_TX]      = UPLOADED_BYTES;
-  credit_uc.bucket_deltas[USED_RX]      = DOWNLOADED_BYTES;
+  credit_uc.bucket_deltas[USED_TX] = UPLOADED_BYTES;
+  credit_uc.bucket_deltas[USED_RX] = DOWNLOADED_BYTES;
   uc.monitor_credit_map[MONITORING_KEY] = credit_uc;
 
-  auto reporter = new MeteringReporter();
   reporter->report_usage(IMSI, SESSION_ID, uc);
 
   // verify if UE traffic metrics are recorded properly
-  auto resp = new MetricsContainer();
-  auto magma_service =
-      std::make_shared<service303::MagmaService>("test_service", "1.0");
-  magma_service->GetMetrics(nullptr, nullptr, resp);
-  for (auto const& fam : resp->family()) {
+  MetricsContainer resp;
+  magma_service->GetMetrics(nullptr, nullptr, &resp);
+  for (auto const& fam : resp.family()) {
     if (fam.name().compare("ue_traffic") == 0) {
       for (auto const& m : fam.metric()) {
         for (auto const& l : m.label()) {
-          EXPECT_TRUE(
-              is_equal(l, IMSI_LABEL, IMSI) ||
-              is_equal(l, SESSION_ID_LABEL, SESSION_ID) ||
-              l.name().compare(DIRECTION_LABEL) == 0);
+          EXPECT_TRUE(is_equal(l, IMSI_LABEL, IMSI) ||
+                      is_equal(l, SESSION_ID_LABEL, SESSION_ID) ||
+                      l.name().compare(DIRECTION_LABEL) == 0);
 
           if (is_equal(l, DIRECTION_LABEL, DIRECTION_UP)) {
             EXPECT_EQ(m.counter().value(), UPLOADED_BYTES);
@@ -82,10 +90,4 @@ TEST_F(MeteringReporterTest, test_reporting) {
     }
   }
 }
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}
-
 }  // namespace magma

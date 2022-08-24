@@ -14,9 +14,14 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/go-openapi/strfmt"
+	"github.com/golang/glog"
+	"github.com/thoas/go-funk"
 
 	"magma/lte/cloud/go/lte"
 	policymodels "magma/lte/cloud/go/services/policydb/obsidian/models"
@@ -27,32 +32,30 @@ import (
 	"magma/orc8r/cloud/go/services/state"
 	state_types "magma/orc8r/cloud/go/services/state/types"
 	"magma/orc8r/cloud/go/storage"
-
-	"github.com/go-openapi/strfmt"
-	"github.com/golang/glog"
-	"github.com/thoas/go-funk"
 )
 
 func (m *MutableSubscriber) ToSubscriber() *Subscriber {
 	sub := &Subscriber{
-		ActiveApns:          m.ActiveApns,
-		ActiveBaseNames:     m.ActiveBaseNames,
-		ActivePolicies:      m.ActivePolicies,
-		ActivePoliciesByApn: m.ActivePoliciesByApn,
-		Config:              nil, // handled below
-		ID:                  m.ID,
-		Lte:                 m.Lte,
-		Monitoring:          nil, // augmented field
-		Name:                m.Name,
-		State:               nil, // augmented field
+		ActiveApns:            m.ActiveApns,
+		ActiveBaseNames:       m.ActiveBaseNames,
+		ActivePolicies:        m.ActivePolicies,
+		ActivePoliciesByApn:   m.ActivePoliciesByApn,
+		Config:                nil, // handled below
+		ID:                    m.ID,
+		Lte:                   m.Lte,
+		Monitoring:            nil, // augmented field
+		Name:                  m.Name,
+		State:                 nil, // augmented field
+		ForbiddenNetworkTypes: m.ForbiddenNetworkTypes,
 	}
 
 	// TODO(v1.3.0+): For backwards compatibility we maintain the Lte field
 	// on the sub. We can convert to just storing and exposing the Config
 	// field after the next minor version.
 	sub.Config = &SubscriberConfig{
-		Lte:       m.Lte,
-		StaticIps: m.StaticIps,
+		Lte:                   m.Lte,
+		StaticIps:             m.StaticIps,
+		ForbiddenNetworkTypes: m.ForbiddenNetworkTypes,
 	}
 
 	return sub
@@ -124,8 +127,8 @@ func (m *Subscriber) IsAssignedIP(ip string) bool {
 	return false
 }
 
-func (m *MutableSubscriber) ToTK() storage.TypeAndKey {
-	return storage.TypeAndKey{Type: lte.SubscriberEntityType, Key: string(m.ID)}
+func (m *MutableSubscriber) ToTK() storage.TK {
+	return storage.TK{Type: lte.SubscriberEntityType, Key: string(m.ID)}
 }
 
 func (m *MutableSubscriber) FromEnt(ent configurator.NetworkEntity, policyProfileEnts configurator.NetworkEntities) (*MutableSubscriber, error) {
@@ -141,9 +144,11 @@ func (m *MutableSubscriber) FromEnt(ent configurator.NetworkEntity, policyProfil
 		model.StaticIps = config.StaticIps
 		// If no profile in backend, return "default"
 		// TODO(8/21/20): enforce this at the API layer (and include data migration)
-		if model.Lte.SubProfile == "" {
-			model.Lte.SubProfile = "default"
+		if model.Lte.SubProfile == nil || *model.Lte.SubProfile == "" {
+			defaultSubProfile := SubProfile("default")
+			model.Lte.SubProfile = &defaultSubProfile
 		}
+		model.ForbiddenNetworkTypes = config.ForbiddenNetworkTypes
 	}
 
 	for _, tk := range ent.Associations.Filter(lte.APNEntityType) {
@@ -174,8 +179,8 @@ func (m *MutableSubscriber) FromEnt(ent configurator.NetworkEntity, policyProfil
 	return model, nil
 }
 
-func (m *MutableSubscriber) GetAssocs() []storage.TypeAndKey {
-	var assocs []storage.TypeAndKey
+func (m *MutableSubscriber) GetAssocs() storage.TKs {
+	var assocs storage.TKs
 	assocs = append(assocs, m.ActivePoliciesByApn.ToTKs(string(m.ID))...)
 	assocs = append(assocs, m.ActiveApns.ToTKs()...)
 	assocs = append(assocs, m.ActivePolicies.ToTKs()...)
@@ -183,14 +188,14 @@ func (m *MutableSubscriber) GetAssocs() []storage.TypeAndKey {
 	return assocs
 }
 
-func (m *SubProfile) ValidateModel() error {
+func (m *SubProfile) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
-func (m ApnList) ToTKs() []storage.TypeAndKey {
-	var tks []storage.TypeAndKey
+func (m ApnList) ToTKs() storage.TKs {
+	var tks storage.TKs
 	for _, apnName := range m {
-		tks = append(tks, storage.TypeAndKey{Type: lte.APNEntityType, Key: apnName})
+		tks = append(tks, storage.TK{Type: lte.APNEntityType, Key: apnName})
 	}
 	return tks
 }

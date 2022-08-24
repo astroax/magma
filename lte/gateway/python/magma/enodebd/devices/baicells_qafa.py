@@ -16,24 +16,38 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from magma.common.service import MagmaService
 from magma.enodebd.data_models import transform_for_enb, transform_for_magma
 from magma.enodebd.data_models.data_model import DataModel, TrParam
-from magma.enodebd.data_models.data_model_parameters import ParameterName, \
-    TrParameterType
-from magma.enodebd.device_config.enodeb_config_postprocessor import \
-    EnodebConfigurationPostProcessor
-from magma.enodebd.device_config.enodeb_configuration import \
-    EnodebConfiguration
-from magma.enodebd.devices.baicells_qafb import \
-    BaicellsQafbGetObjectParametersState, \
-    BaicellsQafbWaitGetTransientParametersState
+from magma.enodebd.data_models.data_model_parameters import (
+    ParameterName,
+    TrParameterType,
+)
+from magma.enodebd.device_config.enodeb_config_postprocessor import (
+    EnodebConfigurationPostProcessor,
+)
+from magma.enodebd.device_config.enodeb_configuration import EnodebConfiguration
+from magma.enodebd.devices.baicells_qafb import (
+    BaicellsQafbGetObjectParametersState,
+    BaicellsQafbWaitGetTransientParametersState,
+)
 from magma.enodebd.devices.device_utils import EnodebDeviceName
-from magma.enodebd.state_machines.enb_acs_impl import \
-    BasicEnodebAcsStateMachine
-from magma.enodebd.state_machines.enb_acs_states import AddObjectsState, \
-    BaicellsSendRebootState, DeleteObjectsState, EndSessionState, \
-    EnodebAcsState, ErrorState, GetParametersState, GetRPCMethodsState, \
-    SendGetTransientParametersState, SetParameterValuesState, \
-    WaitEmptyMessageState, WaitGetParametersState, WaitInformMRebootState, \
-    WaitInformState, WaitRebootResponseState, WaitSetParameterValuesState
+from magma.enodebd.state_machines.enb_acs_impl import BasicEnodebAcsStateMachine
+from magma.enodebd.state_machines.enb_acs_states import (
+    AddObjectsState,
+    DeleteObjectsState,
+    EnbSendRebootState,
+    EndSessionState,
+    EnodebAcsState,
+    ErrorState,
+    GetParametersState,
+    GetRPCMethodsState,
+    SendGetTransientParametersState,
+    SetParameterValuesState,
+    WaitEmptyMessageState,
+    WaitGetParametersState,
+    WaitInformMRebootState,
+    WaitInformState,
+    WaitRebootResponseState,
+    WaitSetParameterValuesState,
+)
 
 
 class BaicellsQAFAHandler(BasicEnodebAcsStateMachine):
@@ -41,8 +55,8 @@ class BaicellsQAFAHandler(BasicEnodebAcsStateMachine):
         self,
         service: MagmaService,
     ) -> None:
-        self._state_map = {}
-        super().__init__(service)
+        self._state_map: Dict[str, Any] = {}
+        super().__init__(service=service, use_param_key=False)
 
     def reboot_asap(self) -> None:
         self.transition('reboot')
@@ -68,7 +82,7 @@ class BaicellsQAFAHandler(BasicEnodebAcsStateMachine):
             'check_wait_get_params': WaitGetParametersState(self, when_done='end_session'),
             'end_session': EndSessionState(self),
             # These states are only entered through manual user intervention
-            'reboot': BaicellsSendRebootState(self, when_done='wait_reboot'),
+            'reboot': EnbSendRebootState(self, when_done='wait_reboot'),
             'wait_reboot': WaitRebootResponseState(self, when_done='wait_post_reboot_inform'),
             'wait_post_reboot_inform': WaitInformMRebootState(self, when_done='wait_empty', when_timeout='wait_inform'),
             # The states below are entered when an unexpected message type is
@@ -192,7 +206,7 @@ class BaicellsQAFATrDataModel(DataModel):
     TRANSFORMS_FOR_MAGMA = {
         # We don't set these parameters
         ParameterName.BAND_CAPABILITY: transform_for_magma.band_capability,
-        ParameterName.DUPLEX_MODE_CAPABILITY: transform_for_magma.duplex_mode
+        ParameterName.DUPLEX_MODE_CAPABILITY: transform_for_magma.duplex_mode,
     }
 
     @classmethod
@@ -222,11 +236,17 @@ class BaicellsQAFATrDataModel(DataModel):
 
     @classmethod
     def get_parameter_names(cls) -> List[ParameterName]:
-        excluded_params = [str(ParameterName.DEVICE),
-                           str(ParameterName.FAP_SERVICE)]
-        names = list(filter(lambda x: (not str(x).startswith('PLMN'))
-                                      and (str(x) not in excluded_params),
-                            cls.PARAMETERS.keys()))
+        excluded_params = [
+            str(ParameterName.DEVICE),
+            str(ParameterName.FAP_SERVICE),
+        ]
+        names = list(
+            filter(
+                lambda x: (not str(x).startswith('PLMN'))
+                and (str(x) not in excluded_params),
+                cls.PARAMETERS.keys(),
+            ),
+        )
         return names
 
     @classmethod
@@ -246,6 +266,6 @@ class BaicellsQAFATrDataModel(DataModel):
 
 
 class BaicellsQAFATrConfigurationInitializer(EnodebConfigurationPostProcessor):
-    def postprocess(self, desired_cfg: EnodebConfiguration) -> None:
+    def postprocess(self, mconfig: Any, service_cfg: Any, desired_cfg: EnodebConfiguration) -> None:
 
         desired_cfg.delete_parameter(ParameterName.ADMIN_STATE)

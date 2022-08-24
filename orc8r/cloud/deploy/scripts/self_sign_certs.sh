@@ -14,8 +14,7 @@
 # self_sign_certs.sh generates a set of keys and self-signed certificates.
 #
 # Generated secrets
-#   - rootCA.key, rootCA.pem -- certs for trusted root CA (rootCA.key is
-#     subsequently deleted)
+#   - rootCA.key, rootCA.pem -- certs for trusted root CA
 #   - controller.key, controller.crt -- certs for orc8r deployment's public
 #     domain name, signed by rootCA.key
 #
@@ -56,6 +55,8 @@ subjectAltName = @alt_names
 [alt_names]
 DNS.1 = *.$domain
 DNS.2 = *.nms.$domain
+DNS.3 = *.staging.$domain
+DNS.4 = *.nms.staging.$domain
 EOF
 openssl x509 -req -in controller.csr -CA rootCA.pem -CAkey rootCA.key -CAcreateserial -out controller.crt -days 825 -sha256 -extfile ${domain}.ext
 

@@ -41,11 +41,43 @@ function configure_multiple_plmn_tac {
   gummei_cmd_str=${gummei_cmd_str::-3}
 
   tac_config=(
-    '{ MCC: "001"; MNC: "01"; TAC: "1" }'
-    '{ MCC: "001"; MNC: "02"; TAC: "2" }'
-    '{ MCC: "001"; MNC: "03"; TAC: "3" }'
-    '{ MCC: "001"; MNC: "04"; TAC: "4" }'
-    '{ MCC: "001"; MNC: "05"; TAC: "5" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "1" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "2" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "3" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "4" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "5" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "6" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "7" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "8" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "9" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "10" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "11" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "12" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "13" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "14" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "15" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "16" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "17" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "19" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "20" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "21" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "22" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "23" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "24" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "25" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "26" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "27" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "28" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "29" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "30" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "31" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "32" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "34" }'
+    '{ MCC: "001" ; MNC: "01" ; TAC: "45" }'
+    '{ MCC: "001" ; MNC: "02" ; TAC: "2" }'
+    '{ MCC: "001" ; MNC: "03" ; TAC: "3" }'
+    '{ MCC: "001" ; MNC: "04" ; TAC: "4" }'
+    '{ MCC: "001" ; MNC: "05" ; TAC: "5" }'
   )
   tac_cmd_str=""
   for config in "${tac_config[@]}"
@@ -65,6 +97,47 @@ function reduce_mobile_reachability_timer_value {
   # quickly be tested as part of Sanity. The current default value of
   # Mobile Reachability Timer is 54 minutes
   sed -i '/^        T3412/s/54/1/' "$mme_config_file"
+}
+
+function configure_restricted_plmn {
+  # Remove default restricted PLMN from MME configuration file
+  sed -i -e '/RESTRICTED_PLMN_LIST/{n;N;N;N;N;N;N;d}' \
+    "$mme_config_file"
+
+  # Configure restricted PLMN/s in MME configuration file
+  restricted_plmn_config=(
+    '{ MCC= "123"; MNC= "450"}'
+  )
+  restricted_plmn_cmd_str=""
+  for config in "${restricted_plmn_config[@]}"
+  do
+    restricted_plmn_cmd_str="$restricted_plmn_cmd_str\ \ \ \ \ \ \ \ $config,\n"
+  done
+  restricted_plmn_cmd_str=${restricted_plmn_cmd_str::-3}
+
+  sed -i -e "/RESTRICTED_PLMN_LIST/a $restricted_plmn_cmd_str" \
+    "$mme_config_file"
+}
+
+function configure_blocked_imei {
+  # Remove default blocked imei(s) from MME configuration file
+  sed -i -e '/BLOCKED_IMEI_LIST/{n;N;N;N;N;N;N;N;N;N;N;d}' \
+    "$mme_config_file"
+
+  # Configure blocked imei(s) in MME configuration file
+  blocked_imei_config=(
+    '{ IMEI_TAC="99000482"; SNR="351037" }'
+    '{ IMEI_TAC="99333821"; }'
+  )
+  blocked_imei_cmd_str=""
+  for config in "${blocked_imei_config[@]}"
+  do
+    blocked_imei_cmd_str="$blocked_imei_cmd_str\ \ \ \ \ \ \ \ $config,\n"
+  done
+  blocked_imei_cmd_str=${blocked_imei_cmd_str::-3}
+
+  sed -i -e "/BLOCKED_IMEI_LIST/a $blocked_imei_cmd_str" \
+    "$mme_config_file"
 }
 
 function restore_mme_config {
@@ -87,6 +160,8 @@ if [[ $1 == "modify" ]]; then
   create_backup_or_restore_mme_config
   configure_multiple_plmn_tac
   reduce_mobile_reachability_timer_value
+  configure_restricted_plmn
+  configure_blocked_imei
 elif [[ $1 == "restore" ]]; then
   # Restore the MME configuration file from the backup config file
   restore_mme_config

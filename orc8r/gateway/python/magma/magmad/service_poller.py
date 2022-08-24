@@ -17,7 +17,11 @@ from typing import List
 
 import grpc
 from magma.common.job import Job
-from magma.common.rpc_utils import grpc_async_wrapper
+from magma.common.rpc_utils import (
+    grpc_async_wrapper,
+    indicates_connection_error,
+)
+from magma.common.sentry import EXCLUDE_FROM_ERROR_MONITORING
 from magma.common.service_registry import ServiceRegistry
 from magma.magmad.metrics import UNEXPECTED_SERVICE_RESTARTS
 from orc8r.protos.common_pb2 import Void
@@ -39,7 +43,8 @@ class ServiceInfo(object):
         self._linked_services = []
         # Initialize the counter for each service
         UNEXPECTED_SERVICE_RESTARTS.labels(
-            service_name=self._service_name).inc(0)
+            service_name=self._service_name,
+        ).inc(0)
 
     @property
     def status(self):
@@ -61,10 +66,13 @@ class ServiceInfo(object):
         if start_time <= self._expected_start_time:
             # Probably a race in service starts, or magmad restarted
             return
-        if (start_time - self._expected_start_time >
-                self.SERVICE_RESTART_BUFFER_TIME):
+        if (
+            start_time - self._expected_start_time
+            > self.SERVICE_RESTART_BUFFER_TIME
+        ):
             UNEXPECTED_SERVICE_RESTARTS.labels(
-                service_name=self._service_name).inc()
+                service_name=self._service_name,
+            ).inc()
             self._expected_start_time = start_time
 
     def process_service_restart(self):
@@ -80,25 +88,36 @@ class ServicePoller(Job):
     # Timeout when getting status from other local services, in seconds
     GET_STATUS_TIMEOUT = 8
 
-    def __init__(self, loop, config, dynamic_services: List[str]):
+    def __init__(self, loop, config, dynamic_services: List[str] = None):
+        """
+        Initialize the ServicePooler
+
+        Args:
+            loop: loop
+            config: configuration
+            dynamic_services: list of dynamic services
+        """
         super().__init__(
             interval=self.GET_STATUS_INTERVAL,
-            loop=loop
+            loop=loop,
         )
         self._config = config
         # Holds a map of service name -> ServiceInfo
         self._service_info = {}
         for service in config['magma_services']:
             self._service_info[service] = ServiceInfo(service)
-        for service in dynamic_services:
-            self._service_info[service] = ServiceInfo(service)
+        if dynamic_services is not None:
+            for service in dynamic_services:
+                self._service_info[service] = ServiceInfo(service)
         for service_list in config.get('linked_services', []):
             for service in service_list:
                 self._service_info[service].add_linked_services(service_list)
 
-    def update_dynamic_services(self,
-                                new_services: List[str],
-                                stopped_services: List[str]):
+    def update_dynamic_services(
+        self,
+        new_services: List[str],
+        stopped_services: List[str],
+    ):
         """
         Update the service poller when dynamic services are enabled or disabled
 
@@ -137,13 +156,14 @@ class ServicePoller(Job):
         Make RPC calls to 'GetServiceInfo' functions of other services, to
         get current status.
         """
-        for service in self._service_info:
+        for service in list(self._service_info):
             # Check whether service provides service303 interface
             if service in self._config['non_service303_services']:
                 continue
             try:
                 chan = ServiceRegistry.get_rpc_channel(
-                    service, ServiceRegistry.LOCAL)
+                    service, ServiceRegistry.LOCAL,
+                )
             except ValueError:
                 # Service can't be contacted
                 logging.error('Cant get RPC channel to %s', service)
@@ -155,8 +175,10 @@ class ServicePoller(Job):
                     self.GET_STATUS_TIMEOUT,
                 )
                 info = await grpc_async_wrapper(future, self._loop)
-                self._service_info[service].update(info.start_time_secs,
-                                                   info.status)
+                self._service_info[service].update(
+                    info.start_time_secs,
+                    info.status,
+                )
                 self._service_info[service].continuous_timeouts = 0
             except grpc.RpcError as err:
                 logging.error(
@@ -164,6 +186,6 @@ class ServicePoller(Job):
                     service,
                     err.code(),
                     err.details(),
+                    extra=EXCLUDE_FROM_ERROR_MONITORING if indicates_connection_error(err) else None,
                 )
-                if err.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-                    self._service_info[service].continuous_timeouts += 1
+                self._service_info[service].continuous_timeouts += 1

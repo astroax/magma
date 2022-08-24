@@ -14,8 +14,13 @@ limitations under the License.
 
 from spyne.model import ComplexModel
 from spyne.model.complex import XmlAttribute, XmlData
-from spyne.model.primitive import Boolean, DateTime, Integer, String, \
-    UnsignedInteger
+from spyne.model.primitive import (
+    Boolean,
+    DateTime,
+    Integer,
+    String,
+    UnsignedInteger,
+)
 from spyne.util.odict import odict
 
 # Namespaces
@@ -29,17 +34,6 @@ class Tr069ComplexModel(ComplexModel):
     """ Base class for TR-069 models, to set common attributes. Does not appear
         in CWMP XSD file. """
     __namespace__ = CWMP_NS
-
-    def as_dict(self):
-        """
-        Overriding default implementation to fix memory leak. Can remove if
-        or after https://github.com/arskom/spyne/pull/579 lands.
-        """
-        flat_type_info = self.get_flat_type_info(self.__class__)
-        return dict((
-            (k, getattr(self, k)) for k in flat_type_info
-            if getattr(self, k) is not None
-        ))
 
 
 class anySimpleType(Tr069ComplexModel):
@@ -87,7 +81,8 @@ class Fault(Tr069ComplexModel):
     _type_info["FaultCode"] = UnsignedInteger
     _type_info["FaultString"] = String
     _type_info["SetParameterValuesFault"] = SetParameterValuesFault.customize(
-        max_occurs='unbounded')
+        max_occurs='unbounded',
+    )
 
 
 # Type definitions used in messages
@@ -134,7 +129,8 @@ class ParameterValueStruct(Tr069ComplexModel):
 class ParameterValueList(Tr069ComplexModel):
     _type_info = odict()
     _type_info["ParameterValueStruct"] = ParameterValueStruct.customize(
-        max_occurs='unbounded')
+        max_occurs='unbounded',
+    )
     _type_info["arrayType"] = XmlAttribute(String, ns=SOAP_ENC)
 
 
@@ -156,7 +152,7 @@ class ParameterNames(Tr069ComplexModel):
     _type_info["arrayType"] = XmlAttribute(String, ns=SOAP_ENC)
 
 
-class ParameterKeyType(String.customize(max_length=32)):
+class ParameterKeyType(anySimpleType):
     pass
 
 
@@ -178,7 +174,8 @@ class SetParameterAttributesStruct(Tr069ComplexModel):
 class SetParameterAttributesList(Tr069ComplexModel):
     _type_info = odict()
     _type_info["SetParameterAttributesStruct"] = SetParameterAttributesStruct.customize(
-        max_occurs='unbounded')
+        max_occurs='unbounded',
+    )
     _type_info["arrayType"] = XmlAttribute(String, ns=SOAP_ENC)
 
 
@@ -192,15 +189,16 @@ class ParameterAttributeStruct(Tr069ComplexModel):
 class ParameterAttributeList(Tr069ComplexModel):
     _type_info = odict()
     _type_info["ParameterValueStruct"] = ParameterAttributeStruct.customize(
-        max_occurs='unbounded')
+        max_occurs='unbounded',
+    )
     _type_info["arrayType"] = XmlAttribute(String, ns=SOAP_ENC)
 
 
-class CommandKeyType(String.customize(max_length=32)):
+class CommandKeyType(String.customize(max_length=32)):  # type: ignore[misc]
     pass
 
 
-class ObjectNameType(String.customize(max_length=256)):
+class ObjectNameType(String.customize(max_length=256)):  # type: ignore[misc]
     pass
 
 
@@ -296,6 +294,9 @@ class Download(Tr069ComplexModel):
     _type_info["DelaySeconds"] = UnsignedInteger
     _type_info["SuccessURL"] = String(max_length=256)
     _type_info["FailureURL"] = String(max_length=256)
+    # The following are extra aditions introduced for Baicells
+    _type_info["Md5"] = String(max_length=32)
+    _type_info["RawMode"] = Boolean
 
 
 class DownloadResponse(Tr069ComplexModel):
@@ -372,7 +373,8 @@ class ParameterListUnion(Tr069ComplexModel):
 
     # Fields from ParameterValueList
     _type_info["ParameterValueStruct"] = ParameterValueStruct.customize(
-        max_occurs='unbounded')
+        max_occurs='unbounded',
+    )
     _type_info["arrayType"] = XmlAttribute(String, ns=SOAP_ENC)
 
     # Fields from SetParameterAttributesList
@@ -422,6 +424,9 @@ class AcsToCpeRequests(Tr069ComplexModel):
     _type_info["DelaySeconds"] = UnsignedInteger
     _type_info["SuccessURL"] = String(max_length=256)
     _type_info["FailureURL"] = String(max_length=256)
+    # Optional Baicells specific Download fields
+    _type_info["Md5"] = String(max_length=32)
+    _type_info["RawMode"] = Boolean
 
     # Fields for Reboot
     # _type_info["CommandKey"] = CommandKeyType - Already covered above

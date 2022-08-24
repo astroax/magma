@@ -11,14 +11,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from magma.pipelined.openflow import flows
 from magma.pipelined.app.base import MagmaController
-from magma.pipelined.openflow import messages
+from magma.pipelined.openflow import flows, messages
 from magma.pipelined.openflow.exceptions import MagmaOFError
-
 from ryu.controller import ofp_event
-from ryu.lib.ofctl_v1_4 import to_instructions
 from ryu.controller.handler import MAIN_DISPATCHER, set_ev_cls
+from ryu.lib.ofctl_v1_4 import to_instructions
 
 
 class TestingController(MagmaController):
@@ -63,7 +61,7 @@ class TestingController(MagmaController):
         flows.add_drop_flow(
             self._datapath, ryu_req["table_id"], ryu_req["match"],
             instructions=actions,
-            priority=ryu_req["priority"]
+            priority=ryu_req["priority"],
         )
 
     def delete_flow(self, ryu_req):
@@ -73,7 +71,7 @@ class TestingController(MagmaController):
         flows.delete_flow(
             self._datapath, ryu_req["table_id"], ryu_req["match"],
             instructions=actions,
-            priority=ryu_req["priority"]
+            priority=ryu_req["priority"],
         )
 
     def ryu_query_lookup(self, ryu, stats_queue):
@@ -88,12 +86,12 @@ class TestingController(MagmaController):
             # If cookie is not set in the parameter, then do not match on
             # cookie.
             req = parser.OFPFlowStatsRequest(
-                self._datapath, table_id=ryu["table_id"], match=match
+                self._datapath, table_id=ryu["table_id"], match=match,
             )
         else:
             req = parser.OFPFlowStatsRequest(
                 self._datapath, table_id=ryu["table_id"], match=match,
-                cookie=ryu["cookie"], cookie_mask=flows.OVS_COOKIE_MATCH_ALL
+                cookie=ryu["cookie"], cookie_mask=flows.OVS_COOKIE_MATCH_ALL,
             )
         try:
             messages.send_msg(self._datapath, req)

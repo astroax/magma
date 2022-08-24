@@ -12,36 +12,50 @@ limitations under the License.
 """
 
 import unittest
-from concurrent.futures import Future
-
 import warnings
+from concurrent.futures import Future
 from typing import List
 
 from lte.protos.mconfig.mconfigs_pb2 import PipelineD
-from lte.protos.policydb_pb2 import FlowDescription, FlowMatch, PolicyRule,\
-    HeaderEnrichment
-from magma.pipelined.app.enforcement import EnforcementController
 from lte.protos.mobilityd_pb2 import IPAddress
-from magma.pipelined.bridge_util import BridgeTools
-from magma.pipelined.policy_converters import flow_match_to_magma_match
-from magma.pipelined.tests.app.flow_query import RyuDirectFlowQuery \
-    as FlowQuery
-from magma.pipelined.tests.app.packet_builder import IPPacketBuilder, \
-    TCPPacketBuilder, IPv6PacketBuilder
-from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
-from magma.pipelined.tests.app.start_pipelined import PipelinedController, \
-    TestSetup
-from magma.pipelined.tests.app.subscriber import RyuDirectSubscriberContext
-from magma.pipelined.tests.app.table_isolation import RyuDirectTableIsolator, \
-    RyuForwardFlowArgsBuilder
-from magma.pipelined.policy_converters import convert_ipv4_str_to_ip_proto, \
-    convert_ipv6_bytes_to_ip_proto
-from magma.pipelined.tests.pipelined_test_util import FlowTest, FlowVerifier, \
-    PktsToSend, SubTest, create_service_manager, start_ryu_app_thread, \
-    stop_ryu_app_thread, wait_after_send, SnapshotVerifier, \
-    fake_controller_setup
-
+from lte.protos.pipelined_pb2 import VersionedPolicy
+from lte.protos.policydb_pb2 import FlowDescription, FlowMatch, PolicyRule
 from magma.pipelined.app import he
+from magma.pipelined.app.enforcement import EnforcementController
+from magma.pipelined.bridge_util import BridgeTools
+from magma.pipelined.policy_converters import (
+    convert_ipv4_str_to_ip_proto,
+    convert_ipv6_bytes_to_ip_proto,
+    flow_match_to_magma_match,
+)
+from magma.pipelined.tests.app.flow_query import RyuDirectFlowQuery as FlowQuery
+from magma.pipelined.tests.app.packet_builder import (
+    IPPacketBuilder,
+    IPv6PacketBuilder,
+    TCPPacketBuilder,
+)
+from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
+from magma.pipelined.tests.app.start_pipelined import (
+    PipelinedController,
+    TestSetup,
+)
+from magma.pipelined.tests.app.subscriber import RyuDirectSubscriberContext
+from magma.pipelined.tests.app.table_isolation import (
+    RyuDirectTableIsolator,
+    RyuForwardFlowArgsBuilder,
+)
+from magma.pipelined.tests.pipelined_test_util import (
+    FlowTest,
+    FlowVerifier,
+    PktsToSend,
+    SnapshotVerifier,
+    SubTest,
+    create_service_manager,
+    fake_controller_setup,
+    start_ryu_app_thread,
+    stop_ryu_app_thread,
+    wait_after_send,
+)
 
 
 def mocked_activate_he_urls_for_ue(ip: IPAddress, rule_id, urls: List[str], imsi: str, msisdn: str):
@@ -56,7 +70,7 @@ class EnforcementTableTest(unittest.TestCase):
     BRIDGE = 'testing_br'
     IFACE = 'testing_br'
     MAC_DEST = "5e:cc:cc:b1:49:4b"
-    he_controller_reference = Future()
+    he_controller_reference: Future = Future()
     VETH = 'tveth1'
     VETH_NS = 'tveth1_ns'
     PROXY_PORT = '16'
@@ -73,10 +87,10 @@ class EnforcementTableTest(unittest.TestCase):
         """
         super(EnforcementTableTest, cls).setUpClass()
         warnings.simplefilter('ignore')
-        cls._static_rule_dict = {}
         cls.service_manager = create_service_manager([PipelineD.ENFORCEMENT], ['proxy'])
         cls._tbl_num = cls.service_manager.get_table_num(
-            EnforcementController.APP_NAME)
+            EnforcementController.APP_NAME,
+        )
         BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
 
         BridgeTools.create_veth_pair(cls.VETH, cls.VETH_NS)
@@ -88,10 +102,12 @@ class EnforcementTableTest(unittest.TestCase):
         he.deactivate_he_urls_for_ue = mocked_deactivate_he_urls_for_ue
 
         test_setup = TestSetup(
-            apps=[PipelinedController.Enforcement,
-                  PipelinedController.HeaderEnrichment,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.Enforcement,
+                PipelinedController.HeaderEnrichment,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.Enforcement:
                     enforcement_controller_reference,
@@ -113,20 +129,18 @@ class EnforcementTableTest(unittest.TestCase):
                 'proxy_port_name': cls.VETH,
                 'enable_nat': True,
                 'ovs_gtp_port_number': 10,
+                'setup_type': 'LTE',
             },
             mconfig=PipelineD(),
             loop=None,
             service_manager=cls.service_manager,
-            integ_test=False
+            integ_test=False,
         )
-
 
         cls.thread = start_ryu_app_thread(test_setup)
 
         cls.enforcement_controller = enforcement_controller_reference.result()
         cls.testing_controller = testing_controller_reference.result()
-
-        cls.enforcement_controller._policy_dict = cls._static_rule_dict
 
     @classmethod
     def tearDownClass(cls):
@@ -144,28 +158,32 @@ class EnforcementTableTest(unittest.TestCase):
         fake_controller_setup(self.enforcement_controller)
         imsi = 'IMSI010000000088888'
         sub_ip = '192.168.128.74'
-        flow_list1 = [FlowDescription(
-            match=FlowMatch(
-                ip_dst=convert_ipv4_str_to_ip_proto('45.10.0.0/24'),
-                direction=FlowMatch.UPLINK),
-            action=FlowDescription.PERMIT)
+        flow_list1 = [
+            FlowDescription(
+                match=FlowMatch(
+                    ip_dst=convert_ipv4_str_to_ip_proto('45.10.0.0/24'),
+                    direction=FlowMatch.UPLINK,
+                ),
+                action=FlowDescription.PERMIT,
+            ),
         ]
         policies = [
-            PolicyRule(id='simple_match', priority=2, flow_list=flow_list1)
+            VersionedPolicy(
+                rule=PolicyRule(id='simple_match', priority=2, flow_list=flow_list1),
+                version=1,
+            ),
         ]
         pkts_matched = 256
         pkts_sent = 4096
 
-        self._static_rule_dict[policies[0].id] = policies[0]
-
         # ============================ Subscriber ============================
         sub_context = RyuDirectSubscriberContext(
-            imsi, sub_ip, self.enforcement_controller, self._tbl_num
-        ).add_static_rule(policies[0].id)
+            imsi, sub_ip, self.enforcement_controller, self._tbl_num,
+        ).add_policy(policies[0])
         isolator = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub_context.cfg)
                                      .build_requests(),
-            self.testing_controller
+            self.testing_controller,
         )
         pkt_sender = ScapyPacketInjector(self.IFACE)
         packet = IPPacketBuilder()\
@@ -174,18 +192,24 @@ class EnforcementTableTest(unittest.TestCase):
             .build()
         flow_query = FlowQuery(
             self._tbl_num, self.testing_controller,
-            match=flow_match_to_magma_match(flow_list1[0].match)
+            match=flow_match_to_magma_match(flow_list1[0].match),
         )
 
         # =========================== Verification ===========================
         # Verify aggregate table stats, subscriber 1 'simple_match' pkt count
-        flow_verifier = FlowVerifier([
-            FlowTest(FlowQuery(self._tbl_num, self.testing_controller),
-                     pkts_sent),
-            FlowTest(flow_query, pkts_matched)
-        ], lambda: wait_after_send(self.testing_controller))
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager)
+        flow_verifier = FlowVerifier(
+            [
+                FlowTest(
+                    FlowQuery(self._tbl_num, self.testing_controller),
+                    pkts_sent,
+                ),
+                FlowTest(flow_query, pkts_matched),
+            ], lambda: wait_after_send(self.testing_controller),
+        )
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+        )
 
         with isolator, sub_context, flow_verifier, snapshot_verifier:
             pkt_sender.send(packet)
@@ -203,27 +227,32 @@ class EnforcementTableTest(unittest.TestCase):
         fake_controller_setup(self.enforcement_controller)
         imsi = 'IMSI010000000088888'
         sub_ip = 'de34:431d:1bc::'
-        flow_list1 = [FlowDescription(
-            match=FlowMatch(
-                ip_dst=convert_ipv6_bytes_to_ip_proto(
-                    'f333:432::dbca'.encode('utf-8')),
-                direction=FlowMatch.UPLINK),
-            action=FlowDescription.PERMIT)
+        flow_list1 = [
+            FlowDescription(
+                match=FlowMatch(
+                    ip_dst=convert_ipv6_bytes_to_ip_proto(
+                        'f333:432::dbca'.encode('utf-8'),
+                    ),
+                    direction=FlowMatch.UPLINK,
+                ),
+                action=FlowDescription.PERMIT,
+            ),
         ]
         policies = [
-            PolicyRule(id='simple_match', priority=2, flow_list=flow_list1)
+            VersionedPolicy(
+                rule=PolicyRule(id='simple_match', priority=2, flow_list=flow_list1),
+                version=1,
+            ),
         ]
-
-        self._static_rule_dict[policies[0].id] = policies[0]
 
         # ============================ Subscriber ============================
         sub_context = RyuDirectSubscriberContext(
-            imsi, sub_ip, self.enforcement_controller, self._tbl_num
-        ).add_static_rule(policies[0].id)
+            imsi, sub_ip, self.enforcement_controller, self._tbl_num,
+        ).add_policy(policies[0])
         isolator = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub_context.cfg)
-                .build_requests(),
-            self.testing_controller
+            .build_requests(),
+            self.testing_controller,
         )
         pkt_sender = ScapyPacketInjector(self.IFACE)
         packet = IPv6PacketBuilder() \
@@ -232,8 +261,10 @@ class EnforcementTableTest(unittest.TestCase):
             .build()
 
         # =========================== Verification ===========================
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager)
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+        )
 
         with isolator, sub_context, snapshot_verifier:
             pkt_sender.send(packet)
@@ -248,24 +279,34 @@ class EnforcementTableTest(unittest.TestCase):
         fake_controller_setup(self.enforcement_controller)
         imsi = 'IMSI000000000000001'
         sub_ip = '192.168.128.45'
-        flow_list = [FlowDescription(
-            match=FlowMatch(
-                ip_src=convert_ipv4_str_to_ip_proto('9999.0.0.0/24')),
-            action=FlowDescription.DENY
-        )]
-        policy = PolicyRule(id='invalid', priority=2, flow_list=flow_list)
+        flow_list = [
+            FlowDescription(
+                match=FlowMatch(
+                    ip_src=convert_ipv4_str_to_ip_proto('9999.0.0.0/24'),
+                ),
+                action=FlowDescription.DENY,
+            ),
+        ]
+        policy = \
+            VersionedPolicy(
+                rule=PolicyRule(id='invalid', priority=2, flow_list=flow_list),
+                version=1,
+            )
         invalid_sub_context = RyuDirectSubscriberContext(
             imsi, sub_ip, self.enforcement_controller,
-            self._tbl_num).add_dynamic_rule(policy)
+            self._tbl_num,
+        ).add_policy(policy)
         isolator = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(invalid_sub_context.cfg)
                                      .build_requests(),
-            self.testing_controller
+            self.testing_controller,
         )
         flow_query = FlowQuery(self._tbl_num, self.testing_controller)
         num_flows_start = len(flow_query.lookup())
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager)
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+        )
 
         with isolator, invalid_sub_context, snapshot_verifier:
             wait_after_send(self.testing_controller)
@@ -284,35 +325,46 @@ class EnforcementTableTest(unittest.TestCase):
         fake_controller_setup(self.enforcement_controller)
         imsi = 'IMSI208950000000001'
         sub_ip = '192.168.128.74'
-        flow_list1 = [FlowDescription(
-            match=FlowMatch(
-                ip_src=convert_ipv4_str_to_ip_proto('15.0.0.0/24'),
-                direction=FlowMatch.DOWNLINK),
-            action=FlowDescription.DENY)
+        flow_list1 = [
+            FlowDescription(
+                match=FlowMatch(
+                    ip_src=convert_ipv4_str_to_ip_proto('15.0.0.0/24'),
+                    direction=FlowMatch.DOWNLINK,
+                ),
+                action=FlowDescription.DENY,
+            ),
         ]
-        flow_list2 = [FlowDescription(
-            match=FlowMatch(ip_proto=6, direction=FlowMatch.UPLINK),
-            action=FlowDescription.PERMIT)
+        flow_list2 = [
+            FlowDescription(
+                match=FlowMatch(ip_proto=6, direction=FlowMatch.UPLINK),
+                action=FlowDescription.PERMIT,
+            ),
         ]
+
         policies = [
-            PolicyRule(id='match', priority=2, flow_list=flow_list1),
-            PolicyRule(id='no_match', priority=2, flow_list=flow_list2)
+            VersionedPolicy(
+                rule=PolicyRule(id='match', priority=2, flow_list=flow_list1),
+                version=1,
+            ),
+            VersionedPolicy(
+                rule=PolicyRule(id='no_match', priority=2, flow_list=flow_list2),
+                version=1,
+            ),
         ]
         pkts_sent = 42
 
-        self._static_rule_dict[policies[0].id] = policies[0]
-        self._static_rule_dict[policies[1].id] = policies[1]
-
         # ============================ Subscriber ============================
-        sub_context = RyuDirectSubscriberContext(imsi, sub_ip,
-                                                 self.enforcement_controller,
-                                                 self._tbl_num) \
-            .add_static_rule(policies[0].id)\
-            .add_static_rule(policies[1].id)
+        sub_context = RyuDirectSubscriberContext(
+            imsi, sub_ip,
+            self.enforcement_controller,
+            self._tbl_num,
+        ) \
+            .add_policy(policies[0])\
+            .add_policy(policies[1])
         isolator = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub_context.cfg)
                                      .build_requests(),
-            self.testing_controller
+            self.testing_controller,
         )
         pkt_sender = ScapyPacketInjector(self.IFACE)
         packet = IPPacketBuilder()\
@@ -321,18 +373,24 @@ class EnforcementTableTest(unittest.TestCase):
             .build()
         flow_query = FlowQuery(
             self._tbl_num, self.testing_controller,
-            match=flow_match_to_magma_match(flow_list1[0].match)
+            match=flow_match_to_magma_match(flow_list1[0].match),
         )
 
         # =========================== Verification ===========================
         # Verify aggregate table stats, subscriber 1 'match' rule pkt count
-        flow_verifier = FlowVerifier([
-            FlowTest(FlowQuery(self._tbl_num, self.testing_controller),
-                     pkts_sent),
-            FlowTest(flow_query, pkts_sent)
-        ], lambda: wait_after_send(self.testing_controller))
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager)
+        flow_verifier = FlowVerifier(
+            [
+                FlowTest(
+                    FlowQuery(self._tbl_num, self.testing_controller),
+                    pkts_sent,
+                ),
+                FlowTest(flow_query, pkts_sent),
+            ], lambda: wait_after_send(self.testing_controller),
+        )
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+        )
 
         with isolator, sub_context, flow_verifier, snapshot_verifier:
             pkt_sender.send(packet, pkts_sent)
@@ -350,28 +408,36 @@ class EnforcementTableTest(unittest.TestCase):
         """
         fake_controller_setup(self.enforcement_controller)
         pkt_sender = ScapyPacketInjector(self.IFACE)
-        ip_match = [FlowDescription(
-            match=FlowMatch(ip_src=convert_ipv4_str_to_ip_proto('8.8.8.0/24'),
-                            direction=1),
-            action=1)
+        ip_match = [
+            FlowDescription(
+                match=FlowMatch(
+                    ip_src=convert_ipv4_str_to_ip_proto('8.8.8.0/24'),
+                    direction=1,
+                ),
+                action=1,
+            ),
         ]
-        tcp_match = [FlowDescription(
-            match=FlowMatch(ip_proto=6, direction=FlowMatch.DOWNLINK),
-            action=FlowDescription.DENY)
+        tcp_match = [
+            FlowDescription(
+                match=FlowMatch(ip_proto=6, direction=FlowMatch.DOWNLINK),
+                action=FlowDescription.DENY,
+            ),
         ]
 
-        self._static_rule_dict['t'] = PolicyRule(id='t', priority=2,
-                                                 flow_list=ip_match)
-
+        policy = \
+            VersionedPolicy(
+                rule=PolicyRule(id='t', priority=2, flow_list=ip_match),
+                version=1,
+            )
         # =========================== Subscriber 1 ===========================
         sub_context1 = RyuDirectSubscriberContext(
             'IMSI208950001111111', '192.168.128.5',
-            self.enforcement_controller, self._tbl_num
-        ).add_static_rule('t')
+            self.enforcement_controller, self._tbl_num,
+        ).add_policy(policy)
         isolator1 = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub_context1.cfg)
                                      .build_requests(),
-            self.testing_controller
+            self.testing_controller,
         )
         packet_ip = IPPacketBuilder()\
             .set_ether_layer(self.MAC_DEST, "00:00:00:00:00:00")\
@@ -381,23 +447,26 @@ class EnforcementTableTest(unittest.TestCase):
         pkts_to_send = [PktsToSend(packet_ip, s1_pkts_sent)]
         flow_query1 = FlowQuery(
             self._tbl_num, self.testing_controller,
-            match=flow_match_to_magma_match(ip_match[0].match)
+            match=flow_match_to_magma_match(ip_match[0].match),
         )
         s1 = SubTest(
-            sub_context1, isolator1, FlowTest(flow_query1, s1_pkts_sent)
+            sub_context1, isolator1, FlowTest(flow_query1, s1_pkts_sent),
         )
 
         # =========================== Subscriber 2 ===========================
         sub_context2 = RyuDirectSubscriberContext(
             'IMSI911500451242001', '192.168.128.100',
-            self.enforcement_controller, self._tbl_num
-        ).add_dynamic_rule(
-            PolicyRule(id='qqq', priority=2, flow_list=tcp_match)
+            self.enforcement_controller, self._tbl_num,
+        ).add_policy(
+            VersionedPolicy(
+                rule=PolicyRule(id='qqq', priority=2, flow_list=tcp_match),
+                version=1,
+            ),
         )
         isolator2 = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub_context2.cfg)
                                      .build_requests(),
-            self.testing_controller
+            self.testing_controller,
         )
         packet_tcp = TCPPacketBuilder()\
             .set_ether_layer(self.MAC_DEST, "00:00:00:00:00:00")\
@@ -407,25 +476,29 @@ class EnforcementTableTest(unittest.TestCase):
         pkts_to_send.append(PktsToSend(packet_tcp, s2_pkts_sent))
         flow_query2 = FlowQuery(
             self._tbl_num, self.testing_controller,
-            match=flow_match_to_magma_match(tcp_match[0].match)
+            match=flow_match_to_magma_match(tcp_match[0].match),
         )
         s2 = SubTest(
-            sub_context2, isolator2, FlowTest(flow_query2, s2_pkts_sent)
+            sub_context2, isolator2, FlowTest(flow_query2, s2_pkts_sent),
         )
 
         # =========================== Verification ===========================
         # Verify aggregate table stats, subscriber 1 & 2 flows packet matches
         pkts = s1_pkts_sent + s2_pkts_sent
-        flow_verifier = FlowVerifier([
-            FlowTest(FlowQuery(self._tbl_num, self.testing_controller), pkts),
-            s1.flowtest_list,
-            s2.flowtest_list
-        ], lambda: wait_after_send(self.testing_controller))
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager)
+        flow_verifier = FlowVerifier(
+            [
+                FlowTest(FlowQuery(self._tbl_num, self.testing_controller), pkts),
+                s1.flowtest_list,
+                s2.flowtest_list,
+            ], lambda: wait_after_send(self.testing_controller),
+        )
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+        )
 
         with s1.isolator, s1.context, s2.isolator, s2.context, flow_verifier, \
-             snapshot_verifier:
+                snapshot_verifier:
             for pkt in pkts_to_send:
                 pkt_sender.send(pkt.pkt, pkt.num)
 

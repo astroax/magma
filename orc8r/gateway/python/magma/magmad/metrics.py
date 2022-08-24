@@ -10,57 +10,106 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import asyncio
+import logging
 # pylint: disable=broad-except
 import os
-import asyncio
+import subprocess
 from collections import OrderedDict
-import logging
+
 import psutil
-from prometheus_client import Gauge, Counter
-
 from magma.common.health.service_state_wrapper import ServiceStateWrapper
+from magma.common.service import MagmaService
 from magma.magmad.check.network_check import ping
+from orc8r.protos.mconfig import mconfigs_pb2
+from prometheus_client import Counter, Gauge
 
-POLL_INTERVAL_SECONDS = 10
+POLL_INTERVAL_SECONDS = 100
 
-MAGMAD_PING_STATS = Gauge('magmad_ping_rtt_ms',
-                          'Gateway ping metrics',
-                          ['host', 'metric'])
-CPU_PERCENT = Gauge('cpu_percent',
-                    'System-wide CPU utilization as a percentage over 1 sec')
-SWAP_MEMORY_PERCENT = Gauge('swap_memory_percent', 'Percent of memory that can'
-                            ' be assigned to processes')
-VIRTUAL_MEMORY_PERCENT = Gauge('virtual_memory_percent',
-                               'Percent of memory that can be assigned to '
-                               'processes without the system going into swap')
+MAGMAD_PING_STATS = Gauge(
+    'magmad_ping_rtt_ms',
+    'Gateway ping metrics',
+    ['host', 'metric'],
+)
+CPU_PERCENT = Gauge(
+    'cpu_percent',
+    'System-wide CPU utilization as a percentage over 1 sec',
+)
+SWAP_MEMORY_PERCENT = Gauge(
+    'swap_memory_percent', 'Percent of memory that can'
+    ' be assigned to processes',
+)
+VIRTUAL_MEMORY_PERCENT = Gauge(
+    'virtual_memory_percent',
+    'Percent of memory that can be assigned to '
+    'processes without the system going into swap',
+)
 MEM_TOTAL = Gauge('mem_total', 'memory total')
 MEM_AVAILABLE = Gauge('mem_available', 'memory available')
 MEM_USED = Gauge('mem_used', 'memory used')
 MEM_FREE = Gauge('mem_free', 'memory free')
-DISK_PERCENT = Gauge('disk_percent',
-                     'Percent of disk space used for the '
-                     'volume mounted at root')
+DISK_PERCENT = Gauge(
+    'disk_percent',
+    'Percent of disk space used for the '
+    'volume mounted at root',
+)
 BYTES_SENT = Gauge('bytes_sent', 'System-wide network I/O bytes sent')
-BYTES_RECEIVED = Gauge('bytes_received',
-                       'System-wide network I/O bytes received')
-TEMPERATURE = Gauge('temperature', 'Temperature readings from system sensors',
-                    ['sensor'])
-CHECKIN_STATUS = Gauge('checkin_status',
-                       '1 for checkin success, and 0 for failure')
-BOOTSTRAP_EXCEPTION = Counter('bootstrap_exception',
-                              'Count for exceptions raised by bootstrapper',
-                              ['cause'])
-UNEXPECTED_SERVICE_RESTARTS = Counter('unexpected_service_restarts',
-                                      'Count of unexpected restarts',
-                                      ['service_name'])
-UNATTENDED_UPGRADE_STATUS = Gauge('unattended_upgrade_status',
-                                  'Unattended Upgrade update status'
-                                  '1 for active, 0 for inactive')
+BYTES_RECEIVED = Gauge(
+    'bytes_received',
+    'System-wide network I/O bytes received',
+)
+TEMPERATURE = Gauge(
+    'temperature', 'Temperature readings from system sensors',
+    ['sensor'],
+)
+CHECKIN_STATUS = Gauge(
+    'checkin_status',
+    '1 for checkin success, and 0 for failure',
+)
+BOOTSTRAP_EXCEPTION = Counter(
+    'bootstrap_exception',
+    'Count for exceptions raised by bootstrapper',
+    ['cause'],
+)
+UNEXPECTED_SERVICE_RESTARTS = Counter(
+    'unexpected_service_restarts',
+    'Count of unexpected restarts',
+    ['service_name'],
+)
+UNATTENDED_UPGRADE_STATUS = Gauge(
+    'unattended_upgrade_status',
+    'Unattended Upgrade update status'
+    '1 for active, 0 for inactive',
+)
 
 
-SERVICE_RESTART_STATUS = Gauge('service_restart_status',
-                               'Count of service restarts',
-                               ['service_name', 'status'])
+SERVICE_RESTART_STATUS = Counter(
+    'service_restart_status',
+    'Count of service restarts',
+    ['service_name', 'status'],
+)
+
+
+SERVICE_CPU_PERCENTAGE = Gauge(
+    'service_cpu_percentage',
+    'Service CPU Percentage',
+    ['service_name'],
+)
+
+
+SERVICE_MEMORY_USAGE = Gauge(
+    'service_memory_usage',
+    'Service Memory Usage',
+    ['service_name'],
+)
+
+
+SERVICE_MEMORY_PERCENTAGE = Gauge(
+    'service_memory_percentage',
+    'Service Memory Percentage',
+    ['service_name'],
+)
+
 
 def _get_ping_params(config):
     ping_params = []
@@ -69,10 +118,22 @@ def _get_ping_params(config):
             ping.PingCommandParams(
                 host,
                 config['ping_config']['num_packets'],
-                config['ping_config']['timeout_secs']
+                config['ping_config']['timeout_secs'],
             ) for host in config['ping_config']['hosts']
         ]
     return ping_params
+
+
+def _counter_set(counter: Counter, val: float):
+    """Set the counter to a particular value
+
+    Args:
+        counter (Counter): Counter instance
+        val (float): Value for the counter to be set
+    """
+    # pylint: disable=protected-access
+    prev = counter._value.get()
+    counter.inc(val - prev)
 
 
 @asyncio.coroutine
@@ -89,6 +150,7 @@ def metrics_collection_loop(service_config, loop=None):
             yield from _collect_ping_metrics(ping_params, loop=loop)
         yield from _collect_load_metrics()
         yield from _collect_service_restart_stats()
+        yield from _collect_service_metrics()
         yield from asyncio.sleep(int(config['sampling_period']))
 
 
@@ -103,12 +165,18 @@ def _collect_service_restart_stats():
         logging.error("Could not fetch service status: %s", e)
         return
     for service_name, status in service_dict.items():
-        SERVICE_RESTART_STATUS.labels(service_name=service_name,
-                                      status="Failure").set(
-            status.num_fail_exits)
-        SERVICE_RESTART_STATUS.labels(service_name=service_name,
-                                      status="Success").set(
-            status.num_clean_exits)
+        _counter_set(
+            SERVICE_RESTART_STATUS.labels(
+                service_name=service_name,
+                status="Failure",
+            ), status.num_fail_exits,
+        )
+        _counter_set(
+            SERVICE_RESTART_STATUS.labels(
+                service_name=service_name,
+                status="Success",
+            ), status.num_clean_exits,
+        )
 
 
 @asyncio.coroutine
@@ -136,7 +204,8 @@ def _collect_load_metrics():
         for sensor, values in psutil.sensors_temperatures().items():
             for idx, value in enumerate(values):
                 TEMPERATURE.labels(
-                    sensor='%s_%d' % (sensor, idx)).set(value.current)
+                    sensor='%s_%d' % (sensor, idx),
+                ).set(value.current)
     except OSError as ex:
         logging.warning("sensors_temperatures error: %s", ex)
 
@@ -153,15 +222,19 @@ def _collect_ping_metrics(ping_params, loop=None):
             ('packets_sent', (ping_stats.packets_transmitted, 'inc')),
             (
                 'packets_lost',
-                (ping_stats.packets_transmitted - ping_stats.packets_received,
-                 'inc')
+                (
+                    ping_stats.packets_transmitted - ping_stats.packets_received,
+                    'inc',
+                ),
             ),
         ])
 
     for param, result in zip(ping_params, ping_results_list):
         if result.error:
-            logging.debug('Failed to ping %s with error: %s',
-                          param.host_or_ip, result.error)
+            logging.debug(
+                'Failed to ping %s with error: %s',
+                param.host_or_ip, result.error,
+            )
         else:
             host = param.host_or_ip
             metrics = extract_metrics(result.stats)
@@ -171,12 +244,13 @@ def _collect_ping_metrics(ping_params, loop=None):
 
             logging.debug(
                 'Pinged %s with %d packet(s). Average RTT ms: %s',
-                result.host_or_ip, result.num_packets, result.stats.rtt_avg)
+                result.host_or_ip, result.num_packets, result.stats.rtt_avg,
+            )
     return ping_results_list
 
 
 @asyncio.coroutine
-def monitor_unattended_upgrade_status(loop):
+def monitor_unattended_upgrade_status():
     """
     Call to poll the unattended upgrade status and set the corresponding metric
     """
@@ -184,7 +258,7 @@ def monitor_unattended_upgrade_status(loop):
         status = 0
         auto_upgrade_file_name = '/etc/apt/apt.conf.d/20auto-upgrades'
         if os.path.isfile(auto_upgrade_file_name):
-            with open(auto_upgrade_file_name) as auto_upgrade_file:
+            with open(auto_upgrade_file_name, encoding='utf-8') as auto_upgrade_file:
                 for line in auto_upgrade_file:
                     package_name, flag = line.strip().strip(';').split()
                     if package_name == "APT::Periodic::Unattended-Upgrade":
@@ -193,4 +267,52 @@ def monitor_unattended_upgrade_status(loop):
                         break
         logging.debug('Unattended upgrade status is %d', status)
         UNATTENDED_UPGRADE_STATUS.set(status)
-        yield from asyncio.sleep(POLL_INTERVAL_SECONDS, loop=loop)
+        yield from asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+
+@asyncio.coroutine
+def _collect_service_metrics():
+    config = MagmaService('magmad', mconfigs_pb2.MagmaD()).config
+    magma_services = ["magma@" + service for service in config['magma_services']]
+    non_magma_services = ["sctpd", "openvswitch-switch"]
+    for service in magma_services + non_magma_services:
+        cmd = ["systemctl", "show", service, "--property=MainPID,MemoryCurrent,MemoryAccounting,MemoryLimit"]
+        # TODO(@wallyrb): Move away from subprocess and use psystemd
+        output = subprocess.check_output(cmd)
+        output_str = str(output, "utf-8").strip().replace("MainPID=", "").replace("MemoryCurrent=", "").replace("MemoryAccounting=", "").replace("MemoryLimit=", "")
+        properties = output_str.split("\n")
+        pid = int(properties[0])
+        memory = properties[1]
+        memory_accounting = properties[2]
+        memory_limit = properties[3]
+
+        if pid != 0:
+            try:
+                p = psutil.Process(pid=pid)
+                cpu_percentage = p.cpu_percent(interval=1)
+            except psutil.NoSuchProcess:
+                logging.warning("When collecting CPU usage for service %s: Process with PID %d no longer exists.", service, pid)
+                continue
+            else:
+                _counter_set(
+                    SERVICE_CPU_PERCENTAGE.labels(
+                        service_name=service,
+                    ), cpu_percentage,
+                )
+
+        if not memory.isnumeric():
+            continue
+
+        if memory_accounting == "yes":
+            _counter_set(
+                SERVICE_MEMORY_USAGE.labels(
+                    service_name=service,
+                ), int(memory),
+            )
+
+        if memory_limit.isnumeric():
+            _counter_set(
+                SERVICE_MEMORY_PERCENTAGE.labels(
+                    service_name=service,
+                ), int(memory) / int(memory_limit),
+            )

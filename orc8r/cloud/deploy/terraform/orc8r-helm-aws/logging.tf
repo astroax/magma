@@ -16,9 +16,9 @@ locals {
 }
 
 resource "helm_release" "fluentd" {
-  count = var.elasticsearch_endpoint == null ? 0 : 1
+  count = var.elasticsearch_endpoint == null || var.orc8r_is_staging_deployment == true ? 0 : 1
 
-  name       = "fluentd"
+  name       = var.fluentd_deployment_name
   namespace  = kubernetes_namespace.orc8r.metadata[0].name
   repository = local.stable_helm_repo
   chart      = "fluentd"
@@ -35,6 +35,7 @@ resource "helm_release" "fluentd" {
     create: false
   service:
     annotations:
+      service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags: "magma-uuid=${var.magma_uuid}"
       external-dns.alpha.kubernetes.io/hostname: ${local.fluentd_hostname}
     type: LoadBalancer
     ports:
@@ -128,16 +129,25 @@ resource "helm_release" "fluentd" {
 
 # helm chart for cleaning old indices.
 resource "helm_release" "elasticsearch_curator" {
-  count = var.elasticsearch_endpoint == null ? 0 : 1
+  count = var.elasticsearch_endpoint == null || var.orc8r_is_staging_deployment == true ? 0 : 1
 
-  name       = "elasticsearch-curator"
+  name       = var.elasticsearch_curator_name
   repository = local.stable_helm_repo
   chart      = "elasticsearch-curator"
-  namespace  = kubernetes_namespace.monitoring.metadata[0].name
-  version    = "2.1.3"
+  namespace  = kubernetes_namespace.monitoring[0].metadata[0].name
+  version    = "2.2.3"
   keyring    = ""
 
   values = [<<EOT
+  cronjob:    
+    schedule: "0 0 * * *"
+    annotations: {}
+    labels: {}
+    concurrencyPolicy: ""
+    failedJobsHistoryLimit: ""
+    successfulJobsHistoryLimit: ""
+    jobRestartPolicy: Never  
+  
   configMaps:
     config_yml: |-
       ---
@@ -171,6 +181,22 @@ resource "helm_release" "elasticsearch_curator" {
             stats_result:
             epoch:
             exclude: False
+        2:
+          action: delete_indices
+          description: "Clean up ES by magma log indices if it consumes more than 75% of volume"
+          options:
+            timeout_override:
+            continue_if_exception: False
+            disable_action: False
+            ignore_empty_list: True
+          filters:
+          - filtertype: pattern
+            kind: prefix
+            value: magma-
+          - filtertype: space
+            disk_space: ${var.elasticsearch_disk_threshold}
+            use_age: True
+            source: creation_date            
   EOT
   ]
 }

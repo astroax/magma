@@ -13,6 +13,8 @@
 
 s11_iface_name: "lo"  # 'sgw_s11_ip' will be filled automatically
 s1u_iface_name: "eth1"  # 's1_ip' will be filled automatically
+sgw_s5s8_up_iface_name: "eth0"  # 'sgw_s5s8_up_ip' will be filled automatically
+sgw_s5s8_up_iface_name_non_nat: "uplink_br0"  # 'sgw_s5s8_up_ip' will be filled automatically
 masquerade: "no"
 ipv4_dns: "8.8.8.8" # will be replaced by dnsd if caching is enabled
 ipv4_sec_dns: "8.8.4.4"
@@ -40,3 +42,22 @@ ovs_multi_tunnel: true
 
 # Non-NAT specific config
 ovs_uplink_port_number: 2
+
+# Flag to control ovs table=0 using pipelined
+pipelined_managed_tbl0: false
+
+# To enable GTP-U echo response on all GTP tunnels.
+ovs_gtpu_echo_resp: true
+
+# To enable PGW tunnel over wireguard tunneling
+agw_l3_tunnel: false
+
+# To enable UDP checksum for GTP-U tunnel
+# This might have performance overhead depending of NIC capability.
+ovs_gtpu_checksum: false
+
+# Enable IPv6 support for S1AP SCTP endpoint
+s1_ipv6_enabled: true
+
+# Enabled eBPF map operations
+ebpf_enabled: false

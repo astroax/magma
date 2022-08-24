@@ -13,12 +13,14 @@ limitations under the License.
 # pylint: disable=broad-except
 
 import asyncio
+import logging
 from enum import Enum
 
 import grpc
+from google.protobuf import message as proto_message
+from google.protobuf.json_format import MessageToJson
+from magma.common.service_registry import ServiceRegistry
 from orc8r.protos import common_pb2
-
-from .service_registry import ServiceRegistry
 
 
 class RetryableGrpcErrorDetails(Enum):
@@ -95,9 +97,11 @@ def cloud_grpc_wrapper(func):
     return wrapper
 
 
-def set_grpc_err(context: grpc.ServicerContext,
-                 code: grpc.StatusCode,
-                 details: str):
+def set_grpc_err(
+    context: grpc.ServicerContext,
+    code: grpc.StatusCode,
+    details: str,
+):
     """
     Sets status code and details for a gRPC context. Removes commas from
     the details message (see https://github.com/grpc/grpc-node/issues/769)
@@ -130,7 +134,7 @@ def grpc_async_wrapper(gf, loop=None):
     if loop is None:
         loop = asyncio.get_event_loop()
     gf.add_done_callback(
-        lambda _: loop.call_soon_threadsafe(_grpc_async_wrapper, f, gf)
+        lambda _: loop.call_soon_threadsafe(_grpc_async_wrapper, f, gf),
     )
     return f
 
@@ -139,8 +143,54 @@ def is_grpc_error_retryable(error: grpc.RpcError) -> bool:
     status_code = error.code()
     error_details = error.details()
     if status_code == grpc.StatusCode.UNAVAILABLE and \
-            any(err_msg.value in error_details for err_msg in
-                RetryableGrpcErrorDetails):
+            any(
+                err_msg.value in error_details for err_msg in
+                RetryableGrpcErrorDetails
+            ):
         # server end closed connection.
         return True
     return False
+
+
+def indicates_connection_error(error: grpc.RpcError) -> bool:
+    """Try to determine if an RpcError is caused by a connection error
+    to the RPC endpoint, which means that it's likely not caused by a bug in the code
+
+    Args:
+        error (grpc.RpcError): The RpcError
+
+    Returns:
+        bool: Is this a network error
+    """
+    return error.code() in {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED}
+
+
+def print_grpc(
+    message: proto_message.Message, print_grpc_payload: bool,
+    message_header: str = "",
+):
+    """
+    Prints content of grpc message
+
+    Args:
+        message: grpc message to print
+        print_grpc_payload: flag to enable/disable printing of the message
+        message_header: header to print before printing grpc content
+    """
+
+    if print_grpc_payload:
+        log_msg = "{} {}".format(
+            message.DESCRIPTOR.full_name,
+            MessageToJson(message),
+        )
+        # add indentation
+        padding = 2 * ' '
+        log_msg = ''.join(
+            "{}{}".format(padding, line)
+            for line in log_msg.splitlines(True)
+        )
+        log_msg = "GRPC message:\n{}".format(log_msg)
+
+        if message_header:
+            logging.info(message_header)
+        logging.info(log_msg)

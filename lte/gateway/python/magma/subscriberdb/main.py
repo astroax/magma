@@ -13,76 +13,147 @@ limitations under the License.
 import asyncio
 import logging
 
-from magma.common.service import MagmaService
-from magma.common.streamer import StreamerClient
-from .processor import Processor
-from .protocols.diameter.application import base, s6a
-from .protocols.diameter.server import S6aServer
-from .rpc_servicer import SubscriberDBRpcServicer
-from .subscription_profile import get_default_sub_profile
-from .streamer_callback import SubscriberDBStreamerCallback
-from .store.sqlite import SqliteStore
-from .protocols.s6a_proxy_servicer import S6aProxyRpcServicer
 from lte.protos.mconfig import mconfigs_pb2
+from lte.protos.subscriberdb_pb2_grpc import SubscriberDBCloudStub
+from magma.common.grpc_client_manager import GRPCClientManager
+from magma.common.sentry import sentry_init
+from magma.common.service import MagmaService
+from magma.subscriberdb.client import SubscriberDBCloudClient
+from magma.subscriberdb.processor import Processor
+from magma.subscriberdb.protocols.diameter.application import base, s6a
+from magma.subscriberdb.protocols.diameter.server import S6aServer
+from magma.subscriberdb.protocols.m5g_auth_servicer import (
+    M5GAuthRpcServicer,
+    M5GSUCIRegRpcServicer,
+)
+from magma.subscriberdb.protocols.s6a_proxy_servicer import S6aProxyRpcServicer
+from magma.subscriberdb.rpc_servicer import (
+    SubscriberDBRpcServicer,
+    SuciProfileDBRpcServicer,
+)
+from magma.subscriberdb.store.sqlite import SqliteStore
+from magma.subscriberdb.subscription_profile import get_default_sub_profile
 
 
 def main():
-    """ main() for subscriberdb """
-    service = MagmaService('subscriberdb',
-                           mconfigs_pb2.SubscriberDB(),
-                           workers=1)
+    """Main routine for subscriberdb service."""  # noqa: D401
+    service = MagmaService('subscriberdb', mconfigs_pb2.SubscriberDB())
+
+    # Optionally pipe errors to Sentry
+    sentry_init(service_name=service.name, sentry_mconfig=service.shared_mconfig.sentry_config)
+
+    suciprofile_db_dict = {}
 
     # Initialize a store to keep all subscriber data.
-    store = SqliteStore(service.config['db_path'], loop=service.loop)
+    store = SqliteStore(
+        service.config.get('db_path'), loop=service.loop,
+        sid_digits=service.config.get('sid_last_n'),
+    )
 
     # Initialize the processor
-    processor = Processor(store,
-                          get_default_sub_profile(service),
-                          service.mconfig.sub_profiles,
-                          service.mconfig.lte_auth_op,
-                          service.mconfig.lte_auth_amf)
+    processor = Processor(
+        store,
+        get_default_sub_profile(service),
+        service.mconfig.sub_profiles,
+        service.mconfig.lte_auth_op,
+        service.mconfig.lte_auth_amf,
+    )
 
     # Add all servicers to the server
-    subscriberdb_servicer = SubscriberDBRpcServicer(store)
+    subscriberdb_servicer = SubscriberDBRpcServicer(
+        store,
+        processor,
+        service.config.get('print_grpc_payload', False),
+    )
     subscriberdb_servicer.add_to_server(service.rpc_server)
 
+    suciprofilerdb_servicer = SuciProfileDBRpcServicer(
+        store,
+        suciprofile_db_dict,
+        service.config.get('print_grpc_payload', False),
+    )
+    suciprofilerdb_servicer.add_to_server(service.rpc_server)
 
     # Start a background thread to stream updates from the cloud
-    if service.config['enable_streaming']:
-        callback = SubscriberDBStreamerCallback(store, service.loop)
-        stream = StreamerClient({"subscriberdb": callback}, service.loop)
-        stream.start()
+    if service.config.get('enable_streaming'):
+        grpc_client_manager = GRPCClientManager(
+            service_name="subscriberdb",
+            service_stub=SubscriberDBCloudStub,
+            max_client_reuse=60,
+        )
+        sync_interval = service.mconfig.sync_interval
+        subscriber_page_size = service.config.get('subscriber_page_size')
+        subscriberdb_cloud_client = SubscriberDBCloudClient(
+            service.loop,
+            store,
+            subscriber_page_size,
+            sync_interval,
+            suciprofile_db_dict,
+            grpc_client_manager,
+        )
+
+        subscriberdb_cloud_client.start()
     else:
-        logging.info('enable_streaming set to False. Streamer disabled!')
+        logging.info(
+            'enable_streaming set to False. Subscriber streaming '
+            'disabled!',
+        )
 
     # Wait until the datastore is populated by addition or resync before
     # listening for clients.
-    async def serve():
+    async def serve():  # noqa: WPS430
         if not store.list_subscribers():
             # Waiting for subscribers to be added to store
             await store.on_ready()
 
-        if service.config['s6a_over_grpc']:
-            s6a_proxy_servicer = S6aProxyRpcServicer(processor)
+        if service.config.get('enable5g_features', service.mconfig.enable5g_features):
+            logging.info('Cater to 5G Authentication')
+            m5g_subs_auth_servicer = M5GAuthRpcServicer(
+                processor,
+                service.config.get('print_grpc_payload', False),
+            )
+            m5g_subs_auth_servicer.add_to_server(service.rpc_server)
+
+        if service.config.get('enable5g_features', service.mconfig.enable5g_features):
+            logging.info('Cater to 5G SUPI Registration')
+            m5g_suci_reg_servicer = M5GSUCIRegRpcServicer(
+                processor,
+                suciprofile_db_dict,
+                service.config.get('print_grpc_payload', False),
+            )
+            m5g_suci_reg_servicer.add_to_server(service.rpc_server)
+
+        if service.config.get('s6a_over_grpc'):
+            logging.info('Running s6a over grpc')
+            s6a_proxy_servicer = S6aProxyRpcServicer(
+                processor,
+                service.config.get('print_grpc_payload', False),
+            )
             s6a_proxy_servicer.add_to_server(service.rpc_server)
         else:
+            logging.info('Running s6a over DIAMETER')
             base_manager = base.BaseApplication(
-                service.config['mme_realm'],
-                service.config['mme_host_name'],
-                service.config['mme_host_address'],
+                service.config.get('mme_realm'),
+                service.config.get('mme_host_name'),
+                service.config.get('mme_host_address'),
             )
             s6a_manager = _get_s6a_manager(service, processor)
             base_manager.register(s6a_manager)
 
             # Setup the Diameter/s6a MME
             s6a_server = service.loop.create_server(
-                lambda: S6aServer(base_manager,
-                              s6a_manager,
-                              service.config['mme_realm'],
-                              service.config['mme_host_name'],
-                              loop=service.loop),
-                service.config['host_address'], service.config['mme_port'])
+                lambda: S6aServer(
+                    base_manager,
+                    s6a_manager,
+                    service.config.get('mme_realm'),
+                    service.config.get('mme_host_name'),
+                    loop=service.loop,
+                ),
+                service.config.get('host_address'),
+                service.config.get('mme_port'),
+            )
             asyncio.ensure_future(s6a_server, loop=service.loop)
+
     asyncio.ensure_future(serve(), loop=service.loop)
 
     # Run the service loop
@@ -95,10 +166,10 @@ def main():
 def _get_s6a_manager(service, processor):
     return s6a.S6AApplication(
         processor,
-        service.config['mme_realm'],
-        service.config['mme_host_name'],
-        service.config['mme_host_address'],
-        service.loop
+        service.config.get('mme_realm'),
+        service.config.get('mme_host_name'),
+        service.config.get('mme_host_address'),
+        service.loop,
     )
 
 

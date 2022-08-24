@@ -14,10 +14,16 @@ limitations under the License.
 package policydb_test
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	"magma/feg/gateway/policydb"
 	fegstreamer "magma/gateway/streamer"
@@ -28,20 +34,11 @@ import (
 	orcprotos "magma/orc8r/lib/go/protos"
 	platform_registry "magma/orc8r/lib/go/registry"
 	"magma/orc8r/lib/go/service/config"
-
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
 
 // Mock Cloud Streamer
 type mockStreamProvider struct {
-	Name string
-}
-
-func (m *mockStreamProvider) GetStreamName() string {
-	return m.Name
+	name string
 }
 
 var (
@@ -49,7 +46,7 @@ var (
 	onceTestsInit   sync.Once
 )
 
-func (m *mockStreamProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([]*orcprotos.DataUpdate, error) {
+func (m *mockStreamProvider) GetUpdates(ctx context.Context, gatewayId string, extraArgs *any.Any) ([]*orcprotos.DataUpdate, error) {
 	// Data for stream name "base_names"
 	rs1, _ := proto.Marshal(&protos.ChargingRuleNameSet{RuleNames: []string{"rule11", "rule12"}})
 	rs2, _ := proto.Marshal(&protos.ChargingRuleNameSet{RuleNames: []string{"rule21", "rule22"}})
@@ -68,7 +65,7 @@ func (m *mockStreamProvider) GetUpdates(gatewayId string, extraArgs *any.Any) ([
 	var updates []*orcprotos.DataUpdate
 
 	// Determine what streamprovider it is before sending the updates
-	switch m.Name {
+	switch m.name {
 	case "base_names":
 		updates = []*orcprotos.DataUpdate{
 			{Key: "base_1", Value: rs1},
@@ -102,10 +99,10 @@ func (cr mockCloudRegistry) GetCloudConnection(service string) (*grpc.ClientConn
 	if service != definitions.StreamerServiceName {
 		return nil, fmt.Errorf("Not Implemented")
 	}
-	return platform_registry.GetConnection(streamer.ServiceName)
+	return platform_registry.GetConnection(streamer.ServiceName, orcprotos.ServiceType_SOUTHBOUND)
 }
 
-func (cr mockCloudRegistry) GetCloudConnectionFromServiceConfig(serviceConfig *config.ConfigMap, service string) (*grpc.ClientConn, error) {
+func (cr mockCloudRegistry) GetCloudConnectionFromServiceConfig(serviceConfig *config.Map, service string) (*grpc.ClientConn, error) {
 	return nil, fmt.Errorf("Not Implemented")
 }
 
@@ -159,7 +156,7 @@ func initOnce(t *testing.T) {
 
 func TestPolicyDBBaseNamesWithGRPC(t *testing.T) {
 	onceTestsInit.Do(func() { initOnce(t) })
-	streamer_test_init.StartNewTestProvider(t, &mockStreamProvider{Name: "base_names"})
+	streamer_test_init.StartNewTestProvider(t, &mockStreamProvider{name: "base_names"}, "base_names")
 	dbClient := &policydb.RedisPolicyDBClient{
 		PolicyMap:      &mockObjectStore{},
 		BaseNameMap:    &mockObjectStore{},
@@ -181,7 +178,7 @@ func TestPolicyDBBaseNamesWithGRPC(t *testing.T) {
 
 func TestPolicyDBRulesWithGRPC(t *testing.T) {
 	onceTestsInit.Do(func() { initOnce(t) })
-	streamer_test_init.StartNewTestProvider(t, &mockStreamProvider{Name: "policydb"})
+	streamer_test_init.StartNewTestProvider(t, &mockStreamProvider{name: "policydb"}, "policydb")
 	dbClient := &policydb.RedisPolicyDBClient{
 		PolicyMap:      &mockObjectStore{},
 		BaseNameMap:    &mockObjectStore{},

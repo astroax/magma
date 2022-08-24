@@ -19,12 +19,12 @@ import argparse
 import os
 import subprocess
 import sys
-import shlex
 import time
-
 from enum import Enum
 
+from lte.protos.mconfig import mconfigs_pb2
 from magma.common.redis.client import get_default_client
+from magma.configuration.mconfig_managers import get_mconfig_manager
 from magma.configuration.service_configs import (
     load_override_config,
     load_service_config,
@@ -32,11 +32,10 @@ from magma.configuration.service_configs import (
 )
 
 return_codes = Enum(
-    "return_codes", "STATELESS STATEFUL CORRUPT INVALID", start=0
+    "return_codes", "STATELESS STATEFUL CORRUPT INVALID", start=0,
 )
 STATELESS_SERVICE_CONFIGS = [
     ("mme", "use_stateless", True),
-    ("mobilityd", "persist_to_redis", True),
     ("pipelined", "clean_restart", False),
     ("pipelined", "redis_enabled", True),
     ("sessiond", "support_stateless", True),
@@ -57,8 +56,8 @@ def check_stateless_services():
     num_stateful = 0
     for service, config, value in STATELESS_SERVICE_CONFIGS:
         if (
-            check_stateless_service_config(service, config, value)
-            == return_codes.STATEFUL
+                check_stateless_service_config(service, config, value)
+                == return_codes.STATEFUL
         ):
             num_stateful += 1
 
@@ -97,6 +96,10 @@ def clear_redis_state():
         "QosManager",
         "s1ap_imsi_map",
         "sessiond:sessions",
+        "*pipelined:rule_ids",
+        "*pipelined:rule_versions",
+        "*pipelined:rule_names",
+        "mme_ueip_imsi_map",
     ]:
         for key in redis_client.scan_iter(key_regex):
             redis_client.delete(key)
@@ -158,12 +161,48 @@ def disable_stateless_agw():
     sys.exit(check_stateless_services().value)
 
 
+def ovs_reset_bridges():
+    mconfig = get_mconfig_manager().load_service_mconfig(
+        'pipelined', mconfigs_pb2.PipelineD(),
+    )
+    service_config = load_service_config('pipelined')
+    if service_config.get('enable_nat', mconfig.nat_enabled):
+        non_nat_sgi_interface = ""
+        sgi_management_iface_ip_addr = ""
+        sgi_management_iface_gw = ""
+    else:
+        non_nat_sgi_interface = service_config['nat_iface']
+        sgi_management_iface_ip_addr = service_config.get(
+            'sgi_management_iface_ip_addr', mconfig.sgi_management_iface_ip_addr,
+        )
+        sgi_management_iface_gw = service_config.get(
+            'sgi_management_iface_gw', mconfig.sgi_management_iface_gw,
+        )
+
+    sgi_bridge_name = service_config.get('uplink_bridge', "uplink_br0")
+
+    reset_br = "magma-bridge-reset.sh -n %s %s %s %s" % \
+               (
+                   sgi_bridge_name,
+                   non_nat_sgi_interface,
+                   sgi_management_iface_ip_addr,
+                   sgi_management_iface_gw,
+               )
+    print("ovs-restart: ", reset_br)
+    subprocess.call(reset_br.split())
+
+
 def sctpd_pre_start():
+    subprocess.Popen("service procps restart".split())
+
     if check_stateless_services() == return_codes.STATEFUL:
         # switching from stateless to stateful
         print("AGW is stateful, nothing to be done")
     else:
+        # Clean up all mobilityd, MME, pipelined and sessiond Redis keys
         clear_redis_state()
+        # Clean up OVS flows
+        ovs_reset_bridges()
     sys.exit(0)
 
 
@@ -195,6 +234,7 @@ def reset_sctpd_for_stateful():
         sys.exit(0)
     restart_sctpd()
 
+
 STATELESS_FUNC_DICT = {
     "check": check_stateless_agw,
     "enable": enable_stateless_agw,
@@ -203,7 +243,7 @@ STATELESS_FUNC_DICT = {
     "sctpd_post": sctpd_post_start,
     "clear_redis": clear_redis_and_restart,
     "flushall_redis": flushall_redis_and_restart,
-    "reset_sctpd_for_stateful": reset_sctpd_for_stateful
+    "reset_sctpd_for_stateful": reset_sctpd_for_stateful,
 }
 
 

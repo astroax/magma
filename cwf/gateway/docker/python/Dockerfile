@@ -11,7 +11,7 @@ RUN apt-get -y update && apt-get -y install curl make virtualenv zip \
   apt-utils software-properties-common apt-transport-https
 
 # Install protobuf compiler.
-RUN curl -Lfs https://github.com/google/protobuf/releases/download/v3.1.0/protoc-3.1.0-linux-x86_64.zip -o protoc3.zip && \
+RUN curl -Lfs https://github.com/protocolbuffers/protobuf/releases/download/v3.1.0/protoc-3.1.0-linux-x86_64.zip -o protoc3.zip && \
   unzip protoc3.zip -d protoc3 && \
   mv protoc3/bin/protoc /usr/bin/protoc && \
   chmod a+rx /usr/bin/protoc && \
@@ -19,8 +19,6 @@ RUN curl -Lfs https://github.com/google/protobuf/releases/download/v3.1.0/protoc
   chmod -R a+Xr /usr/include/google && \
   rm -rf protoc3.zip protoc3
 
-# Install python3.8 since it's not native on focal
-RUN apt-add-repository "ppa:deadsnakes/ppa"
 RUN apt-get -y update && apt-get -y install python3.8
 
 ENV MAGMA_ROOT /magma
@@ -51,12 +49,9 @@ COPY orc8r/tools/ansible/roles/pkgrepo/files/jfrog.pub /tmp/jfrog.pub
 COPY cwf/gateway/deploy/roles/ovs/files/magma-preferences /etc/apt/preferences.d/
 # TODO: change repo to focal once there will be such
 RUN apt-key add /tmp/jfrog.pub && \
-    apt-add-repository "deb https://facebookconnectivity.jfrog.io/artifactory/list/dev-focal/ focal main" && \
+    apt-add-repository "deb https://artifactory.magmacore.org/artifactory/debian-test focal-ci main" && \
     apt-add-repository "deb http://archive.ubuntu.com/ubuntu/ focal-proposed restricted main multiverse universe"
 
- # Install python3.8 since it's not native on focal
-RUN apt-add-repository "ppa:deadsnakes/ppa"
-RUN apt-get -y update && apt-get -y install python3.8
 RUN apt-get -y update && apt-get -y install \
     curl \
     libc-ares2 \
@@ -72,6 +67,7 @@ RUN apt-get -y update && apt-get -y install \
     pkg-config \
     python-cffi \
     python3-pip \
+    python3.8 \
     python3.8-dev \
     redis-server \
     iptables \
@@ -82,7 +78,8 @@ RUN apt-get -y update && apt-get -y install \
     libcap-ng-dev \
     linux-headers-generic \
     netcat \
-    iputils-ping
+    iputils-ping \
+    bcc-tools
 
 RUN python3.8 -m pip install --no-cache-dir \
     Cython \
@@ -114,6 +111,7 @@ RUN python3.8 -m pip install --no-cache-dir \
     click \
     pycares \
     python-dateutil \
+    aioeventlet@git+https://github.com/magma/deb-python-aioeventlet@86130360db113430370ed6c64d42aee3b47cd619 \
     jsonpickle
 
 COPY cwf/gateway/deploy/roles/ovs/files/nx_actions.py /usr/local/lib/python3.8/dist-packages/ryu/ofproto/
@@ -159,8 +157,3 @@ COPY --from=builder /build/python/gen /usr/local/lib/python3.8/dist-packages/
 
 # update aioh2 since there is no pushed package, but master is fixed
 RUN python3.8 -m pip install --force-reinstall git+https://github.com/URenko/aioh2.git
-
-# patching aioeventlet
-RUN mkdir /patches
-COPY lte/gateway/python/patches/aioeventlet.py38.patch /patches
-RUN patch -N -s -f /usr/local/lib/python3.8/dist-packages/aioeventlet.py < patches/aioeventlet.py38.patch

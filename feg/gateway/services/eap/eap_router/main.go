@@ -15,8 +15,9 @@ limitations under the License.
 package main
 
 import (
+	"context"
+
 	"github.com/golang/glog"
-	"golang.org/x/net/context"
 
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/aaa/protos"
@@ -30,7 +31,7 @@ type eapRouter struct {
 
 func main() {
 	// Create the EAP AKA Provider service
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.EAP)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.EAP)
 	if err != nil {
 		glog.Fatalf("Error creating EAP Router service: %s", err)
 	}

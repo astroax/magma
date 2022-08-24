@@ -16,6 +16,12 @@ package servicers_test
 import (
 	"testing"
 
+	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/avp"
+	"github.com/fiorix/go-diameter/v4/diam/datatype"
+	"github.com/fiorix/go-diameter/v4/diam/dict"
+	"github.com/stretchr/testify/assert"
+
 	fegprotos "magma/feg/cloud/go/protos"
 	"magma/feg/cloud/go/protos/mconfig"
 	"magma/feg/gateway/diameter"
@@ -23,12 +29,6 @@ import (
 	hss "magma/feg/gateway/services/testcore/hss/servicers"
 	"magma/feg/gateway/services/testcore/hss/servicers/test_utils"
 	"magma/feg/gateway/services/testcore/hss/storage"
-
-	"github.com/fiorix/go-diameter/v4/diam"
-	"github.com/fiorix/go-diameter/v4/diam/avp"
-	"github.com/fiorix/go-diameter/v4/diam/datatype"
-	"github.com/fiorix/go-diameter/v4/diam/dict"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestNewULA_MissingMandatoryAVP(t *testing.T) {
@@ -118,7 +118,7 @@ func TestNewULA_NewSuccessfulULA(t *testing.T) {
 func TestValidateULR_MissingUserName(t *testing.T) {
 	ulr := createBaseULR()
 	ulr.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("magma;123_1234"))
-	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
+	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(TEST_PLMN_ID))
 	ulr.NewAVP(avp.ULRFlags, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
 	ulr.NewAVP(avp.RATType, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
 
@@ -141,7 +141,7 @@ func TestValidateULR_MissingULRFlags(t *testing.T) {
 	ulr := createBaseULR()
 	ulr.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("magma;123_1234"))
 	ulr.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("sub1"))
-	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
+	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(TEST_PLMN_ID))
 	ulr.NewAVP(avp.RATType, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
 
 	err := hss.ValidateULR(ulr)
@@ -152,7 +152,7 @@ func TestValidateULR_MissingRATType(t *testing.T) {
 	ulr := createBaseULR()
 	ulr.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("magma;123_1234"))
 	ulr.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("sub1"))
-	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
+	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(TEST_PLMN_ID))
 	ulr.NewAVP(avp.ULRFlags, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
 
 	err := hss.ValidateULR(ulr)
@@ -162,7 +162,7 @@ func TestValidateULR_MissingRATType(t *testing.T) {
 func TestValidateULR_MissingSessionID(t *testing.T) {
 	ulr := createBaseULR()
 	ulr.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String("sub1"))
-	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
+	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(TEST_PLMN_ID))
 	ulr.NewAVP(avp.ULRFlags, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
 	ulr.NewAVP(avp.RATType, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
 
@@ -201,7 +201,7 @@ func createULRExtended(userName string, ratType uint32) *diam.Message {
 	ulr := createBaseULR()
 	ulr.NewAVP(avp.SessionID, avp.Mbit, 0, datatype.UTF8String("magma;123_1234"))
 	ulr.NewAVP(avp.UserName, avp.Mbit, 0, datatype.UTF8String(userName))
-	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
+	ulr.NewAVP(avp.VisitedPLMNID, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.OctetString(TEST_PLMN_ID))
 	ulr.NewAVP(avp.ULRFlags, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(0))
 	ulr.NewAVP(avp.RATType, avp.Mbit|avp.Vbit, diameter.Vendor3GPP, datatype.Unsigned32(ratType))
 	return ulr

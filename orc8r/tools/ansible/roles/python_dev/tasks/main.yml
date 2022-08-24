@@ -80,10 +80,9 @@
       - python-babel
       - python-dev
       - pkg-config
+      - sshpass
       # Packaging dependencies
       - build-essential
-      - python3-setuptools
-      - python-setuptools
       # Building and shipping client release
       - autogen
       - autoconf
@@ -96,20 +95,15 @@
       - protobuf-compiler
       - python-protobuf
       - libsystemd-dev
-
-- name: Install python build requirements for Debian systems
-  retries: 5
-  when: preburn and ansible_distribution == "Debian"
-  apt:
-    state: present
-    pkg:
-      - python3-aioeventlet
+      - mypy
+      - python3-testresources
 
 - name: install the package, force reinstall to the latest version
   pip:
     name: setuptools==49.6.0
     state: forcereinstall
     executable: pip3
+  when: preburn
 
 ###########################
 # Install dev dependencies
@@ -118,5 +112,11 @@
 - name: Install mypy-protobuf
   pip:
     name: mypy-protobuf
+    executable: pip3
+  when: preburn
+
+- name: Install grpcio-tools
+  pip:
+    name: grpcio-tools
     executable: pip3
   when: preburn

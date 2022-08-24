@@ -13,17 +13,17 @@ limitations under the License.
 Util module for executing multiple `dpkg` commands via subprocess.
 """
 
-from collections import namedtuple
-
 import asyncio
 import re
+from collections import namedtuple
 
 from magma.magmad.check import subprocess_workflow
 
-
 DpkgCommandParams = namedtuple('DpkgCommandParams', [])
-DpkgCommandResult = namedtuple('DpkgCommandResult',
-                               ['error', 'kernel_versions_installed'])
+DpkgCommandResult = namedtuple(
+    'DpkgCommandResult',
+    ['error', 'kernel_versions_installed'],
+)
 
 
 def get_kernel_versions():
@@ -76,5 +76,5 @@ def parse_dpkg_output(stdout, stderr, _):
         installed = re.findall(r'\S*linux-image\S*', str(stdout))
         return DpkgCommandResult(
             kernel_versions_installed=installed,
-            error=None
+            error=None,
         )

@@ -15,10 +15,9 @@ import logging
 
 import aioh2
 import h2.events
-
-from orc8r.protos.sync_rpc_service_pb2 import GatewayResponse, SyncRPCResponse
-
+from magma.common.sentry import EXCLUDE_FROM_ERROR_MONITORING
 from magma.common.service_registry import ServiceRegistry
+from orc8r.protos.sync_rpc_service_pb2 import GatewayResponse, SyncRPCResponse
 
 
 class ControlProxyHttpClient(object):
@@ -31,8 +30,10 @@ class ControlProxyHttpClient(object):
     def __init__(self):
         self._connection_table = {}  # map req id -> client
 
-    async def send(self, gateway_request, req_id, sync_rpc_response_queue,
-                   conn_closed_table):
+    async def send(
+        self, gateway_request, req_id, sync_rpc_response_queue,
+        conn_closed_table,
+    ):
         """
         Forwards the given request to the service provided
         in :authority and awaits a response. If a exception is
@@ -64,17 +65,21 @@ class ControlProxyHttpClient(object):
         # pylint: enable=protected-access
 
         if req_id in self._connection_table:
-            logging.error("[SyncRPC] proxy_client is already handling "
-                          "request ID %s", req_id)
+            logging.warning(
+                "[SyncRPC] proxy_client is already handling request ID %s",
+                req_id,
+            )
             sync_rpc_response_queue.put(
                 SyncRPCResponse(
                     heartBeat=False,
                     reqId=req_id,
                     respBody=GatewayResponse(
-                        err=str("request ID {} is already being handled"
-                                .format(req_id))
-                    )
-                )
+                        err=str(
+                            "request ID {} is already being handled"
+                            .format(req_id),
+                        ),
+                    ),
+                ),
             )
             client.close_connection()
             return
@@ -82,29 +87,45 @@ class ControlProxyHttpClient(object):
 
         try:
             await client.wait_functional()
-            req_headers = self._get_req_headers(gateway_request.headers,
-                                                gateway_request.path,
-                                                gateway_request.authority)
+            req_headers = self._get_req_headers(
+                gateway_request.headers,
+                gateway_request.path,
+                gateway_request.authority,
+            )
             body = gateway_request.payload
             stream_id = await client.start_request(req_headers)
-            await self._await_gateway_response(client, stream_id, body,
-                                               req_id, sync_rpc_response_queue,
-                                               conn_closed_table)
+            await self._await_gateway_response(
+                client, stream_id, body,
+                req_id, sync_rpc_response_queue,
+                conn_closed_table,
+            )
         except ConnectionAbortedError:
-            logging.error("[SyncRPC] proxy_client connection "
-                          "terminated by cloud")
+            logging.error(
+                "[SyncRPC] proxy_client connection terminated by cloud",
+                extra=EXCLUDE_FROM_ERROR_MONITORING,
+            )
         except Exception as e:  # pylint: disable=broad-except
-            logging.error("[SyncRPC] Exception in proxy_client: %s", e)
+            logging.error(
+                "[SyncRPC] Exception in proxy_client: %s",
+                e,
+                extra=EXCLUDE_FROM_ERROR_MONITORING,
+            )
             sync_rpc_response_queue.put(
-                SyncRPCResponse(heartBeat=False, reqId=req_id,
-                                respBody=GatewayResponse(err=str(e))))
+                SyncRPCResponse(
+                    heartBeat=False, reqId=req_id,
+                    respBody=GatewayResponse(err=str(e)),
+                ),
+            )
         finally:
             del self._connection_table[req_id]
             try:
                 client.close_connection()
             except AttributeError as e:
-                logging.error('[SyncRPC] Error while trying to close conn: %s',
-                              str(e))
+                logging.error(
+                    '[SyncRPC] Error while trying to close conn: %s',
+                    str(e),
+                    extra=EXCLUDE_FROM_ERROR_MONITORING,
+                )
 
     def close_all_connections(self):
         connections = list(self._connection_table.values())
@@ -112,8 +133,11 @@ class ControlProxyHttpClient(object):
             try:
                 client.close_connection()
             except (ConnectionAbortedError, AttributeError) as e:
-                logging.error('[SyncRPC] Error while trying to close conn: %s',
-                              str(e))
+                logging.error(
+                    '[SyncRPC] Error while trying to close conn: %s',
+                    str(e),
+                    extra=EXCLUDE_FROM_ERROR_MONITORING,
+                )
         self._connection_table.clear()
 
     @staticmethod
@@ -121,43 +145,56 @@ class ControlProxyHttpClient(object):
         (ip, port) = ServiceRegistry.get_service_address(service)
         return await aioh2.open_connection(ip, port)
 
-    async def _await_gateway_response(self, client, stream_id, body,
-                                      req_id, response_queue,
-                                      conn_closed_table):
+    async def _await_gateway_response(
+        self, client, stream_id, body,
+        req_id, response_queue,
+        conn_closed_table,
+    ):
         await client.send_data(stream_id, body, end_stream=True)
 
         resp_headers = await client.recv_response(stream_id)
         status = self._get_resp_status(resp_headers)
 
-        curr_payload = await self._read_stream(client, stream_id, req_id,
-                                               response_queue,
-                                               conn_closed_table)
-        next_payload = await self._read_stream(client, stream_id, req_id,
-                                               response_queue,
-                                               conn_closed_table)
+        curr_payload = await self._read_stream(
+            client, stream_id, req_id,
+            response_queue,
+            conn_closed_table,
+        )
+        next_payload = await self._read_stream(
+            client, stream_id, req_id,
+            response_queue,
+            conn_closed_table,
+        )
 
         while True:
             trailers = await client.recv_trailers(stream_id) \
                 if not next_payload else []
             headers = self._get_resp_headers(resp_headers, trailers)
-            res = GatewayResponse(status=status, headers=headers,
-                                  payload=curr_payload)
+            res = GatewayResponse(
+                status=status, headers=headers,
+                payload=curr_payload,
+            )
             response_queue.put(
-                SyncRPCResponse(heartBeat=False, reqId=req_id, respBody=res))
+                SyncRPCResponse(heartBeat=False, reqId=req_id, respBody=res),
+            )
             if not next_payload:
                 break
 
             curr_payload = next_payload
-            next_payload = await self._read_stream(client, stream_id, req_id,
-                                                   response_queue,
-                                                   conn_closed_table)
+            next_payload = await self._read_stream(
+                client, stream_id, req_id,
+                response_queue,
+                conn_closed_table,
+            )
 
     @staticmethod
     def _get_req_headers(raw_req_headers, path, authority):
-        headers = [(":method", "POST"),
-                   (":scheme", "http"),
-                   (":path", path),
-                   (":authority", authority)]
+        headers = [
+            (":method", "POST"),
+            (":scheme", "http"),
+            (":path", path),
+            (":authority", authority),
+        ]
         for key, val in raw_req_headers.items():
             headers.append((key, val))
         return headers
@@ -180,8 +217,10 @@ class ControlProxyHttpClient(object):
         return headers_dict
 
     @staticmethod
-    async def _read_stream(client, stream_id, req_id, response_queue,
-                           conn_closed_table):
+    async def _read_stream(
+        client, stream_id, req_id, response_queue,
+        conn_closed_table,
+    ):
         """
         Attempt to read from the stream. If it times out, send a keepConnActive
         response to the response queue. If it continues to time out after a
@@ -193,7 +232,8 @@ class ControlProxyHttpClient(object):
             while True:
                 try:
                     payload = await asyncio.wait_for(
-                        client.read_stream(stream_id), timeout=10.0)
+                        client.read_stream(stream_id), timeout=10.0,
+                    )
                     if conn_closed_table.get(req_id, False):
                         raise ConnectionAbortedError
                     return payload
@@ -204,8 +244,8 @@ class ControlProxyHttpClient(object):
                         SyncRPCResponse(
                             heartBeat=False,
                             reqId=req_id,
-                            respBody=GatewayResponse(keepConnActive=True)
-                        )
+                            respBody=GatewayResponse(keepConnActive=True),
+                        ),
                     )
 
         return await asyncio.wait_for(try_read_stream(), timeout=120.0)

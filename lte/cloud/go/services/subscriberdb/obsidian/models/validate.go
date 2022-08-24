@@ -14,11 +14,14 @@
 package models
 
 import (
-	"magma/orc8r/cloud/go/obsidian/models"
+	"context"
+	"fmt"
 
 	"github.com/go-openapi/strfmt"
-	"github.com/pkg/errors"
+	"github.com/hashicorp/go-multierror"
 	"github.com/thoas/go-funk"
+
+	"magma/orc8r/cloud/go/services/obsidian/models"
 )
 
 const (
@@ -26,7 +29,7 @@ const (
 	lteAuthOpcLength = 16
 )
 
-func (m *LteSubscription) ValidateModel() error {
+func (m *LteSubscription) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
@@ -45,11 +48,11 @@ func (m *LteSubscription) ValidateModel() error {
 	return nil
 }
 
-func (m *MutableSubscriber) ValidateModel() error {
+func (m *MutableSubscriber) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
-	if err := m.Lte.ValidateModel(); err != nil {
+	if err := m.Lte.ValidateModel(context.Background()); err != nil {
 		return err
 	}
 
@@ -58,19 +61,27 @@ func (m *MutableSubscriber) ValidateModel() error {
 	apnSet := funk.Map(m.ActiveApns, func(apn string) (string, bool) { return apn, true }).(map[string]bool)
 	for apn := range m.StaticIps {
 		if _, exists := apnSet[apn]; !exists {
-			return errors.Errorf("static IP assigned to APN %s which is not active for the subscriber", apn)
+			return fmt.Errorf("static IP assigned to APN %s which is not active for the subscriber", apn)
 		}
 	}
 	return nil
 }
 
-func (m *IcmpStatus) ValidateModel() error {
+func (m MutableSubscribers) ValidateModel(context.Context) error {
+	errs := &multierror.Error{}
+	for _, s := range m {
+		errs = multierror.Append(errs, s.ValidateModel(context.Background()))
+	}
+	return errs.ErrorOrNil()
+}
+
+func (m *IcmpStatus) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *MsisdnAssignment) ValidateModel() error {
+func (m *MsisdnAssignment) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }

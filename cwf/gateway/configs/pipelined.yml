@@ -73,6 +73,7 @@ meter:
 enforcement:
   poll_interval: 5
   default_drop_flow_name: 'internal_default_drop_flow_rule'
+  periodic_stats_reporting: true
 
 # Enable polling mobilityd to identify which subscriber sessions need to be
 # terminated. If disabling this, make sure to set a valid idle_timeout for
@@ -123,11 +124,11 @@ bridge_ip_address: 192.168.128.1
 # For CWF internal redirection, same subnet as the ovs bridge ip address
 internal_ip_subnet: '192.168.0.0/16'
 # For ipv6 router solicitation app
-ipv6_router_addr: 'd88d:aba4:472f:fc95:7e7d:8457:5301:ebce'
+# ipv6_router_addr: 'd88d:aba4:472f:fc95:7e7d:8457:5301:ebce'
 
 # QoS parameters
 qos:
- enable: true
+ enable: false
  impl: ovs_meter
  max_rate: 1000000000
  linux_tc:
@@ -156,8 +157,7 @@ has_quota_port: 51115
 no_quota_port: 51125
 
 # For 5G Functionality Support flag
-5G_feature_set:
- enable: false
+enable5g_features: false
 
 ###############
 ## IMPORTANT ##

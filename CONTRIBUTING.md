@@ -1,10 +1,6 @@
-# Contributing to Magma
-We want to make contributing to this project as easy and transparent as
-possible.
+See the [Contributor Guide](https://github.com/magma/magma/wiki/Contributor-Guide/)
+for information on developer onboarding, workflow, contribution conventions,
+presubmit checks and more.
 
-Please refer to the [Governance](https://github.com/magma/community)
-and [Contribution](https://github.com/magma/community/blob/main/CONTRIBUTING.md)
-model to get started.
-
-The [Wiki](https://github.com/magma/magma/wiki) outlines
-language specific guidelines.
+Please read also the [DCO](./DCO.md) for details regarding regarding the
+sign-off rules for a contribution.

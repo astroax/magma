@@ -11,12 +11,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+from magma.common.grpc_client_manager import GRPCClientManager
+from magma.common.sentry import sentry_init
+from magma.common.service import MagmaService
+from magma.state.garbage_collector import GarbageCollector
+from magma.state.state_replicator import StateReplicator
 from orc8r.protos.mconfig import mconfigs_pb2
 from orc8r.protos.state_pb2_grpc import StateServiceStub
-from magma.common.grpc_client_manager import GRPCClientManager
-from magma.common.service import MagmaService
-from .garbage_collector import GarbageCollector
-from .state_replicator import StateReplicator
 
 
 def main():
@@ -25,6 +26,9 @@ def main():
     """
     service = MagmaService('state', mconfigs_pb2.State())
 
+    # Optionally pipe errors to Sentry
+    sentry_init(service_name=service.name, sentry_mconfig=service.shared_mconfig.sentry_config)
+
     # _grpc_client_manager to manage grpc client recycling
     grpc_client_manager = GRPCClientManager(
         service_name="state",
@@ -32,12 +36,20 @@ def main():
         max_client_reuse=60,
     )
 
+    config = service.config
+    print_grpc_payload = config.get('print_grpc_payload', False)
+
     # Garbage collector propagates state deletions back to Orchestrator
-    garbage_collector = GarbageCollector(service, grpc_client_manager)
+    garbage_collector = GarbageCollector(
+        service, grpc_client_manager, print_grpc_payload,
+    )
 
     # Start state replication loop
-    state_manager = StateReplicator(service, garbage_collector,
-                                    grpc_client_manager)
+    state_manager = StateReplicator(
+        service, garbage_collector,
+        grpc_client_manager,
+        print_grpc_payload,
+    )
     state_manager.start()
 
     # Run the service loop

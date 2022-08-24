@@ -13,34 +13,33 @@
 
 # This script is intended to install a docker-based gateway deployment
 
+# Both ENV vars are moved in to .env file:
+# GIT_HASH="v1.3.3"
+# IMAGE_VERSION="docker-tag-1.3.3"
 set -e
 
 CWAG="cwag"
 FEG="feg"
-XWF="xwf"
 INSTALL_DIR="/tmp/magmagw_install"
-GIT_HASH="master"
 
 # TODO: Update docker-compose to stable version
 
-# Using RC as opposed to stable (1.24.0) due to
-# SCTP port mapping support
-DOCKER_COMPOSE_VERSION=1.25.0-rc1
+DOCKER_COMPOSE_VERSION=1.29.1
 
 DIR="."
 echo "Setting working directory as: $DIR"
 cd "$DIR"
 
 if [ -z $1 ]; then
-  echo "Please supply a gateway type to install. Valid types are: ['$FEG', '$CWAG', '$XWF']"
+  echo "Please supply a gateway type to install. Valid types are: ['$FEG', '$CWAG']"
   exit
 fi
 
 GW_TYPE=$1
 echo "Setting gateway type as: '$GW_TYPE'"
 
-if [ "$GW_TYPE" != "$FEG" ] && [ "$GW_TYPE" != "$CWAG" ] && [ "$GW_TYPE" != "$XWF" ]; then
-  echo "Gateway type '$GW_TYPE' is not valid. Valid types are: ['$FEG', '$CWAG', '$XWF']"
+if [ "$GW_TYPE" != "$FEG" ] && [ "$GW_TYPE" != "$CWAG" ]; then
+  echo "Gateway type '$GW_TYPE' is not valid. Valid types are: ['$FEG', '$CWAG']"
   exit
 fi
 
@@ -65,14 +64,10 @@ fi
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
-MAGMA_GITHUB_URL="https://github.com/facebookincubator/magma.git"
+MAGMA_GITHUB_URL="https://github.com/magma/magma.git"
 git -C "$INSTALL_DIR" clone "$MAGMA_GITHUB_URL"
 
 source .env
-if [[ $IMAGE_VERSION == *"|"* ]]; then
-  GIT_HASH=$(cut -d'|' -f2 <<< "$IMAGE_VERSION")
-  IMAGE_VERSION=$(cut -d'|' -f1 <<< "$IMAGE_VERSION")
-fi
 
 if [ "$IMAGE_VERSION" != "latest" ]; then
     git -C $INSTALL_DIR/magma checkout "$GIT_HASH"
@@ -85,7 +80,7 @@ if ! cmp "$INSTALL_DIR"/magma/orc8r/tools/docker/install_gateway.sh install_gate
    exit
 fi
 
-if [ "$GW_TYPE" == "$CWAG" ] || [ "$GW_TYPE" == "$XWF" ]; then
+if [ "$GW_TYPE" == "$CWAG" ]; then
   MODULE_DIR="cwf"
 
   # Run CWAG ansible role to setup OVS
@@ -94,14 +89,6 @@ if [ "$GW_TYPE" == "$CWAG" ] || [ "$GW_TYPE" == "$XWF" ]; then
   apt-get update -y
   apt-get -y install ansible
   ANSIBLE_CONFIG="$INSTALL_DIR"/magma/"$MODULE_DIR"/gateway/ansible.cfg ansible-playbook "$INSTALL_DIR"/magma/"$MODULE_DIR"/gateway/deploy/cwag.yml -i "localhost," -c local -v -e ingress_port="${INGRESS_PORT:-eth1}" -e uplink_ports="${UPLINK_PORTS:-eth2 eth3}" -e li_port="${LI_PORT:-eth4}"
-fi
-
-if [ "$GW_TYPE" == "$XWF" ]; then
-  MODULE_DIR="xwf"
-  CONNECTION_MODE=${MODE:=tcp}
-  ANSIBLE_CONFIG="$INSTALL_DIR"/magma/"$MODULE_DIR"/gateway/ansible.cfg \
-    ansible-playbook -e "xwf_ctrl_ip=$XWF_CTRL connection_mode=$CONNECTION_MODE" \
-    "$INSTALL_DIR"/magma/"$MODULE_DIR"/gateway/deploy/xwf.yml -i "localhost," -c local -v
 fi
 
 if [ "$GW_TYPE" == "$FEG" ]; then
@@ -144,11 +131,6 @@ mkdir -p /var/opt/magma/configs
 mkdir -p /var/opt/magma/certs
 mkdir -p /etc/magma
 mkdir -p /var/opt/magma/docker
-
-#If this XWF installation copy the cwf config files as well
-if [ "$GW_TYPE" == "$XWF" ]; then
-  cp -TR "$INSTALL_DIR"/magma/cwf/gateway/configs /etc/magma
-fi
 
 # Copy default configs directory
 cp -TR "$INSTALL_DIR"/magma/"$MODULE_DIR"/gateway/configs /etc/magma
@@ -195,3 +177,7 @@ if [ "$GW_TYPE" == "$CWAG" ] && [ -f "$DPI_LICENSE_NAME" ]; then
 fi
 
 echo "Installed successfully!!"
+# Prepare rsyslog config and restart rsyslog
+echo "If you want syslog to be forwarded to the cloud execute following commands as well"
+echo "sudo cp $INSTALL_DIR/magma/orc8r/tools/ansible/roles/fluent_bit/files/60-fluent-bit.conf /etc/rsyslog.d/"
+echo "sudo service rsyslog restart"

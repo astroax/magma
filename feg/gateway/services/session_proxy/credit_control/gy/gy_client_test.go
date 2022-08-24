@@ -15,6 +15,7 @@ limitations under the License.
 package gy_test
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"testing"
@@ -22,7 +23,6 @@ import (
 
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 
 	fegprotos "magma/feg/cloud/go/protos"
 	"magma/feg/cloud/go/protos/mconfig"
@@ -66,7 +66,7 @@ func TestGyClient(t *testing.T) {
 		&serverConfig,
 		getReAuthHandler(), nil, gyGlobalConfig,
 	)
-
+	si11 := uint32(11)
 	// send init
 	ccrInit := &gy.CreditControlRequest{
 		SessionID:     "1",
@@ -77,13 +77,18 @@ func TestGyClient(t *testing.T) {
 		SpgwIPV4:      "10.10.10.10",
 		Apn:           "gy.Apn.magma.com",
 		Credits: []*gy.UsedCredits{
-			&gy.UsedCredits{
+			{
 				RatingGroup:    1,
 				RequestedUnits: defaultRSU,
 			},
-			&gy.UsedCredits{
+			{
 				RatingGroup:    2,
 				RequestedUnits: defaultRSU,
+			},
+			{
+				RatingGroup:       3,
+				ServiceIdentifier: &si11,
+				RequestedUnits:    defaultRSU,
 			},
 		},
 	}
@@ -96,7 +101,7 @@ func TestGyClient(t *testing.T) {
 
 	assert.Equal(t, ccrInit.SessionID, answer.SessionID)
 	assert.Equal(t, ccrInit.RequestNumber, answer.RequestNumber)
-	assert.Equal(t, 2, len(answer.Credits))
+	assert.Equal(t, 3, len(answer.Credits))
 	assert.Equal(t, uint32(diam.Success), answer.ResultCode)
 	assertReceivedAPNonOCS(t, ocs, ccrInit.Apn)
 
@@ -197,7 +202,7 @@ func TestGyClientWithGyGlobalConf(t *testing.T) {
 		SpgwIPV4:      "10.10.10.10",
 		Apn:           "gy.Apn.magma.com",
 		Credits: []*gy.UsedCredits{
-			&gy.UsedCredits{
+			{
 				RatingGroup:    1,
 				RequestedUnits: defaultRSU,
 			},
@@ -236,7 +241,7 @@ func TestGyClientOutOfCredit(t *testing.T) {
 		UeIPV4:        "192.168.1.1",
 		SpgwIPV4:      "10.10.10.10",
 		Credits: []*gy.UsedCredits{
-			&gy.UsedCredits{
+			{
 				RatingGroup:    1,
 				RequestedUnits: defaultRSU,
 			},
@@ -447,7 +452,7 @@ func TestGyClientOutOfCreditRestrict(t *testing.T) {
 		UeIPV4:        "192.168.1.1",
 		SpgwIPV4:      "10.10.10.10",
 		Credits: []*gy.UsedCredits{
-			&gy.UsedCredits{
+			{
 				RatingGroup:    1,
 				RequestedUnits: defaultRSU,
 			},

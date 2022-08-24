@@ -14,8 +14,12 @@
 package servicers
 
 import (
+	"context"
 	"fmt"
 	"sync"
+
+	"github.com/golang/glog"
+	"github.com/hashicorp/go-multierror"
 
 	fegprotos "magma/feg/cloud/go/protos"
 	"magma/feg/gateway/multiplex"
@@ -23,11 +27,7 @@ import (
 	"magma/feg/gateway/services/session_proxy/credit_control/gx"
 	"magma/feg/gateway/services/session_proxy/credit_control/gy"
 	"magma/lte/cloud/go/protos"
-	"magma/orc8r/lib/go/errors"
 	orcprotos "magma/orc8r/lib/go/protos"
-
-	"github.com/golang/glog"
-	"golang.org/x/net/context"
 )
 
 // How CentralSessionControllers works
@@ -219,12 +219,14 @@ func (srv *CentralSessionControllers) Enable(
 	ctx context.Context,
 	void *orcprotos.Void,
 ) (*orcprotos.Void, error) {
-	multiError := errors.NewMulti()
+	errs := &multierror.Error{}
 	for i, controller := range srv.centralControllers {
 		_, err := controller.Enable(ctx, void)
-		multiError = multiError.AddFmt(err, "error(%d):", i+1)
+		if err != nil {
+			errs = multierror.Append(errs, fmt.Errorf("error(%d): %v", i+1, err))
+		}
 	}
-	return &orcprotos.Void{}, multiError.AsError()
+	return &orcprotos.Void{}, errs.ErrorOrNil()
 }
 
 // GetHealthStatus retrieves a health status object which contains the current
@@ -286,7 +288,7 @@ func fillMapWithUpdateSessionRequestIfEmpty(
 	controllersToRequest map[*CentralSessionController]*protos.UpdateSessionRequest,
 	controller *CentralSessionController) {
 	_, found := controllersToRequest[controller]
-	if found == false {
+	if !found {
 		controllersToRequest[controller] = &protos.UpdateSessionRequest{}
 	}
 }
@@ -302,7 +304,7 @@ func getControllerPerKey(
 		return nil, err
 	}
 	if index >= len(controllers) {
-		return nil, fmt.Errorf("Index %d is bigger than the ammount of controllers %d", index, len(controllers))
+		return nil, fmt.Errorf("Index %d is bigger than the amount of controllers %d", index, len(controllers))
 	}
 	return controllers[index], nil
 }

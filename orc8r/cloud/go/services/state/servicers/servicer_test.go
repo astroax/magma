@@ -17,14 +17,14 @@ import (
 	"context"
 	"testing"
 
-	"magma/orc8r/cloud/go/blobstore"
-	"magma/orc8r/cloud/go/blobstore/mocks"
-	"magma/orc8r/cloud/go/services/state/servicers"
-	"magma/orc8r/cloud/go/storage"
-	"magma/orc8r/lib/go/protos"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	"magma/orc8r/cloud/go/blobstore"
+	"magma/orc8r/cloud/go/blobstore/mocks"
+	"magma/orc8r/cloud/go/services/state/servicers/protected"
+	"magma/orc8r/cloud/go/storage"
+	"magma/orc8r/lib/go/protos"
 )
 
 var (
@@ -36,7 +36,7 @@ var (
 func TestStateServicer_GetStates(t *testing.T) {
 	// mock setup: expect 1 RPC to result in a search, the other to a concrete
 	// GetMany
-	mockStore := &mocks.TransactionalBlobStorage{}
+	mockStore := &mocks.Store{}
 	mockStore.On("Search",
 		blobstore.CreateSearchFilter(strPtr("network1"), []string{"t1", "t2"}, []string{"k1", "k2"}, nil),
 		blobstore.GetDefaultLoadCriteria(),
@@ -47,7 +47,7 @@ func TestStateServicer_GetStates(t *testing.T) {
 				{Type: "t2", Key: "k2", Value: []byte("v2"), Version: 43},
 			},
 		}, nil)
-	mockStore.On("GetMany", "network1", []storage.TypeAndKey{{Type: "t1", Key: "k1"}, {Type: "t2", Key: "k2"}}).
+	mockStore.On("GetMany", "network1", storage.TKs{{Type: "t1", Key: "k1"}, {Type: "t2", Key: "k2"}}).
 		Return(blobstore.Blobs{
 			{Type: "t1", Key: "k1", Value: []byte("v1"), Version: 42},
 			{Type: "t2", Key: "k2", Value: []byte("v2"), Version: 43},
@@ -55,10 +55,10 @@ func TestStateServicer_GetStates(t *testing.T) {
 
 	mockStore.On("Commit").Return(nil)
 
-	fact := &mocks.BlobStorageFactory{}
+	fact := &mocks.StoreFactory{}
 	fact.On("StartTransaction", mock.Anything).Return(mockStore, nil)
 
-	srv, err := servicers.NewStateServicer(fact)
+	srv, err := protected.NewCloudStateServicer(fact)
 	assert.NoError(t, err)
 
 	actual, err := srv.GetStates(ctx, &protos.GetStatesRequest{

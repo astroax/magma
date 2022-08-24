@@ -14,12 +14,12 @@
 package mock_pipelined
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 
 	"magma/feg/gateway/registry"
 	"magma/lte/cloud/go/protos"
@@ -51,12 +51,12 @@ type MockPipelined struct {
 }
 
 func NewRunningPipelined(t *testing.T) *MockPipelined {
-	srv, lis := test_utils.NewTestService(t, registry.ModuleName, registry.PIPELINED)
+	srv, lis, _ := test_utils.NewTestService(t, registry.ModuleName, registry.PIPELINED)
 	service := &MockPipelined{
 		Actions: make([]*Action, 0),
 	}
 	protos.RegisterPipelinedServer(srv.GrpcServer, service)
-	go srv.RunTest(lis)
+	go srv.RunTest(lis, nil)
 	return service
 }
 

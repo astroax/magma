@@ -23,6 +23,8 @@ magma-gen-meta:
       filename: gateway_description_swaggergen.go
     - go-struct-name: Error
       filename: error_swaggergen.go
+    - go-struct-name: RegistrationInfo
+      filename: registration_info_swaggergen.go
 
 info:
   title: Magma
@@ -41,11 +43,12 @@ schemes:
   - https
   - http
 
-tags:
-  - name: Networks
-    description: Everything about networks
-  - name: Gateways
-    description: Provision and manage gateways
+securityDefinitions:
+  tokenAuth:
+    type: basic
+
+security:
+  - tokenAuth: []
 
 paths:
   /foo:
@@ -92,6 +95,19 @@ parameters:
     description: Tenant ID
     required : true
     type: integer
+  page_size:
+    in: query
+    name: page_size
+    type: integer
+    format: uint32
+    description: Maximum number of entities to return
+    required: false
+  page_token:
+    in: query
+    name: page_token
+    type: string
+    description: Opaque page token for paginated requests
+    required: false
 
 definitions:
   network_id:
@@ -114,6 +130,10 @@ definitions:
     description: The type of the network
     type: string
     example: LTE
+  page_token:
+    type: string
+    description: Base64-encoded page token for subsequent paginated API requests
+
 
   gateway_id:
     type: string
@@ -131,6 +151,12 @@ definitions:
     minLength: 1
     x-nullable: false
     example: Sample Gateway description
+  gateway_checked_in_recently:
+    type: boolean
+    example: true
+    description: >
+      Describes whether the last check-in happened recently, taking the
+      magmad check-in interval into account.
 
   error:
     type: object
@@ -140,3 +166,23 @@ definitions:
       message:
         type: string
         example: Error string
+  registration_info:
+    type: object
+    required:
+      - registration_token
+      - root_ca
+      - domain_name
+    properties:
+      registration_token:
+        description: registration_token is a token for the operator to give to the AGW; it keys to logical and network ID
+        type: string
+        minLength: 4
+        example: reg_a9vnap30fN0anrfjVneB
+      root_ca:
+        description: root_ca is a certificate that access gateways (AGW) can use to handshake and communicate with the stated orc8r
+        type: string
+        example: =example rootCA.pem=
+      domain_name:
+        description: domain_name is the domain name where the stated orc8r can be accessed
+        type: string
+        example: example.com

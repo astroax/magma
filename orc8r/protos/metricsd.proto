@@ -84,6 +84,10 @@ enum MetricName {
   enodeb_reboots                 = 229;
   enodeb_rf_tx_desired           = 230;
 
+  // Kernsnoopd metrics
+  magma_bytes_sent_total         = 260;
+  linux_bytes_sent_total         = 261;
+
   // Magmad metrics
   magmad_ping_rtt_ms             = 300;
   cpu_percent                    = 301;
@@ -110,6 +114,9 @@ enum MetricName {
   unexpected_service_restarts    = 322;
   unattended_upgrade_status      = 323;
   service_restart_status         = 324;
+  service_cpu_percentage         = 325;
+  service_memory_usage           = 326;
+  service_memory_percentage      = 327;
 
   // Pipelined metrics
   dp_send_msg_error              = 350;
@@ -205,6 +212,8 @@ enum MetricLabelName {
   service_name                   = 16; // magmad unexpected_service_restarts
   rule_id                        = 17; // pipelined rule install failures
   imsi                           = 18; // pipelined rule install failures
+  dest_service                   = 19; // kernsnoopd name of destination service
+  binary_name                    = 20; // kernsnoopd name of linux binary
 }
 
 message MetricsContainer {
@@ -212,6 +221,12 @@ message MetricsContainer {
   // TODO: we should strip this out of metricsd (or duplicate it ourselves)
   // Prometheus 2 no longer supports protobuf client model
   repeated io.prometheus.client.MetricFamily family = 2;
+}
+
+message RawMetricsContainer {
+  string hostName = 1;
+  string service = 2;
+  repeated io.prometheus.client.MetricFamily families = 3;
 }
 
 message PushedMetric {
@@ -235,6 +250,10 @@ service MetricsController {
   // Report a collection of metrics from a service
   rpc Collect(MetricsContainer) returns (Void) {}
 
+}
+
+service CloudMetricsController {
   // Push a collection of metrics to metricsd
   rpc Push(PushedMetricsContainer) returns (Void) {}
+  rpc PushRaw(RawMetricsContainer) returns (Void) {}
 }

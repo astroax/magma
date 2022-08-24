@@ -10,17 +10,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <memory>
-#include <chrono>
-#include <thread>
-#include <future>
-
-#include <gtest/gtest.h>
+#include <folly/io/async/EventBase.h>
 #include <gmock/gmock.h>
-#include "ServiceRegistrySingleton.h"
-#include "SessionReporter.h"
-#include "MagmaService.h"
-#include "SessiondMocks.h"
+#include <grpcpp/impl/codegen/status.h>
+#include <gtest/gtest.h>
+#include <lte/protos/session_manager.pb.h>
+#include <stdint.h>
+#include <chrono>
+#include <future>
+#include <iostream>
+#include <memory>
+#include <thread>
+#include <vector>
+
+#include "lte/gateway/c/session_manager/SessionReporter.hpp"
+#include "lte/gateway/c/session_manager/test/SessiondMocks.hpp"
+#include "orc8r/gateway/c/common/service303/MagmaService.hpp"
+#include "orc8r/gateway/c/common/service_registry/ServiceRegistrySingleton.hpp"
 
 using grpc::Status;
 using ::testing::_;
@@ -34,6 +40,8 @@ class SessionReporterTest : public ::testing::Test {
    * Create magma service and run in separate thread
    */
   virtual void SetUp() {
+    evb = new folly::EventBase();
+
     auto channel = ServiceRegistrySingleton::Instance()->GetGrpcChannel(
         "test_service", ServiceRegistrySingleton::LOCAL);
     magma_service =
@@ -41,7 +49,7 @@ class SessionReporterTest : public ::testing::Test {
     mock_cloud = std::make_shared<MockCentralController>();
     magma_service->AddServiceToServer(mock_cloud.get());
 
-    reporter = std::make_shared<SessionReporterImpl>(&evb, channel);
+    reporter = std::make_shared<SessionReporterImpl>(evb, channel);
 
     std::thread reporter_thread([&]() {
       std::cout << "Started reporter thread\n";
@@ -65,23 +73,22 @@ class SessionReporterTest : public ::testing::Test {
   virtual void TearDown() {
     magma_service->Stop();
     reporter->stop();
+    delete evb;
   }
 
   // Timeout to not block test
   void set_timeout(uint32_t ms) {
-    std::thread([&]() {
+    std::thread([ms]() {
       std::this_thread::sleep_for(std::chrono::milliseconds(ms));
       EXPECT_TRUE(false);
-      evb.terminateLoopSoon();
-    })
-        .detach();
+    }).detach();
   }
 
  protected:
   std::shared_ptr<service303::MagmaService> magma_service;
   std::shared_ptr<MockCentralController> mock_cloud;
   std::shared_ptr<SessionReporter> reporter;
-  folly::EventBase evb;
+  folly::EventBase* evb;
   MockCallback mock_callback;
 };
 
@@ -98,9 +105,8 @@ TEST_F(SessionReporterTest, test_single_call) {
   response.mutable_static_rules()->Add()->mutable_rule_id();
   EXPECT_CALL(*mock_cloud, CreateSession(_, _, _))
       .Times(1)
-      .WillOnce(testing::DoAll(
-          testing::SetArgPointee<2>(response),
-          testing::Return(grpc::Status::OK)));
+      .WillOnce(testing::DoAll(testing::SetArgPointee<2>(response),
+                               testing::Return(grpc::Status::OK)));
 
   std::promise<void> promise1;
   CreateSessionRequest request;
@@ -114,14 +120,13 @@ TEST_F(SessionReporterTest, test_single_call) {
   // wait for one response
   std::thread([&]() {
     promise1.get_future().wait();
-    evb.terminateLoopSoon();
-  })
-      .detach();
+    evb->terminateLoopSoon();
+  }).detach();
 
   set_timeout(1000);
 
   // wait for callback
-  evb.loopForever();
+  evb->loopForever();
 }
 
 // Test multiple calls at the same time, wait for all to finish
@@ -131,15 +136,13 @@ TEST_F(SessionReporterTest, test_multi_call) {
   CreateSessionResponse response;
   EXPECT_CALL(*mock_cloud, CreateSession(_, _, _))
       .Times(2)
-      .WillRepeatedly(testing::DoAll(
-          testing::SetArgPointee<2>(response),
-          testing::Return(grpc::Status::OK)));
+      .WillRepeatedly(testing::DoAll(testing::SetArgPointee<2>(response),
+                                     testing::Return(grpc::Status::OK)));
   UpdateSessionResponse update_response;
   EXPECT_CALL(*mock_cloud, UpdateSession(_, _, _))
       .Times(1)
-      .WillRepeatedly(testing::DoAll(
-          testing::SetArgPointee<2>(update_response),
-          testing::Return(grpc::Status::OK)));
+      .WillRepeatedly(testing::DoAll(testing::SetArgPointee<2>(update_response),
+                                     testing::Return(grpc::Status::OK)));
 
   std::promise<void> promise1, promise2, promise3;
 
@@ -167,19 +170,12 @@ TEST_F(SessionReporterTest, test_multi_call) {
     promise1.get_future().wait();
     promise2.get_future().wait();
     promise3.get_future().wait();
-    evb.terminateLoopSoon();
-  })
-      .detach();
+    evb->terminateLoopSoon();
+  }).detach();
 
   set_timeout(1000);
 
   // wait for callback
-  evb.loopForever();
+  evb->loopForever();
 }
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}
-
 }  // namespace magma

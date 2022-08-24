@@ -1,3 +1,4 @@
+//go:build all
 // +build all
 
 /*
@@ -21,9 +22,7 @@ import (
 	"time"
 
 	cwfprotos "magma/cwf/cloud/go/protos"
-	"magma/feg/cloud/go/protos"
 	fegprotos "magma/feg/cloud/go/protos"
-	"magma/feg/gateway/diameter"
 	"magma/lte/cloud/go/services/policydb/obsidian/models"
 
 	"github.com/fiorix/go-diameter/v4/diam"
@@ -85,27 +84,27 @@ func TestOmnipresentRules(t *testing.T) {
 
 	// Gx - PCRF config
 	usageMonitorInfo := getUsageInformation("mkey1", 5*MegaBytes)
-	gxInitRequest := protos.NewGxCCRequest(imsi, protos.CCRequestType_INITIAL)
-	gxInitAnswer := protos.NewGxCCAnswer(diam.Success).
+	gxInitRequest := fegprotos.NewGxCCRequest(imsi, fegprotos.CCRequestType_INITIAL)
+	gxInitAnswer := fegprotos.NewGxCCAnswer(diam.Success).
 		SetStaticRuleInstalls([]string{"static-block-all"}, []string{}).
 		SetUsageMonitorInfo(usageMonitorInfo)
-	gxInitExpectation := protos.NewGxCreditControlExpectation().Expect(gxInitRequest).Return(gxInitAnswer)
-	gxExpectations := []*protos.GxCreditControlExpectation{gxInitExpectation}
+	gxInitExpectation := fegprotos.NewGxCreditControlExpectation().Expect(gxInitRequest).Return(gxInitAnswer)
+	gxExpectations := []*fegprotos.GxCreditControlExpectation{gxInitExpectation}
 	assert.NoError(t, setPCRFExpectations(gxExpectations, nil)) // we don't expect any update requests
 
 	// Gy - OCS config
 	quotaGrant := &fegprotos.QuotaGrant{
 		RatingGroup: 1,
 		GrantedServiceUnit: &fegprotos.Octets{
-			TotalOctets: 1 * MegaBytes,
+			TotalOctets: 5 * MegaBytes,
 		},
 		IsFinalCredit: false,
 		ResultCode:    diam.Success,
 	}
-	gyInitRequest := protos.NewGyCCRequest(imsi, protos.CCRequestType_INITIAL)
-	gyInitAnswer := protos.NewGyCCAnswer(diam.Success).SetQuotaGrant(quotaGrant)
-	gyInitExpectation := protos.NewGyCreditControlExpectation().Expect(gyInitRequest).Return(gyInitAnswer)
-	gyExpectations := []*protos.GyCreditControlExpectation{gyInitExpectation}
+	gyInitRequest := fegprotos.NewGyCCRequest(imsi, fegprotos.CCRequestType_INITIAL)
+	gyInitAnswer := fegprotos.NewGyCCAnswer(diam.Success).SetQuotaGrant(quotaGrant)
+	gyInitExpectation := fegprotos.NewGyCreditControlExpectation().Expect(gyInitRequest).Return(gyInitAnswer)
+	gyExpectations := []*fegprotos.GyCreditControlExpectation{gyInitExpectation}
 	assert.NoError(t, setOCSExpectations(gyExpectations, nil))
 
 	tr.AuthenticateAndAssertSuccess(imsi)
@@ -122,16 +121,20 @@ func TestOmnipresentRules(t *testing.T) {
 	assert.NotNil(t, omniRecord, fmt.Sprintf("No policy usage omniRecord for imsi: %v", imsi))
 	assert.NotNil(t, blockAllRecord, fmt.Sprintf("Block all record was not installed for imsi %v", imsi))
 
-	assert.True(t, omniRecord.BytesTx > uint64(0), fmt.Sprintf("%s did not pass any data", omniRecord.RuleId))
-	assert.Equal(t, uint64(0x0), blockAllRecord.BytesTx)
+	if omniRecord != nil {
+		assert.True(t, omniRecord.BytesTx > uint64(0), fmt.Sprintf("%s did not pass any data", omniRecord.RuleId))
+	}
+	if blockAllRecord != nil {
+		assert.Equal(t, uint64(0x0), blockAllRecord.BytesTx)
+	}
 
 	tr.AssertAllGyExpectationsMetNoError()
 	tr.AssertAllGxExpectationsMetNoError()
 
 	// Trigger a ReAuth with rule removals of monitored rules
-	target := &protos.PolicyReAuthTarget{
+	target := &fegprotos.PolicyReAuthTarget{
 		Imsi: imsi,
-		RulesToRemove: &protos.RuleRemovals{
+		RulesToRemove: &fegprotos.RuleRemovals{
 			RuleNames: []string{"static-block-all"},
 		},
 	}
@@ -140,8 +143,10 @@ func TestOmnipresentRules(t *testing.T) {
 	assert.Eventually(t, tr.WaitForPolicyReAuthToProcess(raa, imsi), time.Minute, 2*time.Second)
 
 	// Check ReAuth success
-	assert.Equal(t, int(raa.ResultCode), diameter.SuccessCode)
-
+	assert.NotNil(t, raa)
+	if raa != nil {
+		assert.Equal(t, diam.Success, int(raa.ResultCode))
+	}
 	// trigger disconnection
 	tr.DisconnectAndAssertSuccess(imsi)
 	tr.AssertEventuallyAllRulesRemovedAfterDisconnect(imsi)
@@ -196,10 +201,10 @@ func TestGxDisabledOmnipresentRules(t *testing.T) {
 		IsFinalCredit: false,
 		ResultCode:    diam.Success,
 	}
-	gyInitRequest := protos.NewGyCCRequest(imsi, protos.CCRequestType_INITIAL)
-	gyInitAnswer := protos.NewGyCCAnswer(diam.Success).SetQuotaGrant(quotaGrant)
-	gyInitExpectation := protos.NewGyCreditControlExpectation().Expect(gyInitRequest).Return(gyInitAnswer)
-	gyExpectations := []*protos.GyCreditControlExpectation{gyInitExpectation}
+	gyInitRequest := fegprotos.NewGyCCRequest(imsi, fegprotos.CCRequestType_INITIAL)
+	gyInitAnswer := fegprotos.NewGyCCAnswer(diam.Success).SetQuotaGrant(quotaGrant)
+	gyInitExpectation := fegprotos.NewGyCreditControlExpectation().Expect(gyInitRequest).Return(gyInitAnswer)
+	gyExpectations := []*fegprotos.GyCreditControlExpectation{gyInitExpectation}
 	assert.NoError(t, setOCSExpectations(gyExpectations, nil))
 
 	tr.AuthenticateAndAssertSuccess(imsi)

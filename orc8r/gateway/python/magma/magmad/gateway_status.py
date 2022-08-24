@@ -14,79 +14,101 @@ limitations under the License.
 
 import json
 import logging
-import psutil
 import platform
 import time
+from collections.abc import KeysView
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+
 import netifaces
-from typing import NamedTuple, List, Any, Dict, Optional, Tuple
-from collections import KeysView
+import psutil
+from magma.common.job import Job
 from magma.common.misc_utils import (
-    get_ip_from_if,
-    is_interface_up,
+    IpPreference,
     get_all_ips_from_if_cidr,
     get_if_mac_address,
-    IpPreference,
+    get_ip_from_if,
+    is_interface_up,
 )
 from magma.common.service import MagmaService
-from magma.magmad.check.machine_check.cpu_info import get_cpu_info
-from magma.magmad.check.network_check.routing_table import get_routing_table
 from magma.magmad.check.kernel_check.kernel_versions import (
     get_kernel_versions_async,
 )
-from magma.common.job import Job
+from magma.magmad.check.machine_check.cpu_info import get_cpu_info
+from magma.magmad.check.network_check.routing_table import get_routing_table
 from magma.magmad.service_poller import ServicePoller
 
-GatewayStatus = NamedTuple(
-    'GatewayStatus',
-    [('machine_info', Dict[str, Any]), ('meta', Dict[str, str]),
-     ('platform_info', Dict[str, Any]), ('system_status', Dict[str, Any])])
 
-SystemStatus = NamedTuple(
-    'SystemStatus',
-    [('time', int), ('uptime_secs', int), ('cpu_user', int),
-     ('cpu_system', int), ('cpu_idle', int), ('mem_total', int),
-     ('mem_available', int), ('mem_used', int), ('mem_free', int),
-     ('swap_total', int), ('swap_used', int), ('swap_free', int),
-     ('disk_partitions', List[Dict[str, Any]])])
+class GatewayStatus(NamedTuple):
+    machine_info: Dict[str, Any]
+    meta: Dict[str, str]
+    platform_info: Dict[str, Any]
+    system_status: Dict[str, Any]
 
-PlatformInfo = NamedTuple(
-    'PlatformInfo',
-    [('vpn_ip', str), ('packages', List[Dict[str, Any]]),
-     ('kernel_version', str), ('kernel_versions_installed', List[str]),
-     ('config_info',  Dict[str, Any])])
 
-MachineInfo = NamedTuple(
-    'MachineInfo',
-    [('cpu_info', Dict[str, Any]), ('network_info', Dict[str, Any])])
+class SystemStatus(NamedTuple):
+    time: int
+    uptime_secs: int
+    cpu_user: int
+    cpu_system: int
+    cpu_idle: int
+    mem_total: int
+    mem_available: int
+    mem_used: int
+    mem_free: int
+    swap_total: int
+    swap_used: int
+    swap_free: int
+    disk_partitions: List[Dict[str, Any]]
 
-NetworkInfo = NamedTuple(
-    'NetworkInfo',
-    [('network_interfaces', List[Dict[str, Any]]),
-     ('routing_table', List[Dict[str, Any]])])
 
-DiskPartition = NamedTuple(
-    'DiskPartition',
-    [('device', str), ('mount_point', str), ('total', int), ('used', int),
-     ('free', int)])
+class PlatformInfo(NamedTuple):
+    vpn_ip: str
+    packages: List[Dict[str, Any]]
+    kernel_version: str
+    kernel_versions_installed: List[str]
+    config_info: Dict[str, Any]
 
-ConfigInfo = NamedTuple(
-    'ConfigInfo',
-    [('mconfig_created_at', int)])
 
-Package = NamedTuple(
-    'Package',
-    [('name', str), ('version', str)])
+class MachineInfo(NamedTuple):
+    cpu_info: Dict[str, Any]
+    network_info: Dict[str, Any]
 
-CPUInfo = NamedTuple(
-    'CPUInfo',
-    [('core_count', int), ('threads_per_core', int), ('architecture', str),
-     ('model_name', str)])
 
-NetworkInterface = NamedTuple(
-    'NetworkInterface',
-    [('network_interface_id', str), ('mac_address', str),
-     ('ip_addresses', List[str]), ('status', str),
-     ('ipv6_addresses', List[str])])
+class NetworkInfo(NamedTuple):
+    network_interfaces: List[Dict[str, Any]]
+    routing_table: List[Dict[str, Any]]
+
+
+class DiskPartition(NamedTuple):
+    device: str
+    mount_point: str
+    total: int
+    used: int
+    free: int
+
+
+class ConfigInfo(NamedTuple):
+    mconfig_created_at: int
+
+
+class Package(NamedTuple):
+    name: str
+    version: str
+
+
+class CPUInfo(NamedTuple):
+    core_count: int
+    threads_per_core: int
+    architecture: str
+    model_name: str
+
+
+class NetworkInterface(NamedTuple):
+    network_interface_id: str
+    mac_address: str
+    ip_addresses: List[str]
+    status: str
+    ipv6_addresses: List[str]
 
 
 class KernelVersionsPoller(Job):
@@ -95,10 +117,11 @@ class KernelVersionsPoller(Job):
     store the result. get_kernel_versions_installed can be called to get the
     latest list.
     """
+
     def __init__(self, service):
         super().__init__(
             interval=service.mconfig.checkin_interval,
-            loop=service.loop
+            loop=service.loop,
         )
         self._kernel_versions_installed = []
 
@@ -122,9 +145,12 @@ class GatewayStatusFactory:
     the gateway status object. The object mimics the swagger spec for
     GatewayStatus defined in the orc8r.
     """
-    def __init__(self, service: MagmaService,
-                 service_poller: ServicePoller,
-                 kernel_version_poller: Optional[KernelVersionsPoller]):
+
+    def __init__(
+        self, service: MagmaService,
+        service_poller: ServicePoller,
+        kernel_version_poller: Optional[KernelVersionsPoller],
+    ):
         self._service = service
         self._service_poller = service_poller
 
@@ -138,7 +164,8 @@ class GatewayStatusFactory:
         # track services that are required to have non empty meta in order to
         # check-in
         self._required_service_metas = frozenset(
-            service.config.get("skip_checkin_if_missing_meta_services", []))
+            service.config.get("skip_checkin_if_missing_meta_services", []),
+        )
 
     def get_serialized_status(self) -> Tuple[str, bool]:
         """
@@ -162,10 +189,10 @@ class GatewayStatusFactory:
         has_required_service_meta = \
             self._meta_has_required_services(meta_services)
         return json.dumps(gw_status._asdict(), default=str), \
-               has_required_service_meta
+            has_required_service_meta
 
     def _fill_in_meta(
-        self, gw_status: GatewayStatus
+        self, gw_status: GatewayStatus,
     ) -> Tuple[GatewayStatus, KeysView]:
         service_status_meta = self._gather_service_status_meta()
         for statusmeta in service_status_meta.values():
@@ -225,8 +252,10 @@ class GatewayStatusFactory:
             swap_total=swap.total,
             swap_used=swap.used,
             swap_free=swap.free,
-            disk_partitions=[partition._asdict() for partition in
-                             partition_gen()],
+            disk_partitions=[
+                partition._asdict() for partition in
+                partition_gen()
+            ],
         )
         return system_status
 
@@ -275,13 +304,15 @@ class GatewayStatusFactory:
 
                 try:
                     ip_addresses = get_all_ips_from_if_cidr(
-                        interface, IpPreference.IPV4_ONLY)
+                        interface, IpPreference.IPV4_ONLY,
+                    )
                 except ValueError:
                     ip_addresses = []
 
                 try:
                     ipv6_addresses = get_all_ips_from_if_cidr(
-                        interface, IpPreference.IPV6_ONLY)
+                        interface, IpPreference.IPV6_ONLY,
+                    )
                 except ValueError:
                     ipv6_addresses = []
 
@@ -295,13 +326,16 @@ class GatewayStatusFactory:
 
         routing_cmd_result = get_routing_table()
         if routing_cmd_result.error is not None:
-            logging.error("Failed to get routing table: %s",
-                          routing_cmd_result.error)
+            logging.error(
+                "Failed to get routing table: %s",
+                routing_cmd_result.error,
+            )
 
         network_info = NetworkInfo(
             network_interfaces=[
                 network_interface._asdict() for network_interface in
-                network_interface_gen()],
+                network_interface_gen()
+            ],
             routing_table=routing_cmd_result.routing_table,
         )
         return network_info
@@ -321,6 +355,7 @@ class GatewayStatusFactory:
             logging.warning(
                 "Missing meta from services: %s "
                 "(specified in cfg skip_checkin_if_missing_meta_services)",
-                ", ".join(self._required_service_metas - got_meta_services))
+                ", ".join(self._required_service_metas - got_meta_services),
+            )
 
         return has_required_services

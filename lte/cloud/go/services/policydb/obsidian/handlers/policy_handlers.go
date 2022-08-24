@@ -14,20 +14,21 @@
 package handlers
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 
+	"github.com/labstack/echo/v4"
+
 	"magma/lte/cloud/go/lte"
 	"magma/lte/cloud/go/serdes"
 	"magma/lte/cloud/go/services/policydb/obsidian/models"
-	"magma/orc8r/cloud/go/obsidian"
 	"magma/orc8r/cloud/go/services/configurator"
+	"magma/orc8r/cloud/go/services/obsidian"
 	"magma/orc8r/cloud/go/storage"
-	merrors "magma/orc8r/lib/go/errors"
-
-	"github.com/labstack/echo"
-	"github.com/pkg/errors"
+	"magma/orc8r/lib/go/merrors"
 )
 
 const (
@@ -44,15 +45,17 @@ func ListBaseNames(c echo.Context) error {
 		return nerr
 	}
 
+	reqCtx := c.Request().Context()
 	view := c.QueryParam("view")
 	if strings.ToLower(view) == "full" {
-		baseNames, err := configurator.LoadAllEntitiesOfType(
+		baseNames, _, err := configurator.LoadAllEntitiesOfType(
+			reqCtx,
 			networkID, lte.BaseNameEntityType,
 			configurator.EntityLoadCriteria{LoadAssocsFromThis: true, LoadAssocsToThis: true},
 			serdes.Entity,
 		)
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
 
 		ret := map[string]*models.BaseNameRecord{}
@@ -61,9 +64,9 @@ func ListBaseNames(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, ret)
 	} else {
-		names, err := configurator.ListEntityKeys(networkID, lte.BaseNameEntityType)
+		names, err := configurator.ListEntityKeys(reqCtx, networkID, lte.BaseNameEntityType)
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
 		sort.Strings(names)
 		return c.JSON(http.StatusOK, names)
@@ -77,15 +80,16 @@ func CreateBaseName(c echo.Context) error {
 	}
 	bnr := &models.BaseNameRecord{}
 	if err := c.Bind(bnr); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 	bnrEnt := bnr.ToEntity()
+	reqCtx := c.Request().Context()
 
 	// Verify that subscribers and policies exist
 	parents := bnr.GetParentAssocs()
-	doAssignedAssocsExist, _ := configurator.DoEntitiesExist(networkID, parents)
+	doAssignedAssocsExist, _ := configurator.DoEntitiesExist(reqCtx, networkID, parents)
 	if !doAssignedAssocsExist {
-		return obsidian.HttpError(errors.New("failed to create base name: one or more subscribers or policies do not exist"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, errors.New("failed to create base name: one or more subscribers or policies do not exist"))
 	}
 
 	// In one transaction
@@ -99,13 +103,13 @@ func CreateBaseName(c echo.Context) error {
 			w := configurator.EntityUpdateCriteria{
 				Type:              lte.SubscriberEntityType,
 				Key:               tk.Key,
-				AssociationsToAdd: []storage.TypeAndKey{{Type: lte.BaseNameEntityType, Key: bnrEnt.Key}},
+				AssociationsToAdd: storage.TKs{{Type: lte.BaseNameEntityType, Key: bnrEnt.Key}},
 			}
 			writes = append(writes, w)
 		}
 	}
-	if err := configurator.WriteEntities(networkID, writes, serdes.Entity); err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "failed to create base name"), http.StatusInternalServerError)
+	if err := configurator.WriteEntities(reqCtx, networkID, writes, serdes.Entity); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to create base name: %w", err))
 	}
 
 	return c.JSON(http.StatusCreated, string(bnr.Name))
@@ -118,15 +122,16 @@ func GetBaseName(c echo.Context) error {
 	}
 
 	ret, err := configurator.LoadEntity(
+		c.Request().Context(),
 		networkID, lte.BaseNameEntityType, baseName,
 		configurator.EntityLoadCriteria{LoadAssocsFromThis: true, LoadAssocsToThis: true},
 		serdes.Entity,
 	)
 	if err == merrors.ErrNotFound {
-		return obsidian.HttpError(err, http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, err)
 	}
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.JSON(http.StatusOK, (&models.BaseNameRecord{}).FromEntity(ret))
@@ -137,33 +142,35 @@ func UpdateBaseName(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	bnr := &models.BaseNameRecord{}
 	if err := c.Bind(bnr); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 	if string(bnr.Name) != baseName {
-		return obsidian.HttpError(errors.New("base name in body does not match URL param"), http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, errors.New("base name in body does not match URL param"))
 	}
 
 	// 404 if the entity doesn't exist
 	oldEnt, err := configurator.LoadEntity(
+		reqCtx,
 		networkID, lte.BaseNameEntityType, baseName,
 		configurator.EntityLoadCriteria{LoadAssocsFromThis: true, LoadAssocsToThis: true},
 		serdes.Entity,
 	)
 	if err == merrors.ErrNotFound {
-		return obsidian.HttpError(errors.Wrap(err, "failed to check if base name exists"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to check if base name exists: %w", err))
 	}
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	// Verify that associated subscribers and policies exist
 	parents := bnr.GetParentAssocs()
-	assocsExist, _ := configurator.DoEntitiesExist(networkID, parents)
+	assocsExist, _ := configurator.DoEntitiesExist(reqCtx, networkID, parents)
 	if !assocsExist {
-		return obsidian.HttpError(errors.New("failed to update base name: one or more subscribers or policies do not exist"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, errors.New("failed to update base name: one or more subscribers or policies do not exist"))
 	}
 
 	// In one transaction
@@ -178,7 +185,7 @@ func UpdateBaseName(c echo.Context) error {
 		w := configurator.EntityUpdateCriteria{
 			Type:                 lte.SubscriberEntityType,
 			Key:                  tk.Key,
-			AssociationsToDelete: []storage.TypeAndKey{{Type: lte.BaseNameEntityType, Key: baseName}},
+			AssociationsToDelete: storage.TKs{{Type: lte.BaseNameEntityType, Key: baseName}},
 		}
 		writes = append(writes, w)
 	}
@@ -186,13 +193,13 @@ func UpdateBaseName(c echo.Context) error {
 		w := configurator.EntityUpdateCriteria{
 			Type:              lte.SubscriberEntityType,
 			Key:               tk.Key,
-			AssociationsToAdd: []storage.TypeAndKey{{Type: lte.BaseNameEntityType, Key: baseName}},
+			AssociationsToAdd: storage.TKs{{Type: lte.BaseNameEntityType, Key: baseName}},
 		}
 		writes = append(writes, w)
 	}
 
-	if err = configurator.WriteEntities(networkID, writes, serdes.Entity); err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "failed to update base name"), http.StatusInternalServerError)
+	if err = configurator.WriteEntities(reqCtx, networkID, writes, serdes.Entity); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to update base name: %w", err))
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -204,9 +211,9 @@ func DeleteBaseName(c echo.Context) error {
 		return nerr
 	}
 
-	err := configurator.DeleteEntity(networkID, lte.BaseNameEntityType, baseName)
+	err := configurator.DeleteEntity(c.Request().Context(), networkID, lte.BaseNameEntityType, baseName)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -220,14 +227,16 @@ func ListRules(c echo.Context) error {
 	}
 
 	view := c.QueryParam("view")
+	reqCtx := c.Request().Context()
 	if strings.ToLower(view) == "full" {
-		rules, err := configurator.LoadAllEntitiesOfType(
+		rules, _, err := configurator.LoadAllEntitiesOfType(
+			reqCtx,
 			networkID, lte.PolicyRuleEntityType,
 			configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsFromThis: true, LoadAssocsToThis: true},
 			serdes.Entity,
 		)
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
 
 		ret := map[string]*models.PolicyRule{}
@@ -236,9 +245,9 @@ func ListRules(c echo.Context) error {
 		}
 		return c.JSON(http.StatusOK, ret)
 	} else {
-		ruleIDs, err := configurator.ListEntityKeys(networkID, lte.PolicyRuleEntityType)
+		ruleIDs, err := configurator.ListEntityKeys(reqCtx, networkID, lte.PolicyRuleEntityType)
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
 		sort.Strings(ruleIDs)
 		return c.JSON(http.StatusOK, ruleIDs)
@@ -250,13 +259,14 @@ func CreateRule(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	rule := &models.PolicyRule{}
 	if err := c.Bind(rule); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := rule.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := rule.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
 	updateToNewIPModel(rule.FlowList)
@@ -265,9 +275,9 @@ func CreateRule(c echo.Context) error {
 	var allAssocs storage.TKs
 	allAssocs = append(allAssocs, rule.GetParentAssocs()...)
 	allAssocs = append(allAssocs, rule.GetAssocs()...)
-	assocsExist, _ := configurator.DoEntitiesExist(networkID, allAssocs)
+	assocsExist, _ := configurator.DoEntitiesExist(reqCtx, networkID, allAssocs)
 	if !assocsExist {
-		return obsidian.HttpError(errors.New("failed to create policy: one or more subscribers or QoS profiles do not exist"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, errors.New("failed to create policy: one or more subscribers or QoS profiles do not exist"))
 	}
 
 	// In one transaction, create the policy rule and associate subscribers
@@ -281,13 +291,13 @@ func CreateRule(c echo.Context) error {
 		w := configurator.EntityUpdateCriteria{
 			Type:              lte.SubscriberEntityType,
 			Key:               tk.Key,
-			AssociationsToAdd: []storage.TypeAndKey{{Type: lte.PolicyRuleEntityType, Key: createdEntity.Key}},
+			AssociationsToAdd: storage.TKs{{Type: lte.PolicyRuleEntityType, Key: createdEntity.Key}},
 		}
 		writes = append(writes, w)
 	}
 
-	if err := configurator.WriteEntities(networkID, writes, serdes.Entity); err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "failed to create policy"), http.StatusInternalServerError)
+	if err := configurator.WriteEntities(reqCtx, networkID, writes, serdes.Entity); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to create policy: %w", err))
 	}
 	return c.NoContent(http.StatusCreated)
 }
@@ -299,6 +309,7 @@ func GetRule(c echo.Context) error {
 	}
 
 	ent, err := configurator.LoadEntity(
+		c.Request().Context(),
 		networkID, lte.PolicyRuleEntityType, ruleID,
 		configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsFromThis: true, LoadAssocsToThis: true},
 		serdes.Entity,
@@ -307,7 +318,7 @@ func GetRule(c echo.Context) error {
 	case err == merrors.ErrNotFound:
 		return echo.ErrNotFound
 	case err != nil:
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.JSON(http.StatusOK, (&models.PolicyRule{}).FromEntity(ent))
@@ -318,40 +329,42 @@ func UpdateRule(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	rule := &models.PolicyRule{}
 	if err := c.Bind(rule); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := rule.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := rule.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if ruleID != string(rule.ID) {
-		return obsidian.HttpError(errors.New("rule ID in body does not match URL param"), http.StatusBadRequest)
+	if ruleID != string(*rule.ID) {
+		return echo.NewHTTPError(http.StatusBadRequest, errors.New("rule ID in body does not match URL param"))
 	}
 
 	updateToNewIPModel(rule.FlowList)
 
 	// 404 if the rule doesn't exist
 	oldEnt, err := configurator.LoadEntity(
+		reqCtx,
 		networkID, lte.PolicyRuleEntityType, ruleID,
-		configurator.EntityLoadCriteria{LoadAssocsToThis: true},
+		configurator.EntityLoadCriteria{LoadAssocsToThis: true, LoadAssocsFromThis: true},
 		serdes.Entity,
 	)
 	if err == merrors.ErrNotFound {
-		return obsidian.HttpError(errors.Wrap(err, "Failed to check if policy exists"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Failed to check if policy exists: %w", err))
 	}
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	// Verify subscribers and policies exist
 	var allAssocs storage.TKs
 	allAssocs = append(allAssocs, rule.GetParentAssocs()...)
 	allAssocs = append(allAssocs, rule.GetAssocs()...)
-	assocsExist, _ := configurator.DoEntitiesExist(networkID, allAssocs)
+	assocsExist, _ := configurator.DoEntitiesExist(reqCtx, networkID, allAssocs)
 	if !assocsExist {
-		return obsidian.HttpError(errors.New("failed to create policy: one or more subscribers or QoS profiles do not exist"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, errors.New("failed to create policy: one or more subscribers or QoS profiles do not exist"))
 	}
 
 	// In one transaction
@@ -360,14 +373,19 @@ func UpdateRule(c echo.Context) error {
 	//	- update child assocs: policy_qos_profile
 
 	var writes []configurator.EntityWriteOperation
-	writes = append(writes, rule.ToEntityUpdateCriteria())
+
+	removedAssocs, addedAssocs := oldEnt.Associations.Difference(rule.GetAssocs())
+	writes = append(writes, rule.ToEntityUpdateCriteria(
+		addedAssocs.Filter(lte.PolicyQoSProfileEntityType),
+		removedAssocs.Filter(lte.PolicyQoSProfileEntityType),
+	))
 
 	remove, add := oldEnt.ParentAssociations.Difference(rule.GetParentAssocs())
 	for _, tk := range remove.Filter(lte.SubscriberEntityType) {
 		w := configurator.EntityUpdateCriteria{
 			Type:                 lte.SubscriberEntityType,
 			Key:                  tk.Key,
-			AssociationsToDelete: []storage.TypeAndKey{{Type: lte.PolicyRuleEntityType, Key: ruleID}},
+			AssociationsToDelete: storage.TKs{{Type: lte.PolicyRuleEntityType, Key: ruleID}},
 		}
 		writes = append(writes, w)
 	}
@@ -375,13 +393,13 @@ func UpdateRule(c echo.Context) error {
 		w := configurator.EntityUpdateCriteria{
 			Type:              lte.SubscriberEntityType,
 			Key:               tk.Key,
-			AssociationsToAdd: []storage.TypeAndKey{{Type: lte.PolicyRuleEntityType, Key: ruleID}},
+			AssociationsToAdd: storage.TKs{{Type: lte.PolicyRuleEntityType, Key: ruleID}},
 		}
 		writes = append(writes, w)
 	}
 
-	if err = configurator.WriteEntities(networkID, writes, serdes.Entity); err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "failed to update policy rule"), http.StatusInternalServerError)
+	if err = configurator.WriteEntities(reqCtx, networkID, writes, serdes.Entity); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to update policy rule: %w", err))
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -393,9 +411,9 @@ func DeleteRule(c echo.Context) error {
 		return nerr
 	}
 
-	err := configurator.DeleteEntity(networkID, lte.PolicyRuleEntityType, ruleID)
+	err := configurator.DeleteEntity(c.Request().Context(), networkID, lte.PolicyRuleEntityType, ruleID)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -409,13 +427,14 @@ func getQoSProfiles(c echo.Context) error {
 		return nerr
 	}
 
-	profiles, err := configurator.LoadAllEntitiesOfType(
+	profiles, _, err := configurator.LoadAllEntitiesOfType(
+		c.Request().Context(),
 		networkID, lte.PolicyQoSProfileEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	ret := map[string]*models.PolicyQosProfile{}
@@ -431,25 +450,27 @@ func createQoSProfile(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
+
 	profile := &models.PolicyQosProfile{}
 	if err := c.Bind(profile); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := profile.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := profile.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
-	exists, err := configurator.DoesEntityExist(networkID, lte.PolicyQoSProfileEntityType, profile.ID)
+	exists, err := configurator.DoesEntityExist(reqCtx, networkID, lte.PolicyQoSProfileEntityType, profile.ID)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	if exists {
 		return echo.ErrBadRequest
 	}
 
-	_, err = configurator.CreateEntity(networkID, profile.ToEntity(), serdes.Entity)
+	_, err = configurator.CreateEntity(reqCtx, networkID, profile.ToEntity(), serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusCreated)
 }
@@ -460,9 +481,9 @@ func deleteQoSProfile(c echo.Context) error {
 		return nerr
 	}
 
-	err := configurator.DeleteEntity(networkID, lte.PolicyQoSProfileEntityType, profileID)
+	err := configurator.DeleteEntity(c.Request().Context(), networkID, lte.PolicyQoSProfileEntityType, profileID)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

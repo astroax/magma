@@ -23,7 +23,6 @@ from orc8r.protos import magmad_pb2
 
 STATELESS_SERVICE_CONFIGS = [
     ("mme", "use_stateless", True),
-    ("mobilityd", "persist_to_redis", True),
     ("pipelined", "clean_restart", False),
     ("pipelined", "redis_enabled", True),
     ("sessiond", "support_stateless", True),
@@ -47,7 +46,9 @@ def check_stateless_agw():
         res = magmad_pb2.CheckStatelessResponse.CORRUPT
 
     logging.debug(
-        "Check returning %s", magmad_pb2.CheckStatelessResponse.AGWMode.Name(res)
+        "Check returning %s", magmad_pb2.CheckStatelessResponse.AGWMode.Name(
+            res,
+        ),
     )
     return res
 

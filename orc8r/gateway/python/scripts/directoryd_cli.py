@@ -15,11 +15,15 @@ limitations under the License.
 
 import argparse
 import sys
+
 import grpc
 from magma.common.rpc_utils import grpc_wrapper
 from orc8r.protos.common_pb2 import Void
-from orc8r.protos.directoryd_pb2 import UpdateRecordRequest, \
-    DeleteRecordRequest, GetDirectoryFieldRequest
+from orc8r.protos.directoryd_pb2 import (
+    DeleteRecordRequest,
+    GetDirectoryFieldRequest,
+    UpdateRecordRequest,
+)
 from orc8r.protos.directoryd_pb2_grpc import GatewayDirectoryServiceStub
 
 
@@ -56,9 +60,13 @@ def get_record_field_handler(client, args):
 
     try:
         res = client.GetDirectoryField(get_request)
-        print("Successfully got field: (%s, %s) for ID: %s" % (res.key,
-                                                               res.value,
-                                                               args.id))
+        print(
+            "Successfully got field: (%s, %s) for ID: %s" % (
+                res.key,
+                res.value,
+                args.id,
+            ),
+        )
     except grpc.RpcError as e:
         print("gRPC failed with %s: %s" % (e.code(), e.details()))
 
@@ -77,14 +85,16 @@ def get_all_records_handler(client, args):
 def main():
     parser = argparse.ArgumentParser(
         description='Management CLI for DirectoryService',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
     # Add subcommands
     subparsers = parser.add_subparsers(title='subcommands', dest='cmd')
 
     # update_record
     subparser = subparsers.add_parser(
-        'update_record', help='Update record of an object')
+        'update_record', help='Update record of an object',
+    )
     subparser.add_argument('id', help='ID')
     subparser.add_argument('--field_key', required=False)
     subparser.add_argument('--field_value', required=False)
@@ -92,20 +102,23 @@ def main():
 
     # delete_record
     subparser = subparsers.add_parser(
-        'delete_record', help='Delete record of an object')
+        'delete_record', help='Delete record of an object',
+    )
     subparser.add_argument('id', help='ID')
     subparser.set_defaults(func=delete_record_handler)
 
     # get_record_field
     subparser = subparsers.add_parser(
-        'get_record_field', help='Get field of a record object')
+        'get_record_field', help='Get field of a record object',
+    )
     subparser.add_argument('id', help='ID')
     subparser.add_argument('field_key', help='Field key to lookup')
     subparser.set_defaults(func=get_record_field_handler)
 
     # get_all_records
     subparser = subparsers.add_parser(
-        'get_all_records', help='Get all records')
+        'get_all_records', help='Get all records',
+    )
     subparser.set_defaults(func=get_all_records_handler)
 
     # Parse the args

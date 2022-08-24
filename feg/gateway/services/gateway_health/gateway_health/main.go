@@ -17,11 +17,11 @@ import (
 	"flag"
 	"time"
 
+	"github.com/golang/glog"
+
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/gateway_health/health_manager"
 	"magma/orc8r/lib/go/service"
-
-	"github.com/golang/glog"
 )
 
 func init() {
@@ -30,7 +30,7 @@ func init() {
 
 func main() {
 	// Create the service
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.HEALTH)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.HEALTH)
 	if err != nil {
 		glog.Fatalf("Error creating HEALTH service: %s", err)
 	}

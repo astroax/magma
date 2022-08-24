@@ -11,22 +11,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import abc
 import logging
 import time
 from collections import namedtuple
 
-import abc
 import grpc
-from lte.protos.pipelined_pb2 import ActivateFlowsRequest, \
-    DeactivateFlowsRequest
+from magma.pipelined.policy_converters import convert_ip_str_to_ip_proto
 from ryu.lib import hub
 
-from magma.subscriberdb.sid import SIDUtils
-from magma.pipelined.policy_converters import convert_ip_str_to_ip_proto
-
-SubContextConfig = namedtuple('ContextConfig', ['imsi', 'ip', 'ambr',
-                                                'table_id'])
+SubContextConfig = namedtuple(
+    'SubContextConfig', [
+        'imsi', 'ip', 'ambr',
+        'table_id',
+    ],
+)
 default_ambr_config = None
+
 
 def try_grpc_call_with_retries(grpc_call, retry_count=5, retry_interval=1):
     """ Attempt a grpc call and retry if unavailable """
@@ -40,8 +41,10 @@ def try_grpc_call_with_retries(grpc_call, retry_count=5, retry_interval=1):
                 logging.warning("Pipelined unavailable, retrying...")
                 time.sleep(retry_interval * (2 ** i))
                 continue
-            logging.error("Pipelined grpc call failed with error : %s",
-                          error)
+            logging.error(
+                "Pipelined grpc call failed with error : %s",
+                error,
+            )
             raise
 
 
@@ -55,18 +58,7 @@ class SubscriberContext(abc.ABC):
     """
 
     @abc.abstractmethod
-    def add_static_rule(self, id):
-        """
-        Adds a new static rule to the subscriber
-        Args:
-            id (String): PolicyRule id
-        Returns:
-            Self
-        """
-        raise NotImplementedError()
-
-    @abc.abstractmethod
-    def add_dynamic_rule(self, policy_rule):
+    def add_policy(self, policy):
         """
         Adds new dynamic rule to subcriber
         Args:
@@ -107,62 +99,24 @@ class SubscriberContext(abc.ABC):
         raise NotImplementedError()
 
 
-class RyuRPCSubscriberContext(SubscriberContext):
-    """
-    RyuRestSubscriberContext uses grpc calls to enforcement_controller for
-    testing subscriber rules
-    """
-
-    def __init__(self, imsi, ip, pipelined_stub, table_id=5):
-        self.cfg = SubContextConfig(imsi, ip, default_ambr_config, table_id)
-        self._dynamic_rules = []
-        self._static_rule_names = []
-        self._pipelined_stub = pipelined_stub
-
-    def add_static_rule(self, id):
-        self._static_rule_names.append(id)
-        return self
-
-    def add_dynamic_rule(self, policy_rule):
-        self._dynamic_rules.append(policy_rule)
-        return self
-
-    def _activate_subscriber_rules(self):
-        try_grpc_call_with_retries(
-            lambda: self._pipelined_stub.ActivateFlows(
-                ActivateFlowsRequest(sid=SIDUtils.to_pb(self.cfg.imsi),
-                                     rule_ids=self._static_rule_names,
-                                     dynamic_rules=self._dynamic_rules))
-        )
-
-    def _deactivate_subscriber_rules(self):
-        try_grpc_call_with_retries(
-            lambda: self._pipelined_stub.DeactivateFlows(
-                DeactivateFlowsRequest(sid=SIDUtils.to_pb(self.cfg.imsi)))
-        )
-
-
 class RyuDirectSubscriberContext(SubscriberContext):
     """
     RyuDirectSubscriberContext uses ryu.hub and enforcement_controller to
     directly manage subscriber flows
     """
 
-    def __init__(self, imsi, ip, enforcement_controller, table_id=5,
-                 enforcement_stats_controller=None, nuke_flows_on_exit=True):
+    def __init__(
+        self, imsi, ip, enforcement_controller, table_id=5,
+        enforcement_stats_controller=None, nuke_flows_on_exit=True,
+    ):
         self.cfg = SubContextConfig(imsi, ip, default_ambr_config, table_id)
-        self._dynamic_rules = []
-        self._static_rule_names = []
+        self._policies = []
         self._ec = enforcement_controller
         self._esc = enforcement_stats_controller
         self._nuke_flows_on_exit = nuke_flows_on_exit
 
-    def add_static_rule(self, id):
-        self._static_rule_names.append(id)
-        return self
-
-    def add_dynamic_rule(self, policy_rule):
-        self._dynamic_rules.append(policy_rule)
+    def add_policy(self, policy):
+        self._policies.append(policy)
         return self
 
     def _activate_subscriber_rules(self):
@@ -174,8 +128,10 @@ class RyuDirectSubscriberContext(SubscriberContext):
                 uplink_tunnel=None,
                 ip_addr=ip_addr,
                 apn_ambr=default_ambr_config,
-                static_rule_ids=self._static_rule_names,
-                dynamic_rules=self._dynamic_rules)
+                policies=self._policies,
+                shard_id=0,
+                local_f_teid_ng=0,
+            )
             if self._esc:
                 self._esc.activate_rules(
                     imsi=self.cfg.imsi,
@@ -183,8 +139,10 @@ class RyuDirectSubscriberContext(SubscriberContext):
                     uplink_tunnel=None,
                     ip_addr=ip_addr,
                     apn_ambr=default_ambr_config,
-                    static_rule_ids=self._static_rule_names,
-                    dynamic_rules=self._dynamic_rules)
+                    policies=self._policies,
+                    shard_id=0,
+                    local_f_teid_ng=0,
+                )
         hub.joinall([hub.spawn(activate_flows)])
 
     def _deactivate_subscriber_rules(self):
@@ -194,5 +152,6 @@ class RyuDirectSubscriberContext(SubscriberContext):
                 self._ec.deactivate_rules(
                     imsi=self.cfg.imsi,
                     ip_addr=ip_addr,
-                    rule_ids=None)
+                    rule_ids=None,
+                )
             hub.joinall([hub.spawn(deactivate_flows)])

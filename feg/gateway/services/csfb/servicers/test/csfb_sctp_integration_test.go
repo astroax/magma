@@ -14,18 +14,19 @@ limitations under the License.
 package test
 
 import (
+	"context"
 	"testing"
 	"unsafe"
+
+	"github.com/ishidawataru/sctp"
+	"github.com/stretchr/testify/assert"
 
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/services/csfb/servicers"
 	"magma/feg/gateway/services/csfb/servicers/encode/message"
 	"magma/feg/gateway/services/csfb/test_init"
+	"magma/orc8r/cloud/go/test_utils"
 	orcprotos "magma/orc8r/lib/go/protos"
-
-	"github.com/ishidawataru/sctp"
-	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 )
 
 func TestCsfbServer_EPSDetach_Integration(t *testing.T) {
@@ -82,7 +83,7 @@ func TestCsfbServer_EPSDetach_Integration(t *testing.T) {
 	client := protos.NewCSFBFedGWServiceClient(conn)
 	reply, err := client.EPSDetachInd(context.Background(), req)
 	assert.NoError(t, err)
-	assert.Equal(t, &orcprotos.Void{}, reply)
+	test_utils.AssertMessagesEqual(t, &orcprotos.Void{}, reply)
 
 	msgSentFlag <- true
 	// close the mock listener first before moving on to the next test

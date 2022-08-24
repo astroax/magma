@@ -6,7 +6,6 @@ magma-gen-meta:
   dependencies:
     - 'orc8r/cloud/go/models/swagger-common.yml'
     - 'orc8r/cloud/go/services/orchestrator/obsidian/models/swagger.v1.yml'
-    - 'lte/cloud/go/services/lte/obsidian/models/swagger.v1.yml'
     - 'lte/cloud/go/services/policydb/obsidian/models/swagger.v1.yml'
     - 'feg/cloud/go/services/feg/obsidian/models/swagger.v1.yml'
   temp-gen-filename: cwf-swagger.yml
@@ -888,7 +887,6 @@ definitions:
     type: object
     description: Full description of a CWF gateway
     required:
-    - device
     - id
     - name
     - description
@@ -898,6 +896,8 @@ definitions:
     properties:
       device:
         $ref: './orc8r-swagger.yml#/definitions/gateway_device'
+      registration_info:
+        $ref: './orc8r-swagger-common.yml#/definitions/registration_info'
       id:
         $ref: './orc8r-swagger-common.yml#/definitions/gateway_id'
       name:
@@ -917,7 +917,6 @@ definitions:
     type: object
     description: CWF gateway object with read-only fields omitted
     required:
-    - device
     - id
     - name
     - description
@@ -973,9 +972,6 @@ definitions:
         $ref: './feg-swagger.yml#/definitions/aaa_server'
       li_ues:
         $ref: '#/definitions/li_ues'
-      is_xwfm_variant:
-        type: boolean
-        example: false
 
   allowed_gre_peer:
     type: object

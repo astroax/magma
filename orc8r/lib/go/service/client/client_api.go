@@ -14,18 +14,19 @@ limitations under the License.
 package client
 
 import (
-	"github.com/golang/glog"
-	"golang.org/x/net/context"
+	"context"
 
-	"magma/orc8r/lib/go/errors"
+	"github.com/golang/glog"
+
+	"magma/orc8r/lib/go/merrors"
 	"magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/registry"
 )
 
 func getClient(service string) (protos.Service303Client, error) {
-	conn, err := registry.GetConnection(service)
+	conn, err := registry.GetConnection(service, protos.ServiceType_PROTECTED)
 	if err != nil {
-		initErr := errors.NewInitError(err, "SERVICE303")
+		initErr := merrors.NewInitError(err, "SERVICE303")
 		glog.Error(initErr)
 		return nil, initErr
 	}

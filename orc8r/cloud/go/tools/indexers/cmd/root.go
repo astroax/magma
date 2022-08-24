@@ -19,11 +19,12 @@ import (
 	"log"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	"magma/orc8r/cloud/go/services/state"
 	indexer_protos "magma/orc8r/cloud/go/services/state/protos"
+	lib_protos "magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -61,7 +62,7 @@ func globalPre(cmd *cobra.Command, args []string) {
 }
 
 func getClient() indexer_protos.IndexerManagerClient {
-	conn, err := registry.GetConnection(state.ServiceName)
+	conn, err := registry.GetConnection(state.ServiceName, lib_protos.ServiceType_PROTECTED)
 	if err != nil {
 		log.Fatal(err)
 	}

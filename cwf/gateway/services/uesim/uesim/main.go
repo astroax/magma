@@ -31,7 +31,7 @@ func init() {
 	flag.Parse()
 }
 
-func createUeSimServer(store blobstore.BlobStorageFactory) (protos.UESimServer, error) {
+func createUeSimServer(store blobstore.StoreFactory) (protos.UESimServer, error) {
 	config, err := servicers.GetUESimConfig()
 	if err != nil {
 		glog.Fatalf("Error getting UESim Config : %s ", err)
@@ -48,7 +48,7 @@ func main() {
 	flag.Parse()
 	glog.Info("Starting UESim service")
 
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.UeSim)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.UeSim)
 	if err != nil {
 		glog.Fatalf("Error creating UeSim service: %s", err)
 	}

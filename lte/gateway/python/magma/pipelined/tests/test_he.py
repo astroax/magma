@@ -18,32 +18,39 @@ from typing import List
 
 from lte.protos.mconfig.mconfigs_pb2 import PipelineD
 from lte.protos.mobilityd_pb2 import IPAddress
-
-from magma.pipelined.app.he import HeaderEnrichmentController
-from magma.pipelined.app.enforcement import EnforcementController
-from lte.protos.policydb_pb2 import FlowDescription, FlowMatch, PolicyRule, \
-    HeaderEnrichment
-
-from magma.pipelined.bridge_util import BridgeTools
-from magma.pipelined.tests.app.subscriber import RyuDirectSubscriberContext
-
-from magma.pipelined.tests.app.start_pipelined import TestSetup, \
-    PipelinedController
-from magma.pipelined.tests.pipelined_test_util import start_ryu_app_thread, \
-    stop_ryu_app_thread, create_service_manager, wait_after_send, \
-    SnapshotVerifier
-from magma.pipelined.policy_converters import convert_ip_str_to_ip_proto
-
-from magma.pipelined.tests.app.table_isolation import RyuDirectTableIsolator, \
-    RyuForwardFlowArgsBuilder
-
-from magma.pipelined.openflow.messages import MessageHub
-from magma.pipelined.openflow.messages import MsgChannel
+from lte.protos.pipelined_pb2 import VersionedPolicy
+from lte.protos.policydb_pb2 import (
+    FlowDescription,
+    FlowMatch,
+    HeaderEnrichment,
+    PolicyRule,
+)
 from magma.pipelined.app import he
+from magma.pipelined.app.enforcement import EnforcementController
+from magma.pipelined.app.he import HeaderEnrichmentController
+from magma.pipelined.bridge_util import BridgeTools
+from magma.pipelined.openflow.messages import MessageHub, MsgChannel
 from magma.pipelined.openflow.registers import Direction
-from magma.pipelined.policy_converters import convert_ipv4_str_to_ip_proto
-
-from magma.pipelined.tests.pipelined_test_util import fake_controller_setup
+from magma.pipelined.policy_converters import (
+    convert_ip_str_to_ip_proto,
+    convert_ipv4_str_to_ip_proto,
+)
+from magma.pipelined.tests.app.start_pipelined import (
+    PipelinedController,
+    TestSetup,
+)
+from magma.pipelined.tests.app.subscriber import RyuDirectSubscriberContext
+from magma.pipelined.tests.app.table_isolation import (
+    RyuDirectTableIsolator,
+    RyuForwardFlowArgsBuilder,
+)
+from magma.pipelined.tests.pipelined_test_util import (
+    SnapshotVerifier,
+    create_service_manager,
+    fake_controller_setup,
+    start_ryu_app_thread,
+    stop_ryu_app_thread,
+)
 
 
 def mocked_activate_he_urls_for_ue(ip: IPAddress, rule_id: str, urls: List[str], imsi: str, msisdn: str):
@@ -69,8 +76,10 @@ class HeTableTest(unittest.TestCase):
     PROXY_PORT = '15'
 
     @classmethod
-    @unittest.mock.patch('netifaces.ifaddresses',
-                         return_value=[[{'addr': '00:11:22:33:44:55'}]])
+    @unittest.mock.patch(
+        'netifaces.ifaddresses',
+        return_value=[[{'addr': '00:11:22:33:44:55'}]],
+    )
     @unittest.mock.patch('netifaces.AF_LINK', 0)
     def setUpClass(cls, *_):
         """
@@ -99,7 +108,7 @@ class HeTableTest(unittest.TestCase):
             apps=[
                 PipelinedController.HeaderEnrichment,
                 PipelinedController.Testing,
-                PipelinedController.StartupFlows
+                PipelinedController.StartupFlows,
             ],
             references={
                 PipelinedController.HeaderEnrichment:
@@ -159,11 +168,13 @@ class HeTableTest(unittest.TestCase):
         Verify that a proxy flows are setup
         """
 
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager,
-                                             max_sleep_time=20,
-                                             datapath=HeTableTest.he_controller._datapath)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+            max_sleep_time=20,
+            datapath=HeTableTest.he_controller._datapath,
+        )
 
         with snapshot_verifier:
             pass
@@ -178,17 +189,22 @@ class HeTableTest(unittest.TestCase):
         ue_ip = '1.1.1.1'
         tun_id = 1
         dest_server = '2.2.2.2'
-        flow_msg = cls.he_controller.get_subscriber_he_flows("rule1", Direction.OUT, ue_ip, tun_id, dest_server, 123,
-                                                             ['abc.com'], 'IMSI01', b'1')
-        chan = self._msg_hub.send(flow_msg,
-                                  HeTableTest.he_controller._datapath, )
+        flow_msg = cls.he_controller.get_subscriber_he_flows(
+            "rule1", Direction.OUT, ue_ip, tun_id, dest_server, 123,
+            ['abc.com'], 'IMSI01', b'1',
+        )
+        chan = self._msg_hub.send(
+            flow_msg,
+            HeTableTest.he_controller._datapath, )
         self._wait_for_responses(chan, len(flow_msg), HeTableTest.he_controller.logger)
 
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager,
-                                             max_sleep_time=20,
-                                             datapath=HeTableTest.he_controller._datapath)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+            max_sleep_time=20,
+            datapath=HeTableTest.he_controller._datapath,
+        )
 
         with snapshot_verifier:
             pass
@@ -203,18 +219,23 @@ class HeTableTest(unittest.TestCase):
         ue_ip = '1.1.1.1'
         tun_id = 1
         dest_server = '2.2.2.2'
-        flow_msg = cls.he_controller.get_subscriber_he_flows("rule1", Direction.IN, ue_ip, tun_id, dest_server, 123,
-                                                             ['abc.com'], 'IMSI01', b'1')
+        flow_msg = cls.he_controller.get_subscriber_he_flows(
+            "rule1", Direction.IN, ue_ip, tun_id, dest_server, 123,
+            ['abc.com'], 'IMSI01', b'1',
+        )
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip), 0)
-        chan = self._msg_hub.send(flow_msg,
-                                  HeTableTest.he_controller._datapath, )
+        chan = self._msg_hub.send(
+            flow_msg,
+            HeTableTest.he_controller._datapath, )
         self._wait_for_responses(chan, len(flow_msg), HeTableTest.he_controller.logger)
 
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager,
-                                             max_sleep_time=20,
-                                             datapath=HeTableTest.he_controller._datapath)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+            max_sleep_time=20,
+            datapath=HeTableTest.he_controller._datapath,
+        )
 
         with snapshot_verifier:
             pass
@@ -230,26 +251,34 @@ class HeTableTest(unittest.TestCase):
         tun_id1 = 1
         dest_server1 = '2.2.2.4'
         rule1 = 123
-        flow_msg = cls.he_controller.get_subscriber_he_flows("rule1", Direction.OUT, ue_ip1, tun_id1, dest_server1, rule1,
-                                                             ['abc.com'], 'IMSI01', b'1')
+        flow_msg = cls.he_controller.get_subscriber_he_flows(
+            "rule1", Direction.OUT, ue_ip1, tun_id1, dest_server1, rule1,
+            ['abc.com'], 'IMSI01', b'1',
+        )
 
         ue_ip2 = '10.10.10.20'
         tun_id2 = 2
         dest_server2 = '20.20.20.40'
         rule2 = 1230
-        flow_msg.extend(cls.he_controller.get_subscriber_he_flows("rule2", Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
-                                                                  ['abc.com'], 'IMSI01', b'1'))
+        flow_msg.extend(
+            cls.he_controller.get_subscriber_he_flows(
+                "rule2", Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
+                ['abc.com'], 'IMSI01', b'1',
+            ),
+        )
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip1), 1)
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip2), 1)
 
         chan = self._msg_hub.send(flow_msg, dp)
         self._wait_for_responses(chan, len(flow_msg), HeTableTest.he_controller.logger)
 
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager,
-                                             max_sleep_time=20,
-                                             datapath=HeTableTest.he_controller._datapath)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+            max_sleep_time=20,
+            datapath=HeTableTest.he_controller._datapath,
+        )
 
         with snapshot_verifier:
             pass
@@ -266,15 +295,19 @@ class HeTableTest(unittest.TestCase):
 
         dest_server1 = '2.2.2.4'
         rule1 = 123
-        flow_msg = cls.he_controller.get_subscriber_he_flows('rule1', Direction.OUT, ue_ip1, tun_id1, dest_server1, rule1,
-                                                             ['abc.com'], 'IMSI01', b'1')
+        flow_msg = cls.he_controller.get_subscriber_he_flows(
+            'rule1', Direction.OUT, ue_ip1, tun_id1, dest_server1, rule1,
+            ['abc.com'], 'IMSI01', b'1',
+        )
 
         ue_ip2 = '10.10.10.20'
         tun_id2 = 2
         dest_server2 = '20.20.20.40'
         rule2 = 1230
-        flow_msg2 = cls.he_controller.get_subscriber_he_flows('rule2', Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
-                                                              ['abc.com'], 'IMSI01', b'1')
+        flow_msg2 = cls.he_controller.get_subscriber_he_flows(
+            'rule2', Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
+            ['abc.com'], 'IMSI01', b'1',
+        )
         flow_msg.extend(flow_msg2)
         chan = self._msg_hub.send(flow_msg, dp)
         self._wait_for_responses(chan, len(flow_msg), HeTableTest.he_controller.logger)
@@ -283,11 +316,13 @@ class HeTableTest(unittest.TestCase):
 
         cls.he_controller.remove_subscriber_he_flows(convert_ip_str_to_ip_proto(ue_ip2), 'rule_random', 3223)
 
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager,
-                                             max_sleep_time=20,
-                                             datapath=HeTableTest.he_controller._datapath)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+            max_sleep_time=20,
+            datapath=HeTableTest.he_controller._datapath,
+        )
 
         with snapshot_verifier:
             pass
@@ -303,34 +338,46 @@ class HeTableTest(unittest.TestCase):
         tun_id1 = 1
         dest_server1 = '2.2.2.4'
         rule1 = 123
-        flow_msg = cls.he_controller.get_subscriber_he_flows('rule1', Direction.OUT, ue_ip1, tun_id1, dest_server1, rule1,
-                                                             ['abc.com'], 'IMSI01', b'1')
+        flow_msg = cls.he_controller.get_subscriber_he_flows(
+            'rule1', Direction.OUT, ue_ip1, tun_id1, dest_server1, rule1,
+            ['abc.com'], 'IMSI01', b'1',
+        )
 
         ue_ip2 = '10.10.10.20'
         tun_id2 = 2
         dest_server2 = '20.20.20.40'
         rule2 = 1230
-        flow_msg.extend(cls.he_controller.get_subscriber_he_flows('rule2', Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
-                                                                  ['abc.com'], 'IMSI01', b'1'))
+        flow_msg.extend(
+            cls.he_controller.get_subscriber_he_flows(
+                'rule2', Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
+                ['abc.com'], 'IMSI01', b'1',
+            ),
+        )
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip1), 1)
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip2), 1)
 
         ue_ip2 = '10.10.10.20'
         dest_server2 = '20.20.40.40'
         rule2 = 1230
-        flow_msg.extend(cls.he_controller.get_subscriber_he_flows('rule2', Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
-                                                                  ['abc.com'], 'IMSI01', None))
+        flow_msg.extend(
+            cls.he_controller.get_subscriber_he_flows(
+                'rule2', Direction.OUT, ue_ip2, tun_id2, dest_server2, rule2,
+                ['abc.com'], 'IMSI01', None,
+            ),
+        )
 
         chan = self._msg_hub.send(flow_msg, dp)
         self._wait_for_responses(chan, len(flow_msg), HeTableTest.he_controller.logger)
 
         cls.he_controller.remove_subscriber_he_flows(convert_ip_str_to_ip_proto(ue_ip2))
 
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager,
-                                             max_sleep_time=20,
-                                             datapath=HeTableTest.he_controller._datapath)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+            max_sleep_time=20,
+            datapath=HeTableTest.he_controller._datapath,
+        )
 
         with snapshot_verifier:
             pass
@@ -349,27 +396,41 @@ class HeTableTest(unittest.TestCase):
         tun_id1 = 1
         dest_server1 = '2.2.2.4'
         rule1 = 123
-        flow_msg = cls.he_controller.get_subscriber_he_flows('rule1', Direction.OUT, ue_ip1, tun_id1, dest_server1,
-                                                             rule1, ['abc.com'], 'IMSI01', b'1')
+        flow_msg = cls.he_controller.get_subscriber_he_flows(
+            'rule1', Direction.OUT, ue_ip1, tun_id1, dest_server1,
+            rule1, ['abc.com'], 'IMSI01', b'1',
+        )
 
         tun_id2 = 2
         dest_server2 = '20.20.20.40'
         rule2 = 1230
-        flow_msg.extend(cls.he_controller.get_subscriber_he_flows('rule2', Direction.OUT, ue_ip1, tun_id2, dest_server2,
-                                                                  rule2, ['abc1.com'], 'IMSI01', b'1'))
+        flow_msg.extend(
+            cls.he_controller.get_subscriber_he_flows(
+                'rule2', Direction.OUT, ue_ip1, tun_id2, dest_server2,
+                rule2, ['abc1.com'], 'IMSI01', b'1',
+            ),
+        )
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip1), 2)
 
         dest_server2 = '20.20.40.40'
         rule3 = 1230
-        flow_msg.extend(cls.he_controller.get_subscriber_he_flows('rule3', Direction.OUT, ue_ip1, tun_id2, dest_server2,
-                                                                  rule3, ['abc2.com'], 'IMSI01', None))
+        flow_msg.extend(
+            cls.he_controller.get_subscriber_he_flows(
+                'rule3', Direction.OUT, ue_ip1, tun_id2, dest_server2,
+                rule3, ['abc2.com'], 'IMSI01', None,
+            ),
+        )
 
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip1), 3)
 
         dest_server2 = '20.20.50.50'
         rule4 = 22
-        flow_msg.extend(cls.he_controller.get_subscriber_he_flows('rule4', Direction.OUT, ue_ip1, tun_id2, dest_server2,
-                                                                  rule4, ['abc2.com'], 'IMSI01', None))
+        flow_msg.extend(
+            cls.he_controller.get_subscriber_he_flows(
+                'rule4', Direction.OUT, ue_ip1, tun_id2, dest_server2,
+                rule4, ['abc2.com'], 'IMSI01', None,
+            ),
+        )
 
         self.assertEqual(cls.he_controller._ue_rule_counter.get(ue_ip1), 4)
 
@@ -378,11 +439,13 @@ class HeTableTest(unittest.TestCase):
 
         cls.he_controller.remove_subscriber_he_flows(convert_ip_str_to_ip_proto(ue_ip1), "rule1", rule1)
 
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager,
-                                             max_sleep_time=20,
-                                             datapath=HeTableTest.he_controller._datapath)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+            max_sleep_time=20,
+            datapath=HeTableTest.he_controller._datapath,
+        )
 
         with snapshot_verifier:
             pass
@@ -397,10 +460,10 @@ class EnforcementTableHeTest(unittest.TestCase):
     BRIDGE = 'testing_br'
     IFACE = 'testing_br'
     MAC_DEST = "5e:cc:cc:b1:49:4b"
-    he_controller_reference = Future()
+    he_controller_reference: Future = Future()
     VETH = 'tveth1'
     VETH_NS = 'tveth1_ns'
-    PROXY_PORT = '16'
+    PROXY_PORT = '15'
 
     @classmethod
     def setUpClass(cls):
@@ -414,10 +477,10 @@ class EnforcementTableHeTest(unittest.TestCase):
         """
         super(EnforcementTableHeTest, cls).setUpClass()
         warnings.simplefilter('ignore')
-        cls._static_rule_dict = {}
         cls.service_manager = create_service_manager([PipelineD.ENFORCEMENT], ['proxy'])
         cls._tbl_num = cls.service_manager.get_table_num(
-            EnforcementController.APP_NAME)
+            EnforcementController.APP_NAME,
+        )
         BridgeTools.create_bridge(cls.BRIDGE, cls.IFACE)
 
         BridgeTools.create_veth_pair(cls.VETH, cls.VETH_NS)
@@ -429,10 +492,12 @@ class EnforcementTableHeTest(unittest.TestCase):
         he.deactivate_he_urls_for_ue = mocked_deactivate_he_urls_for_ue
 
         test_setup = TestSetup(
-            apps=[PipelinedController.Enforcement,
-                  PipelinedController.HeaderEnrichment,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.Enforcement,
+                PipelinedController.HeaderEnrichment,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.Enforcement:
                     enforcement_controller_reference,
@@ -454,19 +519,18 @@ class EnforcementTableHeTest(unittest.TestCase):
                 'proxy_port_name': cls.VETH,
                 'enable_nat': True,
                 'ovs_gtp_port_number': 10,
+                'setup_type': 'LTE',
             },
             mconfig=PipelineD(),
             loop=None,
             service_manager=cls.service_manager,
-            integ_test=False
+            integ_test=False,
         )
 
         cls.thread = start_ryu_app_thread(test_setup)
 
         cls.enforcement_controller = enforcement_controller_reference.result()
         cls.testing_controller = testing_controller_reference.result()
-
-        cls.enforcement_controller._policy_dict = cls._static_rule_dict
 
     @classmethod
     def tearDownClass(cls):
@@ -478,38 +542,42 @@ class EnforcementTableHeTest(unittest.TestCase):
         Add policy to subscriber with HE config
 
         """
-        cls = self.__class__
-
         fake_controller_setup(self.enforcement_controller)
 
         imsi = 'IMSI010000000088888'
         sub_ip = '192.168.128.74'
-        flow_list1 = [FlowDescription(
-            match=FlowMatch(
-                ip_dst=convert_ipv4_str_to_ip_proto('45.10.0.0/24'),
-                direction=FlowMatch.UPLINK),
-            action=FlowDescription.PERMIT)
+        flow_list1 = [
+            FlowDescription(
+                match=FlowMatch(
+                    ip_dst=convert_ipv4_str_to_ip_proto('45.10.0.0/24'),
+                    direction=FlowMatch.UPLINK,
+                ),
+                action=FlowDescription.PERMIT,
+            ),
         ]
         he = HeaderEnrichment(urls=['abc.com'])
         policies = [
-            PolicyRule(id='simple_match', priority=2, flow_list=flow_list1, he=he)
+            VersionedPolicy(
+                rule=PolicyRule(id='simple_match', priority=2, flow_list=flow_list1, he=he),
+                version=1,
+            ),
         ]
-
-        self._static_rule_dict[policies[0].id] = policies[0]
 
         # ============================ Subscriber ============================
         sub_context = RyuDirectSubscriberContext(
-            imsi, sub_ip, self.enforcement_controller, self._tbl_num
-        ).add_static_rule(policies[0].id)
+            imsi, sub_ip, self.enforcement_controller, self._tbl_num,
+        ).add_policy(policies[0])
 
         isolator = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub_context.cfg)
-                .build_requests(),
-            self.testing_controller
+            .build_requests(),
+            self.testing_controller,
         )
-        snapshot_verifier = SnapshotVerifier(self,
-                                             self.BRIDGE,
-                                             self.service_manager)
+        snapshot_verifier = SnapshotVerifier(
+            self,
+            self.BRIDGE,
+            self.service_manager,
+        )
         with isolator, sub_context, snapshot_verifier:
             pass
 

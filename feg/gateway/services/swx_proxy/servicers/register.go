@@ -20,10 +20,6 @@ import (
 	"strconv"
 	"time"
 
-	"magma/feg/cloud/go/protos"
-	"magma/feg/gateway/diameter"
-	"magma/feg/gateway/services/swx_proxy/metrics"
-
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
 	"github.com/fiorix/go-diameter/v4/diam/datatype"
@@ -31,6 +27,10 @@ import (
 	"github.com/golang/glog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"magma/feg/cloud/go/protos"
+	"magma/feg/gateway/diameter"
+	"magma/feg/gateway/services/swx_proxy/metrics"
 )
 
 // RegisterImpl sends SAR (code 301) over diameter
@@ -78,7 +78,7 @@ func (s *swxProxy) sendSARExt(
 		metrics.SARLatency.Observe(time.Since(sarStartTime).Seconds())
 		if !open {
 			metrics.SwxInvalidSessions.Inc()
-			err = status.Errorf(codes.Aborted, "SAA for Session ID: %s is cancelled", sid)
+			err = status.Errorf(codes.Aborted, "SAA for Session ID: %s is canceled", sid)
 			glog.Error(err)
 			return nil, err
 		}

@@ -11,50 +11,35 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import warnings
-from typing import List
-import subprocess
 import unittest
-from unittest import TestCase
 import unittest.mock
-from unittest.mock import MagicMock
-import grpc
+import warnings
 from concurrent import futures
+from unittest import TestCase
+from unittest.mock import MagicMock
 
-from magma.pipelined.bridge_util import BridgeTools
-from magma.pipelined.tests.app.start_pipelined import (
-    TestSetup,
-    PipelinedController)
-
-from magma.pipelined.tests.pipelined_test_util import (
-    start_ryu_app_thread,
-    stop_ryu_app_thread,
-    create_service_manager,
-    wait_after_send)
-
-import threading
-
+import grpc
 from lte.protos import session_manager_pb2_grpc
 from lte.protos.session_manager_pb2_grpc import SetInterfaceForUserPlaneStub
-from lte.protos.session_manager_pb2 import UPFNodeState
 from magma.pipelined.ng_manager.node_state_manager import NodeStateManager
-from magma.pipelined.set_interface_client import send_node_state_association_request
-from ryu.lib import hub
 from orc8r.protos.common_pb2 import Void
+from ryu.lib import hub
+
 
 class SMFAssociationServerTest(session_manager_pb2_grpc.SetInterfaceForUserPlaneServicer):
 
-     def __init__ (self, loop):
-         self._loop = loop
+    def __init__(self, loop):
+        self._loop = loop
 
-     def add_to_server(self, server):
+    def add_to_server(self, server):
         """
         Add the servicer to a gRPC server
         """
         session_manager_pb2_grpc.add_SetInterfaceForUserPlaneServicer_to_server(self, server)
 
-     def SetUPFNodeState(self, request, context):
-         return (Void())
+    def SetUPFNodeState(self, request, context):
+        return (Void())
+
 
 class RpcTests(unittest.TestCase):
     """
@@ -89,19 +74,18 @@ class RpcTests(unittest.TestCase):
         channel = grpc.insecure_channel('0.0.0.0:{}'.format(port))
         sessiod_interface_stub = SetInterfaceForUserPlaneStub(channel)
 
-        config_mock ={
-                   'enodeb_iface': 'eth1',
-                   'clean_restart': True,
-                   '5G_feature_set': {'enable': True},
-                   '5G_feature_set': {'node_identifier': '192.168.220.1'},
-                   'bridge_name': self.BRIDGE,
-               }
+        config_mock = {
+            'enodeb_iface': 'eth1',
+            'clean_restart': True,
+            'enable5g_features': True,
+            'upf_node_identifier': '192.168.220.1',
+            'bridge_name': self.BRIDGE,
+        }
 
         self._ng_node_mgr = NodeStateManager(loop_mock, sessiod_interface_stub, config_mock)
 
     def tearDown(self):
         self._rpc_server.stop(0)
-
 
     def mock_sessiond_failure_case(self, node_message):
         return False

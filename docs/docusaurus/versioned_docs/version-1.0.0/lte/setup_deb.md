@@ -31,25 +31,14 @@ satisfies the following requirements:
 ## Deployment
 ### 1. Create boot USB stick and install Debian on your AGW host
 
-- Download .iso image from [Debian mirror](http://cdimage.debian.org/mirror/cdimage/archive/9.9.0/amd64/iso-cd/debian-9.9.0-amd64-netinst.iso)
+- Download .iso image from [Debian mirror](https://cdimage.debian.org/cdimage/archive/9.13.0/amd64/iso-cd/debian-9.13.0-amd64-netinst.iso)
 - Create bootable usb using etcher [tutorial here](https://tutorials.ubuntu.com/tutorial/tutorial-create-a-usb-stick-on-macos#0)
 - Boot your AGW host from USB
   (Press F11 to select boot sequence, :warning: This might be different for
   your machine). If you see 2 options to boot from USB, select the non-UEFI
   option.
-- Select “Install” option.
-- Network missing firmeware "No"
-- Primary network interface "enp1s0"
-- Configuration.
-  * Hostname: “magma”
-  * Domain name : “”
-  * Root password: “magma”
-  * Username : “magma”
-  * Password: “magma”
-  * Partition disk: "Use entire disk"
-  * Select disk to partition: "sda"
-  * Partitioning scheme: "All files in one partition"
-  * Only tick ssh server and utilities (untick every other)
+- Install and configure you access gateway according to your network defaults.
+    - Make sure to enable ssh server and utilities (untick every other)
 - Connect your SGi interface to the internet and select this port during the
 installation process to get an IP using DHCP.
 
@@ -58,7 +47,7 @@ installation process to get an IP using DHCP.
 
 ```bash
 su
-wget https://raw.githubusercontent.com/facebookincubator/magma/v1.0.0/lte/gateway/deploy/agw_prepare.sh
+wget https://raw.githubusercontent.com/magma/magma/v1.0.0/lte/gateway/deploy/agw_prepare.sh
 sh agw_prepare.sh
 ```
 
@@ -68,7 +57,7 @@ A prompt will pop up to as you if you want to stop removing linux-image-4.9.0-11
 - [AGW_DEPLOY] Build and run AGW_DEPLOY container
 
 ```bash
-git clone https://github.com/facebookincubator/magma.git ~/magma
+git clone https://github.com/magma/magma.git ~/magma
 git fetch && git fetch --tags
 git checkout v1.0.0
 

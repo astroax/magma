@@ -16,26 +16,27 @@ package test_init
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"magma/orc8r/cloud/go/blobstore"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/directoryd"
-	"magma/orc8r/cloud/go/services/directoryd/servicers"
+	directoryd_protos "magma/orc8r/cloud/go/services/directoryd/protos"
+	servicers "magma/orc8r/cloud/go/services/directoryd/servicers/protected"
 	"magma/orc8r/cloud/go/services/directoryd/storage"
 	"magma/orc8r/cloud/go/sqorc"
 	"magma/orc8r/cloud/go/test_utils"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func StartTestService(t *testing.T) {
 	// Create service
-	srv, lis := test_utils.NewTestService(t, orc8r.ModuleName, directoryd.ServiceName)
+	srv, lis, plis := test_utils.NewTestService(t, orc8r.ModuleName, directoryd.ServiceName)
 
 	// Init storage
 	db, err := sqorc.Open("sqlite3", ":memory:")
 	assert.NoError(t, err)
-	fact := blobstore.NewSQLBlobStorageFactory(storage.DirectorydTableBlobstore, db, sqorc.GetSqlBuilder())
+	fact := blobstore.NewSQLStoreFactory(storage.DirectorydTableBlobstore, db, sqorc.GetSqlBuilder())
 	err = fact.InitializeFactory()
 	assert.NoError(t, err)
 	store := storage.NewDirectorydBlobstore(fact)
@@ -43,9 +44,9 @@ func StartTestService(t *testing.T) {
 	// Add servicers
 	directoryServicer, err := servicers.NewDirectoryLookupServicer(store)
 	assert.NoError(t, err)
-	protos.RegisterDirectoryLookupServer(srv.GrpcServer, directoryServicer)
+	directoryd_protos.RegisterDirectoryLookupServer(srv.ProtectedGrpcServer, directoryServicer)
 	protos.RegisterGatewayDirectoryServiceServer(srv.GrpcServer, servicers.NewDirectoryUpdateServicer())
 
 	// Run service
-	go srv.RunTest(lis)
+	go srv.RunTest(lis, plis)
 }

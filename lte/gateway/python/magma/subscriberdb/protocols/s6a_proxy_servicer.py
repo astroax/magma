@@ -13,11 +13,13 @@ limitations under the License.
 
 import logging
 
+from feg.protos import s6a_proxy_pb2, s6a_proxy_pb2_grpc
+from google.protobuf.json_format import MessageToJson
+from magma.common.rpc_utils import print_grpc
 from magma.subscriberdb import metrics
 from magma.subscriberdb.crypto.utils import CryptoError
 from magma.subscriberdb.store.base import SubscriberNotFoundError
-
-from feg.protos import s6a_proxy_pb2, s6a_proxy_pb2_grpc
+from magma.subscriberdb.subscription.utils import ServiceNotActive
 
 
 class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
@@ -25,9 +27,10 @@ class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
     gRPC based server for the S6aProxy.
     """
 
-    def __init__(self, lte_processor):
+    def __init__(self, lte_processor, print_grpc_payload: bool = False):
         self.lte_processor = lte_processor
         logging.info("starting s6a_proxy servicer")
+        self._print_grpc_payload = print_grpc_payload
 
     def add_to_server(self, server):
         """
@@ -36,13 +39,14 @@ class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
         s6a_proxy_pb2_grpc.add_S6aProxyServicer_to_server(self, server)
 
     def AuthenticationInformation(self, request, context):
+        print_grpc(request, self._print_grpc_payload, "AIR:")
         imsi = request.user_name
         aia = s6a_proxy_pb2.AuthenticationInformationAnswer()
         try:
             plmn = request.visited_plmn
 
             re_sync_info = request.resync_info
-            #resync_info =
+            # resync_info =
             #  rand + auts, rand is of 16 bytes + auts is of 14 bytes
             sizeof_resync_info = 30
             if re_sync_info and (re_sync_info != b'\x00' * sizeof_resync_info):
@@ -68,18 +72,30 @@ class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
         except CryptoError as e:
             logging.error("Auth error for %s: %s", imsi, e)
             metrics.S6A_AUTH_FAILURE_TOTAL.labels(
-                code=metrics.DIAMETER_AUTHENTICATION_REJECTED).inc()
+                code=metrics.DIAMETER_AUTHENTICATION_REJECTED,
+            ).inc()
             aia.error_code = metrics.DIAMETER_AUTHENTICATION_REJECTED
             return aia
 
         except SubscriberNotFoundError as e:
             logging.warning("Subscriber not found: %s", e)
             metrics.S6A_AUTH_FAILURE_TOTAL.labels(
-                code=metrics.DIAMETER_ERROR_USER_UNKNOWN).inc()
+                code=metrics.DIAMETER_ERROR_USER_UNKNOWN,
+            ).inc()
             aia.error_code = metrics.DIAMETER_ERROR_USER_UNKNOWN
             return aia
+        except ServiceNotActive as e:
+            logging.error("Service not active for %s: %s", imsi, e)
+            metrics.M5G_AUTH_FAILURE_TOTAL.labels(
+                code=metrics.DIAMETER_ERROR_UNAUTHORIZED_SERVICE,
+            ).inc()
+            aia.error_code = metrics.DIAMETER_ERROR_UNAUTHORIZED_SERVICE
+            return aia
+        finally:
+            print_grpc(aia, self._print_grpc_payload, "AIA:")
 
     def UpdateLocation(self, request, context):
+        print_grpc(request, self._print_grpc_payload, "ULR:")
         imsi = request.user_name
         ula = s6a_proxy_pb2.UpdateLocationAnswer()
         try:
@@ -87,6 +103,7 @@ class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
         except SubscriberNotFoundError as e:
             ula.error_code = s6a_proxy_pb2.USER_UNKNOWN
             logging.warning('Subscriber not found for ULR: %s', e)
+            print_grpc(ula, self._print_grpc_payload, "ULA:")
             return ula
 
         try:
@@ -94,6 +111,7 @@ class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
         except SubscriberNotFoundError as e:
             ula.error_code = s6a_proxy_pb2.USER_UNKNOWN
             logging.warning("Subscriber not found for ULR: %s", e)
+            print_grpc(ula, self._print_grpc_payload, "ULA:")
             return ula
         ula.error_code = s6a_proxy_pb2.SUCCESS
         ula.default_context_id = 0
@@ -119,13 +137,27 @@ class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
 
             sec_apn.ambr.max_bandwidth_ul = apn.ambr.max_bandwidth_ul
             sec_apn.ambr.max_bandwidth_dl = apn.ambr.max_bandwidth_dl
+            sec_apn.ambr.unit = (
+                s6a_proxy_pb2.UpdateLocationAnswer
+                .AggregatedMaximumBitrate.BitrateUnitsAMBR.BPS
+            )
             sec_apn.pdn = (
                 apn.pdn
                 if apn.pdn
                 else s6a_proxy_pb2.UpdateLocationAnswer.APNConfiguration.IPV4
             )
 
+        print_grpc(ula, self._print_grpc_payload, "ULA:")
         return ula
+
+    def PurgeUE(self, request, context):
+        logging.warning(
+            "Purge request not implemented: %s %s",
+            request.DESCRIPTOR.full_name, MessageToJson(request),
+        )
+        pur = s6a_proxy_pb2.PurgeUEAnswer()
+        print_grpc(pur, self._print_grpc_payload, "PUR:")
+        return pur
 
     @staticmethod
     def encode_msisdn(msisdn: str) -> bytes:
@@ -135,9 +167,9 @@ class S6aProxyRpcServicer(s6a_proxy_pb2_grpc.S6aProxyServicer):
             msisdn = msisdn + "F"
         result = []
         # Treat each 2 characters as a byte and flip the order
-        for i in range(len(msisdn)//2):
-            first = int(msisdn[2*i])
-            second = int(msisdn[2*i+1], 16)
+        for i in range(len(msisdn) // 2):
+            first = int(msisdn[2 * i])
+            second = int(msisdn[2 * i + 1], 16)
             flipped = first + (second << 4)
             result.append(flipped)
         return bytes(result)

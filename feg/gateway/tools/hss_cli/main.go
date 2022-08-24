@@ -138,7 +138,8 @@ func updateSubscriber(_ *commands.Command, _ []string) int {
 		return 1
 	}
 
-	_, err = client.UpdateSubscriber(context.Background(), getSubscriberData())
+	subUpdate := &lteprotos.SubscriberUpdate{Data: getSubscriberData()}
+	_, err = client.UpdateSubscriber(context.Background(), subUpdate)
 	if err != nil {
 		fmt.Printf("Failed to update subscriber: %v\n", err)
 		return 1
@@ -309,7 +310,7 @@ func getSubscriberData() *lteprotos.SubscriberData {
 			},
 			Non_3GppIpAccess:    getNon3GPPIPAccess(),
 			Non_3GppIpAccessApn: getNon3GPPIPAccessApn(),
-			ApnConfig: []*lteprotos.APNConfiguration{&lteprotos.APNConfiguration{
+			ApnConfig: []*lteprotos.APNConfiguration{{
 				ContextId:        uint32(apnContextID),
 				ServiceSelection: serviceSelection,
 				QosProfile: &lteprotos.APNConfiguration_QoSProfile{

@@ -15,9 +15,9 @@
 package unary
 
 import (
+	"context"
 	"log"
 
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,7 +25,7 @@ import (
 	"magma/orc8r/lib/go/protos"
 )
 
-// BlockUnregisteredGateways is an Interceptor blocking calls from Gateways
+// BlockUnregisteredGateways is an interceptor blocking calls from Gateways
 // which were not registered on the cloud.
 // BlockUnregisteredGateways must be invoked after Identity Decorator since
 // it relies on the Identity Decorator's results
@@ -44,9 +44,7 @@ func BlockUnregisteredGateways(
 			rpc = "Undefined"
 		}
 		log.Printf("Blocking %s call from unregisterd Gateway %+v", rpc, gw)
-		err = status.Errorf(
-			codes.PermissionDenied, "Unregistered Gateway %s",
-			gw.GetHardwareId())
+		err = status.Errorf(codes.PermissionDenied, "Unregistered Gateway %s", gw.GetHardwareId())
 	}
 	return
 }

@@ -14,41 +14,41 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 
-	"magma/orc8r/cloud/go/services/configurator"
-
 	"github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
-	"github.com/pkg/errors"
+
+	"magma/orc8r/cloud/go/services/configurator"
 )
 
-func (m FegNetworkID) ValidateModel() error {
+func (m FegNetworkID) ValidateModel(ctx context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	if !swag.IsZero(m) {
-		exists, err := configurator.DoesNetworkExist(string(m))
+		exists, err := configurator.DoesNetworkExist(ctx, string(m))
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Failed to search for network %s", string(m)))
+			return fmt.Errorf("Failed to search for network %s: %w", string(m), err)
 		}
 		if !exists {
-			return errors.New(fmt.Sprintf("Network: %s does not exist", string(m)))
+			return fmt.Errorf("Network: %s does not exist", string(m))
 		}
 	}
 	return nil
 }
 
-func (m *FederatedNetworkConfigs) ValidateModel() error {
+func (m *FederatedNetworkConfigs) ValidateModel(ctx context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	nid := *m.FegNetworkID
 	if !swag.IsZero(nid) {
-		exists, err := configurator.DoesNetworkExist(nid)
+		exists, err := configurator.DoesNetworkExist(ctx, nid)
 		if err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Failed to search for network %s", nid))
+			return fmt.Errorf("Failed to search for network %s: %w", nid, err)
 		}
 		if !exists {
 			return fmt.Errorf("Network: %s does not exist", nid)
@@ -57,28 +57,28 @@ func (m *FederatedNetworkConfigs) ValidateModel() error {
 	return nil
 }
 
-func (m *DiameterClientConfigs) ValidateModel() error {
+func (m *DiameterClientConfigs) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *DiameterServerConfigs) ValidateModel() error {
+func (m *DiameterServerConfigs) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *EapAkaTimeouts) ValidateModel() error {
+func (m *EapAkaTimeouts) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *GatewayFederationConfigs) ValidateModel() error {
+func (m *GatewayFederationConfigs) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (m *GatewayFederationConfigs) ValidateModel() error {
 
 var nhRouteRegex = regexp.MustCompile(`^(\d{5,6})$`)
 
-func (m *NetworkFederationConfigs) ValidateModel() error {
+func (m *NetworkFederationConfigs) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func (m *NetworkFederationConfigs) ValidateModel() error {
 	return nil
 }
 
-func (m *SubscriptionProfile) ValidateModel() error {
+func (m *SubscriptionProfile) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}

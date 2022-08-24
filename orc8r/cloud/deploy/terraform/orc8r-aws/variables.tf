@@ -34,9 +34,29 @@ variable "deploy_elasticsearch_service_linked_role" {
   default     = true
 }
 
+
+variable "enable_aws_db_notifications" {
+  description = "Flag to enable AWS RDS notifications"
+  type        = bool
+  default     = false
+}
+
+variable "magma_uuid" {
+  description = "UUID to identify Orc8r deployment"
+  type        = string
+  default     = "default"
+}
+
 variable "global_tags" {
   default = {}
 }
+
+variable "enable_orc8r_blue_green_deployment" {
+  description = "Flag to enable the deployment for a blue & green Orc8r instances in the same infrastructure"
+  type        = bool
+  default     = false
+}
+
 ##############################################################################
 # K8s configuration
 ##############################################################################
@@ -59,7 +79,7 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "Kubernetes version for the EKS cluster."
   type        = string
-  default     = "1.17"
+  default     = "1.21"
 }
 
 variable "eks_worker_group_key" {
@@ -93,7 +113,7 @@ variable "eks_worker_groups" {
       asg_min_size         = 1
       asg_max_size         = 3
       autoscaling_enabled  = false
-      kubelet_extra_args = "" // object types must be identical (see thanos_worker_groups)
+      kubelet_extra_args   = "" // object types must be identical (see thanos_worker_groups)
     },
   ]
 }
@@ -115,10 +135,30 @@ variable "thanos_worker_groups" {
       asg_min_size         = 1
       asg_max_size         = 1
       autoscaling_enabled  = false
-      kubelet_extra_args = "--node-labels=compute-type=thanos"
+      kubelet_extra_args   = "--node-labels=compute-type=thanos"
     },
   ]
 
+}
+
+variable "blue_green_worker_groups" {
+  # Check the docs at https://github.com/terraform-aws-modules/terraform-aws-eks
+  # for the complete set of valid properties for these objects. This worker group exists
+  # in order to increase the capacity of the EKS resources to accommodate a second instance
+  # of the Orc8r/NMS
+  description = "Worker group configuration for EKS. Default value is 1 worker group consisting of 5 t3.medium instances."
+  type        = any
+  default = [
+    {
+      name                 = "wg-1"
+      instance_type        = "t3.medium"
+      asg_desired_capacity = 8
+      asg_min_size         = 1
+      asg_max_size         = 8
+      autoscaling_enabled  = false
+      kubelet_extra_args   = "" // object types must be identical (see thanos_worker_groups)
+    },
+  ]
 }
 
 variable "eks_map_roles" {
@@ -141,6 +181,12 @@ variable "eks_map_users" {
     groups   = list(string)
   }))
   default = []
+}
+
+variable "eks_enable_irsa" {
+  description = "Enable IAM Roles for Service Accounts (IRSA) on the EKS cluster."
+  type        = bool
+  default     = true
 }
 
 ##############################################################################
@@ -236,53 +282,39 @@ variable "orc8r_db_password" {
 variable "orc8r_db_engine_version" {
   description = "Postgres engine version for Orchestrator DB."
   type        = string
-  default     = "9.6.15"
+  default     = "12.8"
 }
 
-##############################################################################
-# NMS DB Specs
-##############################################################################
-
-variable "nms_db_identifier" {
-  description = "Identifier for the RDS instance for NMS."
+variable "orc8r_db_dialect" {
+  description = "Database dialect for Orchestrator DB."
   type        = string
-  default     = "nmsdb"
+  default     = "postgres"
 }
 
-variable "nms_db_storage_gb" {
-  description = "Capacity in GB to allocate for NMS RDS instance."
+variable "orc8r_db_backup_retention" {
+  description = "Database backup retention period"
   type        = number
-  default     = 16
+  default     = 7
 }
 
-variable "nms_db_instance_class" {
-  description = "RDS instance type for NMS DB."
+variable "orc8r_db_backup_window" {
+  description = "Database daily backup window in UTC with a 30-minute minimum"
   type        = string
-  default     = "db.m4.large"
+  default     = "01:00-01:30"
 }
 
-variable "nms_db_name" {
-  description = "DB name for NMS RDS instance."
+variable "orc8r_db_event_subscription" {
+  description = "Database event subscription"
   type        = string
-  default     = "magma"
+  default     = "orc8r-rds-events"
 }
 
-variable "nms_db_username" {
-  description = "Username for default DB user for NMS DB."
-  type        = string
-  default     = "magma"
+variable "orc8r_db_apply_immediately" {
+  description = "Flag to immediately upgrade RDS without waiting for a maintenance window"
+  type        = bool
+  default     = false
 }
 
-variable "nms_db_password" {
-  description = "Password for the NMS DB. Must be at least 8 characters."
-  type        = string
-}
-
-variable "nms_db_engine_version" {
-  description = "MySQL engine version for NMS DB."
-  type        = string
-  default     = "5.7"
-}
 
 ##############################################################################
 # Secretmanager configuration
@@ -291,6 +323,16 @@ variable "nms_db_engine_version" {
 variable "secretsmanager_orc8r_secret" {
   description = "AWS Secret Manager secret to store Orchestrator secrets."
   type        = string
+}
+
+##############################################################################
+# Setup IAM Role for cert-manager
+##############################################################################
+
+variable "setup_cert_manager" {
+  description = "Create IAM role and policy for cert-manager."
+  type        = bool
+  default     = false
 }
 
 ##############################################################################
@@ -375,6 +417,22 @@ variable "elasticsearch_domain_tags" {
 
 variable "thanos_enabled" {
   description = "Enable thanos infrastructure"
-  type = bool
-  default = false
+  type        = bool
+  default     = false
+}
+
+##############################################################################
+# Simple Notification Service (SNS) configuration
+##############################################################################
+
+variable "orc8r_sns_name" {
+  description = "SNS for Orc8r to redirect alerts and notifications"
+  type        = string
+  default     = "orc8r-sns"
+}
+
+variable "orc8r_sns_email" {
+  description = "SNS email endpoint to send notifications"
+  type        = string
+  default     = ""
 }

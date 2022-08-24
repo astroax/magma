@@ -138,6 +138,8 @@ message SgwEpsBearerContext {
     repeated uint32 sdf_ids = 26;
 
     string policy_rule_name = 27;
+
+    bytes sgw_ipv6_address_s1u_s12_s4_up = 28;
 }
 
 // traffic_flow_template
@@ -164,7 +166,7 @@ message PacketFilter {
     uint32 identifier = 3;
     uint32 eval_precedence = 4;
     uint32 length = 5;
-    PacketFilterContents packet_filter_contents = 6;
+    repeated PacketFilterContents packet_filter_contents = 6;
 }
 
 // eps_bearer_qos_t
@@ -190,16 +192,15 @@ message S11BearerContext {
 
 // gtvpv1u_data
 message GTPV1uData {
-    string ip_address = 1;
-    uint32 seq_num = 2;
-    uint32 restart_counter = 3;
+    string ip_address = 1      [deprecated = true];
+    uint32 seq_num = 2         [deprecated = true];
+    uint32 restart_counter = 3 [deprecated = true];
 
     uint32 fd0 = 4;
     uint32 fd1u = 5;
 }
 
 message SpgwState {
-    uint32 last_tunnel_id = 1;
     uint32 gtpv1u_teid = 2;
 
     repeated uint64 ipv4_list_free = 5;

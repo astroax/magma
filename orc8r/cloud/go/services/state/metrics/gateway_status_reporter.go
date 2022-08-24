@@ -14,16 +14,17 @@ limitations under the License.
 package metrics
 
 import (
+	"context"
 	"time"
+
+	"github.com/go-openapi/swag"
+	"github.com/golang/glog"
 
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/serdes"
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/state/wrappers"
-	"magma/orc8r/lib/go/errors"
-
-	"github.com/go-openapi/swag"
-	"github.com/golang/glog"
+	"magma/orc8r/lib/go/merrors"
 )
 
 func PeriodicallyReportGatewayStatus(dur time.Duration) {
@@ -36,12 +37,13 @@ func PeriodicallyReportGatewayStatus(dur time.Duration) {
 }
 
 func reportGatewayStatus() error {
-	networks, err := configurator.ListNetworkIDs()
+	networks, err := configurator.ListNetworkIDs(context.Background())
 	if err != nil {
 		return err
 	}
 	for _, networkID := range networks {
 		gateways, _, err := configurator.LoadEntities(
+			context.Background(),
 			networkID,
 			swag.String(orc8r.MagmadGatewayType),
 			nil,
@@ -57,9 +59,9 @@ func reportGatewayStatus() error {
 		numUpGateways := 0
 		for _, gatewayEntity := range gateways {
 			gatewayID := gatewayEntity.Key
-			status, err := wrappers.GetGatewayStatus(networkID, gatewayEntity.PhysicalID)
+			status, err := wrappers.GetGatewayStatus(context.Background(), networkID, gatewayEntity.PhysicalID)
 			if err != nil {
-				if err != errors.ErrNotFound {
+				if err != merrors.ErrNotFound {
 					glog.Errorf("Error getting gateway state for network:%v, gateway:%v, %v", networkID, gatewayID, err)
 				}
 				continue

@@ -14,8 +14,14 @@
 package handlers_test
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/go-openapi/strfmt"
+	"github.com/go-openapi/swag"
+	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
 
 	"magma/cwf/cloud/go/cwf"
 	"magma/cwf/cloud/go/serdes"
@@ -25,25 +31,19 @@ import (
 	models3 "magma/feg/cloud/go/services/feg/obsidian/models"
 	"magma/orc8r/cloud/go/clock"
 	models5 "magma/orc8r/cloud/go/models"
-	"magma/orc8r/cloud/go/obsidian"
-	"magma/orc8r/cloud/go/obsidian/tests"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/serde"
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/configurator/test_init"
 	deviceTestInit "magma/orc8r/cloud/go/services/device/test_init"
 	directorydTypes "magma/orc8r/cloud/go/services/directoryd/types"
+	"magma/orc8r/cloud/go/services/obsidian"
+	"magma/orc8r/cloud/go/services/obsidian/tests"
 	"magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
 	"magma/orc8r/cloud/go/services/state"
 	stateTestInit "magma/orc8r/cloud/go/services/state/test_init"
 	"magma/orc8r/cloud/go/services/state/test_utils"
 	"magma/orc8r/lib/go/protos"
-
-	"github.com/go-openapi/strfmt"
-	"github.com/go-openapi/swag"
-	"github.com/labstack/echo"
-	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 )
 
 func TestCwfNetworks(t *testing.T) {
@@ -181,7 +181,7 @@ func TestCwfNetworks(t *testing.T) {
 	}
 	tests.RunUnitTest(t, e, tc)
 
-	actualN1, err := configurator.LoadNetwork("n1", true, true, serdes.Network)
+	actualN1, err := configurator.LoadNetwork(context.Background(), "n1", true, true, serdes.Network)
 	assert.NoError(t, err)
 	expected := configurator.Network{
 		ID:          "n1",
@@ -410,7 +410,6 @@ func TestCwfGateways(t *testing.T) {
 		},
 	}
 	expected["g1"].Status.CheckinTime = uint64(time.Unix(1000000, 0).UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond)))
-	expected["g1"].Status.CertExpirationTime = time.Unix(1000000, 0).Add(time.Hour * 4).Unix()
 	tc = tests.Test{
 		Method:         "GET",
 		URL:            "/magma/v1/cwf/n1/gateways",
@@ -451,7 +450,6 @@ func TestCwfGateways(t *testing.T) {
 		Status: models.NewDefaultGatewayStatus("hw1"),
 	}
 	expectedGet.Status.CheckinTime = uint64(time.Unix(1000000, 0).UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond)))
-	expectedGet.Status.CertExpirationTime = time.Unix(1000000, 0).Add(time.Hour * 4).Unix()
 	tc = tests.Test{
 		Method:         "GET",
 		URL:            "/magma/v1/cwf/n1/gateways/g1",
@@ -830,56 +828,50 @@ func TestCwfHaPairs(t *testing.T) {
 // n1, n3 are cwf networks, n2, n5 are not
 func seedCwfNetworks(t *testing.T) {
 	fegNetworkID := "n5"
-	_, err := configurator.CreateNetworks(
-		[]configurator.Network{
-			{
-				ID:          fegNetworkID,
-				Type:        feg.FederationNetworkType,
-				Name:        "foobar",
-				Description: "Foo Bar",
-				Configs: map[string]interface{}{
-					feg.FegNetworkType:          models3.NewDefaultNetworkFederationConfigs(),
-					orc8r.NetworkFeaturesConfig: models.NewDefaultFeaturesConfig(),
-					orc8r.DnsdNetworkType:       models.NewDefaultDNSConfig(),
-				},
+	_, err := configurator.CreateNetworks(context.Background(), []configurator.Network{
+		{
+			ID:          fegNetworkID,
+			Type:        feg.FederationNetworkType,
+			Name:        "foobar",
+			Description: "Foo Bar",
+			Configs: map[string]interface{}{
+				feg.FegNetworkType:          models3.NewDefaultNetworkFederationConfigs(),
+				orc8r.NetworkFeaturesConfig: models.NewDefaultFeaturesConfig(),
+				orc8r.DnsdNetworkType:       models.NewDefaultDNSConfig(),
 			},
 		},
-		serdes.Network,
-	)
+	}, serdes.Network)
 	assert.NoError(t, err)
-	_, err = configurator.CreateNetworks(
-		[]configurator.Network{
-			{
-				ID:          "n1",
-				Type:        cwf.CwfNetworkType,
-				Name:        "foobar",
-				Description: "Foo Bar",
-				Configs: map[string]interface{}{
-					cwf.CwfNetworkType: models2.NewDefaultNetworkCarrierWifiConfigs(),
-					feg.FederatedNetworkType: &models3.FederatedNetworkConfigs{
-						FegNetworkID: &fegNetworkID,
-					},
-					orc8r.NetworkFeaturesConfig: models.NewDefaultFeaturesConfig(),
-					orc8r.DnsdNetworkType:       models.NewDefaultDNSConfig(),
+	_, err = configurator.CreateNetworks(context.Background(), []configurator.Network{
+		{
+			ID:          "n1",
+			Type:        cwf.CwfNetworkType,
+			Name:        "foobar",
+			Description: "Foo Bar",
+			Configs: map[string]interface{}{
+				cwf.CwfNetworkType: models2.NewDefaultNetworkCarrierWifiConfigs(),
+				feg.FederatedNetworkType: &models3.FederatedNetworkConfigs{
+					FegNetworkID: &fegNetworkID,
 				},
-			},
-			{
-				ID:          "n2",
-				Type:        "blah",
-				Name:        "foobar",
-				Description: "Foo Bar",
-				Configs:     map[string]interface{}{},
-			},
-			{
-				ID:          "n3",
-				Type:        cwf.CwfNetworkType,
-				Name:        "barfoo",
-				Description: "Bar Foo",
-				Configs:     map[string]interface{}{},
+				orc8r.NetworkFeaturesConfig: models.NewDefaultFeaturesConfig(),
+				orc8r.DnsdNetworkType:       models.NewDefaultDNSConfig(),
 			},
 		},
-		serdes.Network,
-	)
+		{
+			ID:          "n2",
+			Type:        "blah",
+			Name:        "foobar",
+			Description: "Foo Bar",
+			Configs:     map[string]interface{}{},
+		},
+		{
+			ID:          "n3",
+			Type:        cwf.CwfNetworkType,
+			Name:        "barfoo",
+			Description: "Bar Foo",
+			Configs:     map[string]interface{}{},
+		},
+	}, serdes.Network)
 	assert.NoError(t, err)
 }
 
@@ -992,12 +984,8 @@ func seedCwfGateway(t *testing.T, id string, hwId string) {
 
 func seedCwfTier(t *testing.T, networkID string) {
 	// setup fixtures in backend
-	_, err := configurator.CreateEntities(
-		networkID,
-		[]configurator.NetworkEntity{
-			{Type: orc8r.UpgradeTierEntityType, Key: "t1"},
-		},
-		serdes.Entity,
-	)
+	_, err := configurator.CreateEntities(context.Background(), networkID, []configurator.NetworkEntity{
+		{Type: orc8r.UpgradeTierEntityType, Key: "t1"},
+	}, serdes.Entity)
 	assert.NoError(t, err)
 }

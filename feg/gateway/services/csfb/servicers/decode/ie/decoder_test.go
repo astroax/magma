@@ -17,11 +17,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"magma/feg/gateway/services/csfb/servicers/decode"
 	"magma/feg/gateway/services/csfb/servicers/decode/ie"
 	"magma/feg/gateway/services/csfb/servicers/decode/test_utils"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestDecodeIMSI(t *testing.T) {
@@ -169,6 +169,7 @@ func TestDecodeVariableLengthIE(t *testing.T) {
 	)
 	assert.EqualError(t, err, errorMsg)
 	assert.Equal(t, []byte{}, mmInfo)
+	assert.Equal(t, -1, ieLength)
 }
 
 func TestDecodeLimitedLengthIE(t *testing.T) {

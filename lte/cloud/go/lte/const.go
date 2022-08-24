@@ -63,17 +63,19 @@ const (
 	NetworkSubscriberConfigType = "network_subscriber_config"
 
 	// APNEntityType etc. are configurator network entity types.
-	APNEntityType                 = "apn"
-	APNPolicyProfileEntityType    = "apn_policy_profile"
-	APNResourceEntityType         = "apn_resource"
-	BaseNameEntityType            = "base_name"
-	CellularEnodebEntityType      = "cellular_enodeb"
-	CellularGatewayEntityType     = "cellular_gateway"
-	CellularGatewayPoolEntityType = "cellular_gateway_pool"
-	PolicyQoSProfileEntityType    = "policy_qos_profile"
-	PolicyRuleEntityType          = "policy"
-	RatingGroupEntityType         = "rating_group"
-	SubscriberEntityType          = "subscriber"
+	APNEntityType                     = "apn"
+	APNPolicyProfileEntityType        = "apn_policy_profile"
+	APNResourceEntityType             = "apn_resource"
+	BaseNameEntityType                = "base_name"
+	CellularEnodebEntityType          = "cellular_enodeb"
+	CellularGatewayEntityType         = "cellular_gateway"
+	CellularGatewayPoolEntityType     = "cellular_gateway_pool"
+	PolicyQoSProfileEntityType        = "policy_qos_profile"
+	PolicyRuleEntityType              = "policy"
+	RatingGroupEntityType             = "rating_group"
+	SubscriberEntityType              = "subscriber"
+	NetworkProbeTaskEntityType        = "network_probe_task"
+	NetworkProbeDestinationEntityType = "network_probe_destination"
 
 	// ApnRuleMappingsStreamName etc. are streamer stream names.
 	ApnRuleMappingsStreamName  = "apn_rule_mappings"
@@ -84,13 +86,14 @@ const (
 	SubscriberStreamName       = "subscriberdb"
 
 	// EnodebStateType etc. denote types of state replicated from AGWs.
-	EnodebStateType     = "single_enodeb"
-	ICMPStateType       = "icmp_monitoring"
-	MMEStateType        = "MME"
-	MobilitydStateType  = "mobilityd_ipdesc_record"
-	S1APStateType       = "S1AP"
-	SPGWStateType       = "SPGW"
-	SubscriberStateType = "subscriber_state"
+	EnodebStateType            = "single_enodeb"
+	ICMPStateType              = "icmp_monitoring"
+	MMEStateType               = "MME"
+	MobilitydStateType         = "mobilityd_ipdesc_record"
+	S1APStateType              = "S1AP"
+	SPGWStateType              = "SPGW"
+	SubscriberStateType        = "subscriber_state"
+	GatewaySubscriberStateType = "gateway_subscriber_state"
 
 	// MSISDNBlobstoreType etc. denote blob types stored in blobstore tables.
 	MSISDNBlobstoreType = "msisdn"

@@ -18,6 +18,8 @@ magma-gen-meta:
       filename: dns_config_record_swaggergen.go
     - go-struct-name: NetworkFeatures
       filename: network_features_swaggergen.go
+    - go-struct-name: NetworkSentryConfig
+      filename: network_sentry_config_swaggergen.go
     - go-struct-name: ChallengeKey
       filename: challenge_key_swaggergen.go
     - go-struct-name: ConfigInfo
@@ -36,8 +38,8 @@ magma-gen-meta:
       filename: machine_info_swaggergen.go
     - go-struct-name: NetworkInterface
       filename: network_interface_swaggergen.go
-    - go-struct-name: Package
-      filename: package_swaggergen.go
+    - go-struct-name: DistributionPackage
+      filename: distribution_package_swaggergen.go
     - go-struct-name: PlatformInfo
       filename: platform_info_swaggergen.go
     - go-struct-name: Route
@@ -85,8 +87,14 @@ info:
   version: 1.0.0
 
 tags:
+  - name: Networks
+    description: Everything about networks
+  - name: Gateways
+    description: Provision and manage gateways
   - name: Upgrades
     description: Configuration to manage upgrades
+  - name: About
+    description: Version info
 
 basePath: /magma/v1
 
@@ -297,6 +305,68 @@ paths:
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
 
+  /networks/{network_id}/sentry:
+    get:
+      summary: Get the Sentry.io configuration for network
+      tags:
+        - Networks
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+      responses:
+        '200':
+          description: Network-wide Sentry.io configuration
+          schema:
+            $ref: '#/definitions/network_sentry_config'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    put:
+      summary: Update the Sentry.io configuration for network
+      tags:
+        - Networks
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - name: network_sentry_config
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/network_sentry_config'
+      responses:
+        '204':
+          description: Success
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+  /networks/{network_id}/state:
+    get:
+      summary: Get the state configuration for network
+      tags:
+        - Networks
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+      responses:
+        '200':
+          description: State configuration
+          schema:
+            $ref: '#/definitions/state_config'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+    put:
+      summary: Update the state configuration for network
+      tags:
+        - Networks
+      parameters:
+        - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - name: state_config
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/state_config'
+      responses:
+        '204':
+          description: Success
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
   /networks/{network_id}/dns:
     get:
       summary: Get DNS of network
@@ -433,13 +503,13 @@ paths:
         - Gateways
       parameters:
         - $ref: './orc8r-swagger-common.yml#/parameters/network_id'
+        - $ref: './orc8r-swagger-common.yml#/parameters/page_size'
+        - $ref: './orc8r-swagger-common.yml#/parameters/page_token'
       responses:
         '200':
-          description: Map of all gateways inside the network by gatewayID
+          description: Map of all gateways inside the network by gatewayID with pagination support
           schema:
-            type: object
-            additionalProperties:
-              $ref: '#/definitions/magmad_gateway'
+            $ref: '#/definitions/paginated_gateways'
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
     post:
@@ -1220,6 +1290,20 @@ paths:
         default:
           $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
 
+  /about/version:
+    get:
+      summary: Get version
+      tags:
+        - About
+      responses:
+        '200':
+          description: Version
+          schema:
+            $ref: '#/definitions/version_info'
+        default:
+          $ref: './orc8r-swagger-common.yml#/responses/UnexpectedError'
+
+
 parameters:
   channel_id:
     in: path
@@ -1271,6 +1355,10 @@ definitions:
         $ref: '#/definitions/network_dns_config'
       features:
         $ref: '#/definitions/network_features'
+      sentry_config:
+        $ref: '#/definitions/network_sentry_config'
+      state_config:
+        $ref: '#/definitions/state_config'
 
   network_dns_config:
     description: DNS configuration for a network
@@ -1344,11 +1432,62 @@ definitions:
           featureName1: featureProp1
           featureName2: featureProp2
 
+  network_sentry_config:
+    type: object
+    description: Sentry.io configuration
+    properties:
+      url_python:
+        type: string
+        format: uri
+        minLength: 0
+        x-nullable: false
+        example: https://examplePublicKey@o0.ingest.sentry.io/0
+      url_native:
+        type: string
+        format: uri
+        minLength: 0
+        x-nullable: false
+        example: https://examplePublicKey@o0.ingest.sentry.io/0
+      upload_mme_log:
+        type: boolean
+        example: false
+      number_of_lines_in_log:
+        type: integer
+        format: uint32
+        example: 1000
+      sample_rate:
+        type: number
+        format: float
+        minimum: 0
+        maximum: 1
+        example: 0.5
+      exclusion_patterns:
+        type: array
+        items:
+          type: string
+        minItems: 0
+        description: log message patterns that are excluded (regex substring match)
+    default:
+      upload_mme_log: false
+      number_of_lines_in_log: 0
+      sample_rate: 1
+      exclusion_patterns: []
+
+  state_config:
+    type: object
+    description: State configuration
+    properties:
+      sync_interval:
+        description: Sync interval in seconds
+        type: number
+        format: uint32
+        minimum: 3
+        example: 60
+
   magmad_gateway:
     type: object
     description: Full representation of a generic gateway
     required:
-      - device
       - id
       - name
       - description
@@ -1357,6 +1496,8 @@ definitions:
     properties:
       device:
         $ref: '#/definitions/gateway_device'
+      registration_info:
+        $ref: './orc8r-swagger-common.yml#/definitions/registration_info'
       id:
         $ref: './orc8r-swagger-common.yml#/definitions/gateway_id'
       name:
@@ -1727,7 +1868,7 @@ definitions:
         x-omitempty: true
         items:
           $ref: '#/definitions/disk_partition'
-  package:
+  distribution_package:
     type: object
     properties:
       name:
@@ -1756,7 +1897,7 @@ definitions:
         type: array
         x-omitempty: true
         items:
-          $ref: '#/definitions/package'
+          $ref: '#/definitions/distribution_package'
       kernel_version:
         type: string
         example: 4.9.0-6-amd64
@@ -1957,3 +2098,35 @@ definitions:
 
   elastic_hit_count:
     type: number
+
+  version_info:
+    type: object
+    properties:
+      container_image_version:
+        type: string
+        example: 1.6.0
+      helm_chart_version:
+        type: string
+        example: 1.5.21
+
+  paginated_gateways:
+    description: Page of gateways
+    properties:
+      page_token:
+        $ref: './orc8r-swagger-common.yml#/definitions/page_token'
+      gateways:
+        additionalProperties:
+          x-nullable: true
+          $ref: '#/definitions/magmad_gateway'
+        type: object
+      total_count:
+        description: Estimated total number of gateways
+        example: 10
+        format: int64
+        type: integer
+        x-nullable: false
+    required:
+      - page_token
+      - gateways
+      - total_count
+    type: object

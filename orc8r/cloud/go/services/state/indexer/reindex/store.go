@@ -14,12 +14,13 @@ limitations under the License.
 package reindex
 
 import (
-	"magma/orc8r/cloud/go/blobstore"
-	state_types "magma/orc8r/cloud/go/services/state/types"
+	"fmt"
 
-	"github.com/pkg/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"magma/orc8r/cloud/go/blobstore"
+	state_types "magma/orc8r/cloud/go/services/state/types"
 )
 
 // Store provides a cross-network DAO for local usage by the state service.
@@ -28,15 +29,15 @@ type Store interface {
 	GetAllIDs() (state_types.IDsByNetwork, error)
 }
 
-type storeImpl struct {
-	factory blobstore.BlobStorageFactory
+type store struct {
+	factory blobstore.StoreFactory
 }
 
-func NewStore(factory blobstore.BlobStorageFactory) Store {
-	return &storeImpl{factory: factory}
+func NewStore(factory blobstore.StoreFactory) Store {
+	return &store{factory: factory}
 }
 
-func (s *storeImpl) GetAllIDs() (state_types.IDsByNetwork, error) {
+func (s *store) GetAllIDs() (state_types.IDsByNetwork, error) {
 	store, err := s.factory.StartTransaction(nil)
 	if err != nil {
 		return nil, internalErr(err, "GetAllIDs blobstore start transaction")
@@ -70,6 +71,6 @@ func blobsToIDs(byNetwork map[string]blobstore.Blobs) state_types.IDsByNetwork {
 }
 
 func internalErr(err error, wrap string) error {
-	e := errors.Wrap(err, wrap)
+	e := fmt.Errorf(wrap+": %w", err)
 	return status.Error(codes.Internal, e.Error())
 }

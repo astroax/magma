@@ -17,16 +17,16 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/fiorix/go-diameter/v4/diam"
+	"github.com/fiorix/go-diameter/v4/diam/avp"
+	"github.com/fiorix/go-diameter/v4/diam/datatype"
+	"github.com/golang/glog"
+
 	fegprotos "magma/feg/cloud/go/protos"
 	"magma/feg/gateway/diameter"
 	"magma/feg/gateway/services/swx_proxy/servicers"
 	"magma/feg/gateway/services/testcore/hss/storage"
 	lteprotos "magma/lte/cloud/go/protos"
-
-	"github.com/fiorix/go-diameter/v4/diam"
-	"github.com/fiorix/go-diameter/v4/diam/avp"
-	"github.com/fiorix/go-diameter/v4/diam/datatype"
-	"github.com/golang/glog"
 )
 
 // NewSAA outputs a server assignment answer (SAA) to reply to a server
@@ -62,7 +62,7 @@ func NewSAA(srv *HomeSubscriberServer, msg *diam.Message) (*diam.Message, error)
 
 	if subscriber.GetNon_3Gpp().GetApnConfig() == nil {
 		subscriber.State.TgppAaaServerName = ""
-		err = srv.store.UpdateSubscriber(subscriber)
+		err = srv.store.UpdateSubscriber(&lteprotos.SubscriberUpdate{Data: subscriber})
 		if err != nil {
 			glog.Errorf("Failed to remove the 3GPP AAA Server name: %v", err)
 		}
@@ -77,7 +77,7 @@ func NewSAA(srv *HomeSubscriberServer, msg *diam.Message) (*diam.Message, error)
 	case servicers.ServerAssignnmentType_USER_DEREGISTRATION:
 		subscriber.State.TgppAaaServerName = ""
 		subscriber.State.TgppAaaServerRegistered = false
-		err = srv.store.UpdateSubscriber(subscriber)
+		err = srv.store.UpdateSubscriber(&lteprotos.SubscriberUpdate{Data: subscriber})
 		if err != nil {
 			err = fmt.Errorf("Failed to deregister 3GPP AAA server: %v", err)
 			return ConstructFailureAnswer(msg, sar.SessionID, srv.Config.Server, uint32(diam.UnableToComply)), err
@@ -85,7 +85,7 @@ func NewSAA(srv *HomeSubscriberServer, msg *diam.Message) (*diam.Message, error)
 
 	case servicers.ServerAssignmentType_REGISTRATION:
 		subscriber.State.TgppAaaServerRegistered = true
-		err = srv.store.UpdateSubscriber(subscriber)
+		err = srv.store.UpdateSubscriber(&lteprotos.SubscriberUpdate{Data: subscriber})
 		if err != nil {
 			err = fmt.Errorf("Failed to register 3GPP AAA server: %v", err)
 			return ConstructFailureAnswer(msg, sar.SessionID, srv.Config.Server, uint32(diam.UnableToComply)), err

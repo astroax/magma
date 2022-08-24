@@ -16,12 +16,12 @@ package main
 import (
 	"flag"
 
+	"github.com/golang/glog"
+
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/feg_hello/servicers"
 	"magma/orc8r/lib/go/service"
-
-	"github.com/golang/glog"
 )
 
 func init() {
@@ -30,7 +30,7 @@ func init() {
 
 func main() {
 	// Create the service
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.FEG_HELLO)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.FEG_HELLO)
 	if err != nil {
 		glog.Fatalf("Error creating FEG_HELLO service: %s", err)
 	}

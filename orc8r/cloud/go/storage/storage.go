@@ -17,24 +17,13 @@ package storage
 
 import (
 	"fmt"
-
-	"magma/orc8r/lib/go/definitions"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/thoas/go-funk"
+
+	"magma/orc8r/lib/go/definitions"
 )
-
-var (
-	SQLDriver      = definitions.GetEnvWithDefault("SQL_DRIVER", "sqlite3")
-	DatabaseSource = definitions.GetEnvWithDefault("DATABASE_SOURCE", ":memory:")
-)
-
-type TypeAndKey struct {
-	Type string
-	Key  string
-}
-
-type TKs []TypeAndKey
 
 type IsolationLevel int
 
@@ -55,9 +44,20 @@ const (
 	LevelLinearizable
 )
 
-func (tk TypeAndKey) String() string {
+type TK struct {
+	Type string
+	Key  string
+}
+
+func (tk TK) String() string {
 	return fmt.Sprintf("%s-%s", tk.Type, tk.Key)
 }
+
+func (tk TK) IsLessThan(tkb TK) bool {
+	return tk.String() < tkb.String()
+}
+
+type TKs []TK
 
 // Filter returns the tks which match the passed type.
 func (tks TKs) Filter(typ string) TKs {
@@ -83,13 +83,13 @@ func (tks TKs) MultiFilter(types ...string) TKs {
 
 // GetFirst returns the first TK with the passed type.
 // Returns err only on tk not found.
-func (tks TKs) GetFirst(typ string) (TypeAndKey, error) {
+func (tks TKs) GetFirst(typ string) (TK, error) {
 	for _, tk := range tks {
 		if tk.Type == typ {
 			return tk, nil
 		}
 	}
-	return TypeAndKey{}, fmt.Errorf("no TK of type %s found in %v", typ, tks)
+	return TK{}, fmt.Errorf("no TK of type %s found in %v", typ, tks)
 }
 
 // Keys returns the keys of the TKs.
@@ -104,7 +104,7 @@ func (tks TKs) Keys() []string {
 func MakeTKs(typ string, keys []string) TKs {
 	var tks TKs
 	for _, key := range keys {
-		tks = append(tks, TypeAndKey{Type: typ, Key: key})
+		tks = append(tks, TK{Type: typ, Key: key})
 	}
 	return tks
 }
@@ -113,11 +113,11 @@ func MakeTKs(typ string, keys []string) TKs {
 func (tks TKs) Difference(b TKs) (TKs, TKs) {
 	a := tks
 
-	aa := map[TypeAndKey]struct{}{}
+	aa := map[TK]struct{}{}
 	for _, tk := range a {
 		aa[tk] = struct{}{}
 	}
-	bb := map[TypeAndKey]struct{}{}
+	bb := map[TK]struct{}{}
 	for _, tk := range b {
 		bb[tk] = struct{}{}
 	}
@@ -137,8 +137,10 @@ func (tks TKs) Difference(b TKs) (TKs, TKs) {
 	return diffA, diffB
 }
 
-func IsTKLessThan(a TypeAndKey, b TypeAndKey) bool {
-	return a.String() < b.String()
+func (tks TKs) Sort() {
+	sort.Slice(tks, func(i, j int) bool {
+		return tks[i].IsLessThan(tks[j])
+	})
 }
 
 // IDGenerator is an interface which wraps the creation of unique IDs
@@ -152,4 +154,12 @@ type UUIDGenerator struct{}
 
 func (*UUIDGenerator) New() string {
 	return uuid.New().String()
+}
+
+func GetSQLDriver() string {
+	return definitions.MustGetEnv("SQL_DRIVER")
+}
+
+func GetDatabaseSource() string {
+	return definitions.MustGetEnv("DATABASE_SOURCE")
 }

@@ -14,6 +14,8 @@ limitations under the License.
 package servicers_test
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"math/rand"
 	"net"
@@ -22,7 +24,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"magma/feg/cloud/go/protos"
@@ -77,13 +78,13 @@ func TestS6aProxyService(t *testing.T) {
 	complChan := make(chan error, TEST_LOOPS+1)
 	testLoopF := func() {
 		// AIR
-		r, err := c.AuthenticationInformation(context.Background(), req)
-		if err != nil {
-			t.Fatalf("GRPC AIR Error: %v", err)
-			complChan <- err
+		r, airErr := c.AuthenticationInformation(context.Background(), req)
+		if airErr != nil {
+			t.Errorf("GRPC AIR Error: %v", airErr)
+			complChan <- airErr
 			return
 		}
-		t.Logf("GRPC AIA: %#+v", *r)
+		t.Logf("GRPC AIA: %+v", r)
 		if r.ErrorCode != protos.ErrorCode_UNDEFINED {
 			t.Errorf("Unexpected AIA Error Code: %d", r.ErrorCode)
 		}
@@ -91,34 +92,59 @@ func TestS6aProxyService(t *testing.T) {
 			t.Errorf("Unexpected Number of EutranVectors: %d, Expected: 3", len(r.EutranVectors))
 		}
 		ulReq := &protos.UpdateLocationRequest{
-			UserName:           test.TEST_IMSI,
-			VisitedPlmn:        []byte(test.TEST_PLMN_ID),
-			SkipSubscriberData: false,
-			InitialAttach:      true,
+			UserName:                     test.TEST_IMSI,
+			VisitedPlmn:                  []byte(test.TEST_PLMN_ID),
+			SkipSubscriberData:           false,
+			InitialAttach:                true,
+			DualRegistration_5GIndicator: true,
+			FeatureListId_1: &protos.FeatureListId1{
+				RegionalSubscription: true,
+			},
+			FeatureListId_2: &protos.FeatureListId2{
+				NrAsSecondaryRat: true,
+			},
 		}
 		// ULR
-		ulResp, err := c.UpdateLocation(context.Background(), ulReq)
-		if err != nil {
-			t.Fatalf("GRPC ULR Error: %v", err)
-			complChan <- err
+		ulResp, airErr := c.UpdateLocation(context.Background(), ulReq)
+		if airErr != nil {
+			t.Errorf("GRPC ULR Error: %v", airErr)
+			complChan <- airErr
 			return
 		}
-		t.Logf("GRPC ULA: %#+v", *ulResp)
+		t.Logf("GRPC ULA: %+v", ulResp)
 		if ulResp.ErrorCode != protos.ErrorCode_UNDEFINED {
 			t.Errorf("Unexpected ULA Error Code: %d", ulResp.ErrorCode)
 		}
+		assert.NoError(t, airErr)
+		if len(ulResp.RegionalSubscriptionZoneCode) != 2 ||
+			!bytes.Equal(ulResp.RegionalSubscriptionZoneCode[0], []byte{155, 36, 12, 2, 227, 43, 246, 254}) ||
+			!bytes.Equal(ulResp.RegionalSubscriptionZoneCode[1], []byte{1, 1, 0, 1}) {
+			t.Errorf("There should be 2 Regional Subscription Zone Codes : %+v", ulResp.RegionalSubscriptionZoneCode)
+		}
+		assert.NotEmpty(t, ulResp.FeatureListId_1)
+		assert.True(t, ulResp.FeatureListId_1.RegionalSubscription)
+		assert.NotEmpty(t, ulResp.FeatureListId_2)
+		assert.True(t, ulResp.FeatureListId_2.NrAsSecondaryRat)
 
+		assert.NotNil(t, ulResp.TotalAmbr)
+		assert.Equal(t, uint32(500), ulResp.TotalAmbr.MaxBandwidthDl)
+		assert.Equal(t, uint32(600), ulResp.TotalAmbr.MaxBandwidthUl)
+		assert.Equal(t, protos.UpdateLocationAnswer_AggregatedMaximumBitrate_KBPS, ulResp.TotalAmbr.Unit)
+		assert.NotEmpty(t, ulResp.Apn)
+		assert.Equal(t, uint32(50), ulResp.Apn[0].Ambr.MaxBandwidthDl)
+		assert.Equal(t, uint32(60), ulResp.Apn[0].Ambr.MaxBandwidthUl)
+		assert.Equal(t, protos.UpdateLocationAnswer_AggregatedMaximumBitrate_BPS, ulResp.Apn[0].Ambr.Unit)
 		puReq := &protos.PurgeUERequest{
 			UserName: test.TEST_IMSI,
 		}
 		// PUR
-		puResp, err := c.PurgeUE(context.Background(), puReq)
-		if err != nil {
-			t.Fatalf("GRPC PUR Error: %v", err)
-			complChan <- err
+		puResp, airErr := c.PurgeUE(context.Background(), puReq)
+		if airErr != nil {
+			t.Errorf("GRPC PUR Error: %v", airErr)
+			complChan <- airErr
 			return
 		}
-		t.Logf("GRPC PUA: %#+v", *puResp)
+		t.Logf("GRPC PUA: %+v", puResp)
 		if puResp.ErrorCode != protos.ErrorCode_SUCCESS {
 			t.Errorf("Unexpected PUA Error Code: %d", puResp.ErrorCode)
 		}
@@ -180,7 +206,7 @@ func TestS6aProxyService(t *testing.T) {
 		t.Fatalf("GRPC AIR Error: %v", err)
 		return
 	}
-	t.Logf("GRPC AIA: %#+v", *airResp)
+	t.Logf("GRPC AIA: %+v", airResp)
 	if airResp.ErrorCode != protos.ErrorCode_UNDEFINED {
 		t.Errorf("Unexpected AIA Error Code: %d", airResp.ErrorCode)
 	}
@@ -210,13 +236,13 @@ func TestS6aProxyServiceWitPLMNlist(t *testing.T) {
 		}
 
 		// AIR
-		r, err := c.AuthenticationInformation(context.Background(), req)
-		if err != nil {
-			t.Fatalf("GRPC AIR with PLMN IMSI1 Error: %v", err)
-			complChan <- err
+		r, airErr := c.AuthenticationInformation(context.Background(), req)
+		if airErr != nil {
+			t.Errorf("GRPC AIR with PLMN IMSI1 Error: %v", airErr)
+			complChan <- airErr
 			return
 		}
-		t.Logf("GRPC AIA: %#+v", *r)
+		t.Logf("GRPC AIA: %+v", r)
 		if r.ErrorCode != protos.ErrorCode_UNDEFINED {
 			t.Errorf("Unexpected AIA with PLMN IMSI1 Error Code: %d", r.ErrorCode)
 		}
@@ -226,13 +252,13 @@ func TestS6aProxyServiceWitPLMNlist(t *testing.T) {
 
 		// Use an IMSI that is not on the PLMN list
 		req.UserName = test.TEST_IMSI_2
-		r, err = c.AuthenticationInformation(context.Background(), req)
-		if err != nil {
-			t.Fatalf("GRPC AIR with PLMN IMSI2 Error: %v", err)
-			complChan <- err
+		r, airErr = c.AuthenticationInformation(context.Background(), req)
+		if airErr != nil {
+			t.Errorf("GRPC AIR with PLMN IMSI2 Error: %v", airErr)
+			complChan <- airErr
 			return
 		}
-		t.Logf("GRPC AIA: %#+v", *r)
+		t.Logf("GRPC AIA: %+v", r)
 		if r.ErrorCode != protos.ErrorCode_AUTHENTICATION_REJECTED {
 			t.Errorf("Authentication Rejected was expected but AIA with PLMN IMSI2 got Error Code: %d", r.ErrorCode)
 		}
@@ -276,11 +302,11 @@ func TestS6aProxyWithHSS_AIA(t *testing.T) {
 		t.Logf("TestS6aProxyWithHSS_AIA - AIA RPC Req: %s", req.String())
 		r, err := c.AuthenticationInformation(context.Background(), req)
 		if err != nil {
-			t.Fatalf("TestS6aProxyWithHSS_AIA - GRPC AIR Error: %v", err)
+			t.Errorf("TestS6aProxyWithHSS_AIA - GRPC AIR Error: %v", err)
 			complChan <- err
 			return
 		}
-		t.Logf("GRPC AIA Resp: %#+v", *r)
+		t.Logf("GRPC AIA Resp: %+v", r)
 		if r.ErrorCode != protos.ErrorCode_UNDEFINED {
 			t.Errorf("Unexpected AIA with PLMN IMSI1 Error Code: %d", r.ErrorCode)
 		}
@@ -370,8 +396,9 @@ func startTestServer(t *testing.T, config *servicers.S6aProxyConfig, useStaticRe
 	protos.RegisterS6AProxyServer(s, service)
 	protos.RegisterServiceHealthServer(s, service)
 	go func() {
-		if err := s.Serve(lis); err != nil {
-			t.Fatalf("failed to serve: %v", err)
+		if errSrv := s.Serve(lis); errSrv != nil {
+			t.Errorf("test server failed to serve: %v", errSrv)
+			return
 		}
 	}()
 	addr := lis.Addr().String()

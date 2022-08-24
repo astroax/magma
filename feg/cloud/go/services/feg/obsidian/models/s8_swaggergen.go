@@ -6,22 +6,31 @@ package models
 // Editing this file might prove futile when you re-run the swagger generate command
 
 import (
-	strfmt "github.com/go-openapi/strfmt"
+	"context"
 
 	"github.com/go-openapi/errors"
+	"github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
 	"github.com/go-openapi/validate"
 )
 
 // S8 s8 configuration
+//
 // swagger:model s8
 type S8 struct {
 
+	// apn operator suffix
+	// Example: .operator.com
+	// Pattern: [^\:]+(:[0-9]{1,5})?
+	ApnOperatorSuffix string `json:"apn_operator_suffix,omitempty"`
+
 	// local address
+	// Example: 0.0.0.0:0
 	// Pattern: [^\:]+(:[0-9]{1,5})?
 	LocalAddress string `json:"local_address,omitempty"`
 
 	// pgw address
+	// Example: 0.0.0.0:0
 	// Pattern: [^\:]+(:[0-9]{1,5})?
 	PgwAddress string `json:"pgw_address,omitempty"`
 }
@@ -29,6 +38,10 @@ type S8 struct {
 // Validate validates this s8
 func (m *S8) Validate(formats strfmt.Registry) error {
 	var res []error
+
+	if err := m.validateApnOperatorSuffix(formats); err != nil {
+		res = append(res, err)
+	}
 
 	if err := m.validateLocalAddress(formats); err != nil {
 		res = append(res, err)
@@ -44,13 +57,24 @@ func (m *S8) Validate(formats strfmt.Registry) error {
 	return nil
 }
 
-func (m *S8) validateLocalAddress(formats strfmt.Registry) error {
+func (m *S8) validateApnOperatorSuffix(formats strfmt.Registry) error {
+	if swag.IsZero(m.ApnOperatorSuffix) { // not required
+		return nil
+	}
 
+	if err := validate.Pattern("apn_operator_suffix", "body", m.ApnOperatorSuffix, `[^\:]+(:[0-9]{1,5})?`); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *S8) validateLocalAddress(formats strfmt.Registry) error {
 	if swag.IsZero(m.LocalAddress) { // not required
 		return nil
 	}
 
-	if err := validate.Pattern("local_address", "body", string(m.LocalAddress), `[^\:]+(:[0-9]{1,5})?`); err != nil {
+	if err := validate.Pattern("local_address", "body", m.LocalAddress, `[^\:]+(:[0-9]{1,5})?`); err != nil {
 		return err
 	}
 
@@ -58,15 +82,19 @@ func (m *S8) validateLocalAddress(formats strfmt.Registry) error {
 }
 
 func (m *S8) validatePgwAddress(formats strfmt.Registry) error {
-
 	if swag.IsZero(m.PgwAddress) { // not required
 		return nil
 	}
 
-	if err := validate.Pattern("pgw_address", "body", string(m.PgwAddress), `[^\:]+(:[0-9]{1,5})?`); err != nil {
+	if err := validate.Pattern("pgw_address", "body", m.PgwAddress, `[^\:]+(:[0-9]{1,5})?`); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// ContextValidate validates this s8 based on context it is used
+func (m *S8) ContextValidate(ctx context.Context, formats strfmt.Registry) error {
 	return nil
 }
 

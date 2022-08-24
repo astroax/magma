@@ -1,12 +1,14 @@
 package models
 
 import (
-	"magma/lte/cloud/go/services/policydb/obsidian/models"
-	"magma/lte/cloud/go/services/smsd/storage"
+	"context"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
+
+	"magma/lte/cloud/go/services/policydb/obsidian/models"
+	"magma/lte/cloud/go/services/smsd/storage"
 )
 
 func (m *SmsMessage) FromProto(from *storage.SMS) *SmsMessage {
@@ -36,12 +38,12 @@ func (m *SmsMessage) FromProto(from *storage.SMS) *SmsMessage {
 	return m
 }
 
-func (m *MutableSmsMessage) ValidateModel() error {
+func (m *MutableSmsMessage) ValidateModel(context.Context) error {
 	return m.Validate(strfmt.Default)
 }
 
-func (m *MutableSmsMessage) ToProto() storage.MutableSMS {
-	return storage.MutableSMS{
+func (m *MutableSmsMessage) ToProto() *storage.MutableSMS {
+	return &storage.MutableSMS{
 		Imsi:         string(m.Imsi),
 		SourceMsisdn: m.SourceMsisdn,
 		Message:      m.Message,

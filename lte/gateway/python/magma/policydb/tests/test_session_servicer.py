@@ -12,18 +12,26 @@ limitations under the License.
 """
 
 import unittest
-from lte.protos.mconfig import mconfigs_pb2
-from lte.protos.policydb_pb2 import RatingGroup, AssignedPolicies,\
-    ChargingRuleNameSet, SubscriberPolicySet, ApnPolicySet, PolicyRule,\
-    FlowDescription, FlowMatch
-from lte.protos.session_manager_pb2 import CreateSessionRequest, \
-    UpdateSessionRequest, CreditUsageUpdate, SessionTerminateRequest, \
-    CreditUpdateResponse, CreditLimitType, RatSpecificContext, \
-    LTESessionContext, CommonSessionContext
-from lte.protos.subscriberdb_pb2 import SubscriberData, LTESubscription, \
-    SubscriberID
-from magma.policydb.servicers.session_servicer import SessionRpcServicer
 
+from lte.protos.mconfig import mconfigs_pb2
+from lte.protos.policydb_pb2 import (
+    ApnPolicySet,
+    ChargingRuleNameSet,
+    RatingGroup,
+    SubscriberPolicySet,
+)
+from lte.protos.session_manager_pb2 import (
+    CommonSessionContext,
+    CreateSessionRequest,
+    CreditLimitType,
+    CreditUsageUpdate,
+    LTESessionContext,
+    RatSpecificContext,
+    SessionTerminateRequest,
+    UpdateSessionRequest,
+)
+from lte.protos.subscriberdb_pb2 import SubscriberID
+from magma.policydb.servicers.session_servicer import SessionRpcServicer
 
 CSR_STATIC_RULES = '[rule_id: "redirect"]'
 CSR_STATIC_RULES_2 = '[rule_id: "p6"]'
@@ -97,10 +105,12 @@ class SessionRpcServicerTest(unittest.TestCase):
                 ],
             ),
         }
-        self.servicer = SessionRpcServicer(self._get_mconfig(),
-                                           rating_groups_by_id,
-                                           basenames_dict,
-                                           apn_rules_by_sid)
+        self.servicer = SessionRpcServicer(
+            self._get_mconfig(),
+            rating_groups_by_id,
+            basenames_dict,
+            apn_rules_by_sid,
+        )
 
     def _get_mconfig(self) -> mconfigs_pb2.PolicyDB:
         return mconfigs_pb2.PolicyDB(
@@ -130,9 +140,9 @@ class SessionRpcServicerTest(unittest.TestCase):
                 ),
                 apn='apn1',
             ),
-            rat_specific_context = RatSpecificContext(
-                lte_context = LTESessionContext(
-                    imsi_plmn_id = '00101',
+            rat_specific_context=RatSpecificContext(
+                lte_context=LTESessionContext(
+                    imsi_plmn_id='00101',
                 ),
             ),
         )
@@ -141,14 +151,18 @@ class SessionRpcServicerTest(unittest.TestCase):
         # There should be a static rule installed for the redirection
         static_rules = self._rm_whitespace(str(resp.static_rules))
         expected = self._rm_whitespace(CSR_STATIC_RULES)
-        self.assertEqual(static_rules, expected, 'There should be one static '
-                         'rule installed for redirection.')
+        self.assertEqual(
+            static_rules, expected, 'There should be one static '
+            'rule installed for redirection.',
+        )
 
         # Credit granted should be unlimited and un-metered
         credit_limit_type = resp.credits[0].limit_type
         expected = CreditLimitType.Value("INFINITE_UNMETERED")
-        self.assertEqual(credit_limit_type, expected, 'There should be an '
-                         'infinite, unmetered credit grant')
+        self.assertEqual(
+            credit_limit_type, expected, 'There should be an '
+            'infinite, unmetered credit grant',
+        )
 
         msg_2 = CreateSessionRequest(
             session_id='2345',
@@ -158,9 +172,9 @@ class SessionRpcServicerTest(unittest.TestCase):
                 ),
                 apn='apn2',
             ),
-            rat_specific_context = RatSpecificContext(
-                lte_context = LTESessionContext(
-                    imsi_plmn_id = '00101',
+            rat_specific_context=RatSpecificContext(
+                lte_context=LTESessionContext(
+                    imsi_plmn_id='00101',
                 ),
             ),
         )
@@ -169,14 +183,18 @@ class SessionRpcServicerTest(unittest.TestCase):
         # There should be a static rule installed
         static_rules = self._rm_whitespace(str(resp.static_rules))
         expected = self._rm_whitespace(CSR_STATIC_RULES_2)
-        self.assertEqual(static_rules, expected, 'There should be one static '
-                                                 'rule installed.')
+        self.assertEqual(
+            static_rules, expected, 'There should be one static '
+            'rule installed.',
+        )
 
         # Credit granted should be unlimited and un-metered
         credit_limit_type = resp.credits[0].limit_type
         expected = CreditLimitType.Value("INFINITE_UNMETERED")
-        self.assertEqual(credit_limit_type, expected,
-                         'There should be an infinite, unmetered credit grant')
+        self.assertEqual(
+            credit_limit_type, expected,
+            'There should be an infinite, unmetered credit grant',
+        )
 
         msg_3 = CreateSessionRequest(
             session_id='3456',
@@ -186,9 +204,9 @@ class SessionRpcServicerTest(unittest.TestCase):
                 ),
                 apn='apn1',
             ),
-            rat_specific_context = RatSpecificContext(
-                lte_context = LTESessionContext(
-                    imsi_plmn_id = '00101',
+            rat_specific_context=RatSpecificContext(
+                lte_context=LTESessionContext(
+                    imsi_plmn_id='00101',
                 ),
             ),
         )
@@ -197,14 +215,18 @@ class SessionRpcServicerTest(unittest.TestCase):
         # There should be a static rule installed
         static_rules = self._rm_whitespace(str(resp.static_rules))
         expected = self._rm_whitespace(CSR_STATIC_RULES_3)
-        self.assertEqual(static_rules, expected, 'There should be one static '
-                                                 'rule installed.')
+        self.assertEqual(
+            static_rules, expected, 'There should be one static '
+            'rule installed.',
+        )
 
         # Credit granted should be unlimited and un-metered
         credit_limit_type = resp.credits[0].limit_type
         expected = CreditLimitType.Value("INFINITE_UNMETERED")
-        self.assertEqual(credit_limit_type, expected,
-                         'There should be an infinite, unmetered credit grant')
+        self.assertEqual(
+            credit_limit_type, expected,
+            'There should be an infinite, unmetered credit grant',
+        )
 
     def test_UpdateSession(self):
         """
@@ -220,9 +242,11 @@ class SessionRpcServicerTest(unittest.TestCase):
         resp = self.servicer.UpdateSession(msg, None)
         session_response = self._rm_whitespace(str(resp))
         expected = self._rm_whitespace(USR)
-        self.assertEqual(session_response, expected, 'There should be an '
-                         'infinite, unmetered credit grant and an infinite, '
-                         'metered credit grant')
+        self.assertEqual(
+            session_response, expected, 'There should be an '
+            'infinite, unmetered credit grant and an infinite, '
+            'metered credit grant',
+        )
 
     def test_TerminateSession(self):
         """
@@ -236,8 +260,10 @@ class SessionRpcServicerTest(unittest.TestCase):
         msg.session_id = 'session_id_123'
         resp = self.servicer.TerminateSession(msg, None)
         self.assertEqual(resp.sid, 'abc', 'SID should be same as request')
-        self.assertEqual(resp.session_id, 'session_id_123', 'session ID should '
-                         'be same as request')
+        self.assertEqual(
+            resp.session_id, 'session_id_123', 'session ID should '
+            'be same as request',
+        )
 
     def _rm_whitespace(self, inp: str) -> str:
         return inp.replace(' ', '').replace('\n', '')

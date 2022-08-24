@@ -16,12 +16,12 @@ package main
 import (
 	"flag"
 
+	"github.com/golang/glog"
+
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/s8_proxy/servicers"
 	"magma/orc8r/lib/go/service"
-
-	"github.com/golang/glog"
 )
 
 func init() {
@@ -30,7 +30,7 @@ func init() {
 
 func main() {
 	// Create the service
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.S8_PROXY)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.S8_PROXY)
 	if err != nil {
 		glog.Fatalf("Error creating S8 Proxy service: %s", err)
 	}
@@ -45,9 +45,7 @@ func main() {
 
 	// Register services
 	protos.RegisterS8ProxyServer(srv.GrpcServer, servicer)
-
-	// TODO: Add health servicer
-	//protos.RegisterServiceHealthServer(srv.GrpcServer, servicer)
+	protos.RegisterServiceHealthServer(srv.GrpcServer, servicer)
 
 	// Run the service
 	err = srv.Run()

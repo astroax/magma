@@ -17,24 +17,25 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/golang/glog"
+
 	"magma/lte/cloud/go/lte"
 	"magma/lte/cloud/go/serdes"
 	lte_models "magma/lte/cloud/go/services/lte/obsidian/models"
 	"magma/lte/cloud/go/services/lte/protos"
 	"magma/orc8r/cloud/go/serde"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/lib/go/merrors"
+	lib_protos "magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/golang/glog"
 )
 
-func GetEnodebState(networkID string, gatewayID string, enodebSN string) (*lte_models.EnodebState, error) {
+func GetEnodebState(ctx context.Context, networkID string, gatewayID string, enodebSN string) (*lte_models.EnodebState, error) {
 	client, err := getClient()
 	if err != nil {
 		return nil, err
 	}
 	res, err := client.GetEnodebState(
-		context.Background(),
+		ctx,
 		&protos.GetEnodebStateRequest{
 			NetworkId: networkID,
 			GatewayId: gatewayID,
@@ -55,13 +56,13 @@ func GetEnodebState(networkID string, gatewayID string, enodebSN string) (*lte_m
 	return enodebState, nil
 }
 
-func SetEnodebState(networkID string, gatewayID string, enodebSN string, serializedState []byte) error {
+func SetEnodebState(ctx context.Context, networkID string, gatewayID string, enodebSN string, serializedState []byte) error {
 	client, err := getClient()
 	if err != nil {
 		return err
 	}
 	_, err = client.SetEnodebState(
-		context.Background(),
+		ctx,
 		&protos.SetEnodebStateRequest{
 			NetworkId:       networkID,
 			GatewayId:       gatewayID,
@@ -73,7 +74,7 @@ func SetEnodebState(networkID string, gatewayID string, enodebSN string, seriali
 }
 
 func getClient() (protos.EnodebStateLookupClient, error) {
-	conn, err := registry.GetConnection(ServiceName)
+	conn, err := registry.GetConnection(ServiceName, lib_protos.ServiceType_PROTECTED)
 	if err != nil {
 		initErr := merrors.NewInitError(err, ServiceName)
 		glog.Error(initErr)

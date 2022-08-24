@@ -12,13 +12,16 @@ limitations under the License.
 """
 
 import asyncio
+from typing import Dict
 from unittest import mock
+
+from lte.protos.mconfig import mconfigs_pb2
 from magma.common.service import MagmaService
 from magma.enodebd.devices.device_map import get_device_handler_from_name
 from magma.enodebd.devices.device_utils import EnodebDeviceName
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
-from magma.enodebd.tests.test_utils.config_builder import EnodebConfigBuilder
 from magma.enodebd.state_machines.enb_acs_manager import StateMachineManager
+from magma.enodebd.tests.test_utils.config_builder import EnodebConfigBuilder
 
 
 class EnodebAcsStateMachineBuilder:
@@ -52,9 +55,10 @@ class EnodebAcsStateMachineBuilder:
     def build_acs_state_machine(
         cls,
         device: EnodebDeviceName = EnodebDeviceName.BAICELLS,
+        service_config: Dict = None,
     ) -> EnodebAcsStateMachine:
         # Build the state_machine
-        service = cls.build_magma_service(device)
+        service = cls.build_magma_service(device, service_config)
         handler_class = get_device_handler_from_name(device)
         acs_state_machine = handler_class(service)
         return acs_state_machine
@@ -63,10 +67,14 @@ class EnodebAcsStateMachineBuilder:
     def build_magma_service(
         cls,
         device: EnodebDeviceName = EnodebDeviceName.BAICELLS,
+            mconfig: mconfigs_pb2.EnodebD = None,
+            service_config: Dict = None,
     ) -> MagmaService:
         event_loop = asyncio.get_event_loop()
-        mconfig = EnodebConfigBuilder.get_mconfig(device)
-        service_config = EnodebConfigBuilder.get_service_config()
+        if not mconfig:
+            mconfig = EnodebConfigBuilder.get_mconfig(device)
+        if not service_config:
+            service_config = EnodebConfigBuilder.get_service_config()
         with mock.patch('magma.common.service.MagmaService') as MockService:
             MockService.config = service_config
             MockService.mconfig = mconfig

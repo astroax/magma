@@ -11,13 +11,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Callable, List
 import unittest
+from typing import Callable, List
 from unittest.mock import Mock
-from lte.protos.policydb_pb2 import ChargingRuleNameSet,\
-    SubscriberPolicySet, ApnPolicySet, PolicyRule, FlowDescription, FlowMatch
-from lte.protos.session_manager_pb2 import SessionRules, RulesPerSubscriber,\
-    RuleSet, StaticRuleInstall, DynamicRuleInstall
+
+from lte.protos.policydb_pb2 import (
+    ApnPolicySet,
+    ChargingRuleNameSet,
+    FlowDescription,
+    FlowMatch,
+    PolicyRule,
+    SubscriberPolicySet,
+)
+from lte.protos.session_manager_pb2 import (
+    DynamicRuleInstall,
+    RuleSet,
+    RulesPerSubscriber,
+    SessionRules,
+    StaticRuleInstall,
+)
 from magma.policydb.streamer_callback import ApnRuleMappingsStreamerCallback
 from magma.policydb.tests.mock_stubs import MockLocalSessionManagerStub
 from orc8r.protos.common_pb2 import Void
@@ -26,7 +38,7 @@ from orc8r.protos.streamer_pb2 import DataUpdate
 
 def get_SetSessionRules_side_effect(
     called_with: List[SessionRules],
-) -> Callable[[SessionRules], Void]:
+) -> Callable[[SessionRules, float], Void]:
     def side_effect(session_rules: SessionRules, timeout: float) -> Void:
         called_with.append(session_rules)
         return Void()
@@ -45,20 +57,24 @@ class ApnRuleMappingsStreamerCallbackTest(unittest.TestCase):
             FlowDescription(
                 match=FlowMatch(
                     direction=FlowMatch.Direction.Value(
-                        "UPLINK"),
+                        "UPLINK",
+                    ),
                 ),
                 action=FlowDescription.Action.Value(
-                    "PERMIT"),
+                    "PERMIT",
+                ),
             ),
             FlowDescription(
                 match=FlowMatch(
                     direction=FlowMatch.Direction.Value(
-                        "DOWNLINK"),
+                        "DOWNLINK",
+                    ),
                 ),
                 action=FlowDescription.Action.Value(
-                    "PERMIT"),
+                    "PERMIT",
+                ),
             ),
-        ] # type: List[FlowDescription]
+        ]  # type: List[FlowDescription]
         no_tracking_type = PolicyRule.TrackingType.Value("NO_TRACKING")
         expected = SessionRules(
             rules_per_subscriber=[
@@ -78,11 +94,11 @@ class ApnRuleMappingsStreamerCallbackTest(unittest.TestCase):
                                         priority=2,
                                         flow_list=allow_all_flow_list,
                                         tracking_type=no_tracking_type,
-                                    )
-                                )
+                                    ),
+                                ),
                             ],
                         ),
-                    ]
+                    ],
                 ),
                 RulesPerSubscriber(
                     imsi='imsi_2',
@@ -100,13 +116,13 @@ class ApnRuleMappingsStreamerCallbackTest(unittest.TestCase):
                                         priority=2,
                                         flow_list=allow_all_flow_list,
                                         tracking_type=no_tracking_type,
-                                    )
-                                )
+                                    ),
+                                ),
                             ],
                         ),
-                    ]
-                )
-            ]
+                    ],
+                ),
+            ],
         )
 
         # Setup the test
@@ -117,10 +133,9 @@ class ApnRuleMappingsStreamerCallbackTest(unittest.TestCase):
         }
         stub = MockLocalSessionManagerStub()
 
-        stub_call_args = [] # type: List[SessionRules]
+        stub_call_args = []  # type: List[SessionRules]
         side_effect = get_SetSessionRules_side_effect(stub_call_args)
         stub.SetSessionRules = Mock(side_effect=side_effect)
-
 
         callback = ApnRuleMappingsStreamerCallback(
             stub,
@@ -161,13 +176,19 @@ class ApnRuleMappingsStreamerCallbackTest(unittest.TestCase):
         # Since we used a stub which always succeeds when a RAR is made,
         # We should expect the assignments_dict to be updated
         imsi_1_policies = apn_rules_dict["imsi_1"]
-        self.assertEqual(len(imsi_1_policies.rules_per_apn), 1,
-                         'There should be 1 active APNs for imsi_1')
-        self.assertEqual(len(stub_call_args), 1,
-                         'Stub should have been called once')
+        self.assertEqual(
+            len(imsi_1_policies.rules_per_apn), 1,
+            'There should be 1 active APNs for imsi_1',
+        )
+        self.assertEqual(
+            len(stub_call_args), 1,
+            'Stub should have been called once',
+        )
         called_with = stub_call_args[0].SerializeToString()
-        self.assertEqual(called_with, expected.SerializeToString(),
-                         'SetSessionRules call has incorrect arguments')
+        self.assertEqual(
+            called_with, expected.SerializeToString(),
+            'SetSessionRules call has incorrect arguments',
+        )
 
         # Stream down a second update, and now IMSI_1 gets access to a new APN
         updates_2 = [
@@ -216,11 +237,11 @@ class ApnRuleMappingsStreamerCallbackTest(unittest.TestCase):
                                         priority=2,
                                         flow_list=allow_all_flow_list,
                                         tracking_type=no_tracking_type,
-                                    )
-                                )
+                                    ),
+                                ),
                             ],
                         ),
-                    ]
+                    ],
                 ),
                 RulesPerSubscriber(
                     imsi='imsi_2',
@@ -238,22 +259,28 @@ class ApnRuleMappingsStreamerCallbackTest(unittest.TestCase):
                                         priority=2,
                                         flow_list=allow_all_flow_list,
                                         tracking_type=no_tracking_type,
-                                    )
-                                )
+                                    ),
+                                ),
                             ],
                         ),
-                    ]
+                    ],
                 ),
-            ]
+            ],
         )
 
         callback.process_update("stream", updates_2, False)
 
         imsi_1_policies = apn_rules_dict["imsi_1"]
-        self.assertEqual(len(imsi_1_policies.rules_per_apn), 1,
-                         'There should be 1 active APNs for imsi_1')
-        self.assertEqual(len(stub_call_args), 2,
-                         'Stub should have been called twice')
+        self.assertEqual(
+            len(imsi_1_policies.rules_per_apn), 1,
+            'There should be 1 active APNs for imsi_1',
+        )
+        self.assertEqual(
+            len(stub_call_args), 2,
+            'Stub should have been called twice',
+        )
         called_with = stub_call_args[1].SerializeToString()
-        self.assertEqual(called_with, expected_2.SerializeToString(),
-                         'SetSessionRules call has incorrect arguments')
+        self.assertEqual(
+            called_with, expected_2.SerializeToString(),
+            'SetSessionRules call has incorrect arguments',
+        )

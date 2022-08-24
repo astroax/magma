@@ -14,7 +14,6 @@ limitations under the License.
 import asyncio
 import errno
 import ssl
-
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -97,10 +96,14 @@ class CertValidityTests(TestCase):
             ssl=mock_context,
         )
 
-    @patch('magma.common.cert_validity.create_ssl_connection',
-           new_callable=AsyncMock)
-    @patch('magma.common.cert_validity.create_tcp_connection',
-           new_callable=AsyncMock)
+    @patch(
+        'magma.common.cert_validity.create_ssl_connection',
+        new_callable=AsyncMock,
+    )
+    @patch(
+        'magma.common.cert_validity.create_tcp_connection',
+        new_callable=AsyncMock,
+    )
     def test_cert_is_invalid_both_ok(self, mock_create_tcp, mock_create_ssl):
         """
         Test the appropriate calls and return value for cert_is_invalid()
@@ -134,8 +137,10 @@ class CertValidityTests(TestCase):
         )
         self.assertEqual(ret_val, False)
 
-    @patch('magma.common.cert_validity.create_ssl_connection',
-           new_callable=AsyncMock)
+    @patch(
+        'magma.common.cert_validity.create_ssl_connection',
+        new_callable=AsyncMock,
+    )
     @patch('magma.common.cert_validity.create_tcp_connection', AsyncMock())
     def test_cert_is_invalid_ssl_fail(self, mock_create_ssl):
         """
@@ -160,8 +165,10 @@ class CertValidityTests(TestCase):
         ret_val = self.loop.run_until_complete(go())
         self.assertEqual(ret_val, True)
 
-    @patch('magma.common.cert_validity.create_ssl_connection',
-           new_callable=AsyncMock)
+    @patch(
+        'magma.common.cert_validity.create_ssl_connection',
+        new_callable=AsyncMock,
+    )
     @patch('magma.common.cert_validity.create_tcp_connection', AsyncMock())
     def test_cert_is_invalid_ssl_fail_none_errno(self, mock_create_ssl):
         """
@@ -187,8 +194,10 @@ class CertValidityTests(TestCase):
         self.assertEqual(ret_val, True)
 
     @patch('magma.common.cert_validity.create_ssl_connection', AsyncMock())
-    @patch('magma.common.cert_validity.create_tcp_connection',
-           new_callable=AsyncMock)
+    @patch(
+        'magma.common.cert_validity.create_tcp_connection',
+        new_callable=AsyncMock,
+    )
     def test_cert_is_invalid_tcp_fail_none_errno(self, mock_create_tcp):
         """
         Test cert_is_invalid() == False when TCP fails w/o errno and SSL succeeds
@@ -213,8 +222,10 @@ class CertValidityTests(TestCase):
         self.assertEqual(ret_val, False)
 
     @patch('magma.common.cert_validity.create_ssl_connection', AsyncMock())
-    @patch('magma.common.cert_validity.create_tcp_connection',
-           new_callable=AsyncMock)
+    @patch(
+        'magma.common.cert_validity.create_tcp_connection',
+        new_callable=AsyncMock,
+    )
     def test_cert_is_invalid_tcp_fail(self, mock_create_tcp):
         """
         Test cert_is_invalid() == False when TCP fails and SSL succeeds
@@ -238,10 +249,14 @@ class CertValidityTests(TestCase):
         ret_val = self.loop.run_until_complete(go())
         self.assertEqual(ret_val, False)
 
-    @patch('magma.common.cert_validity.create_ssl_connection',
-           new_callable=AsyncMock)
-    @patch('magma.common.cert_validity.create_tcp_connection',
-           new_callable=AsyncMock)
+    @patch(
+        'magma.common.cert_validity.create_ssl_connection',
+        new_callable=AsyncMock,
+    )
+    @patch(
+        'magma.common.cert_validity.create_tcp_connection',
+        new_callable=AsyncMock,
+    )
     def test_cert_is_invalid_both_fail(self, mock_create_tcp, mock_create_ssl):
         """
         Test cert_is_invalid() == False when TCP and SSL fail

@@ -12,12 +12,11 @@ limitations under the License.
 """
 
 import logging
-from typing import Any, Dict, \
-    Optional  # noqa: lint doesn't handle inline typehints
-
 import os
-import yaml
+from typing import Optional  # noqa: lint doesn't handle inline typehints
+from typing import Any, Dict
 
+import yaml
 from magma.configuration.exceptions import LoadConfigError
 
 # Location of configs (both service config and mconfig)
@@ -56,7 +55,7 @@ def save_override_config(service_name: str, cfg: Any):
     """
     override_file_name = _override_file_name(service_name)
     os.makedirs(CONFIG_OVERRIDE_DIR, exist_ok=True)
-    with open(override_file_name, 'w') as override_file:
+    with open(override_file_name, 'w', encoding='utf-8') as override_file:
         yaml.dump(cfg, override_file, default_flow_style=False)
 
 
@@ -121,7 +120,7 @@ def get_service_config_value(service: str, param: str, default: Any) -> Any:
     else:
         logging.error(
             'Error retrieving config for %s, key not found: %s',
-            service, param
+            service, param,
         )
         return default
 
@@ -145,7 +144,7 @@ def _load_yaml_file(file_name: str) -> Any:
     """
 
     try:
-        with open(file_name, 'r') as stream:
+        with open(file_name, 'r', encoding='utf-8') as stream:
             data = yaml.safe_load(stream)
             return data
     except (OSError, yaml.YAMLError) as e:

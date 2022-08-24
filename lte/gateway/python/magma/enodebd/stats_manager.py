@@ -12,15 +12,17 @@ limitations under the License.
 """
 
 import asyncio
-from magma.enodebd.logger import EnodebdLogger as logger
+from typing import Optional
 from xml.etree import ElementTree
+
 from aiohttp import web
 from magma.common.misc_utils import get_ip_from_if
 from magma.configuration.service_configs import load_service_config
-from magma.enodebd.enodeb_status import get_enb_status, \
-    update_status_metrics
+from magma.enodebd.enodeb_status import get_enb_status, update_status_metrics
+from magma.enodebd.logger import EnodebdLogger as logger
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
 from magma.enodebd.state_machines.enb_acs_manager import StateMachineManager
+
 from . import metrics
 
 
@@ -71,20 +73,28 @@ class StatsManager:
         self.enb_manager = enb_acs_manager
         self.loop = asyncio.get_event_loop()
         self._prev_rf_tx = False
-        self.mme_timeout_handler = None
+        self.mme_timeout_handler: Optional[asyncio.TimerHandle] = None
 
     def run(self) -> None:
         """ Create and start HTTP server """
         svc_config = load_service_config("enodebd")
 
         app = web.Application()
-        app.router.add_route('POST', "/{something}", self._post_handler)
+        app.router.add_route(
+            'POST', "/{something}",
+            self._post_and_put_handler,
+        )
+        app.router.add_route(
+            'PUT', "/{something}",
+            self._post_and_put_handler,
+        )
 
         handler = app.make_handler()
         create_server_func = self.loop.create_server(
             handler,
             host=get_ip_from_if(svc_config['tr069']['interface']),
-            port=svc_config['tr069']['perf_mgmt_port'])
+            port=svc_config['tr069']['perf_mgmt_port'],
+        )
 
         self._periodic_check_rf_tx()
         self.loop.run_until_complete(create_server_func)
@@ -112,7 +122,8 @@ class StatsManager:
         serial_list = self.enb_manager.get_connected_serial_id_list()
         for enb_serial in serial_list:
             handler = self.enb_manager.get_handler_by_serial(enb_serial)
-            self._check_rf_tx_for_handler(handler)
+            if handler:
+                self._check_rf_tx_for_handler(handler)
 
     def _check_rf_tx_for_handler(self, handler: EnodebAcsStateMachine) -> None:
         status = get_enb_status(handler)
@@ -142,14 +153,15 @@ class StatsManager:
             logger.error("Couldn't find serial for ip", ip)
         return label
 
-    @asyncio.coroutine
-    def _post_handler(self, request) -> web.Response:
+    async def _post_and_put_handler(self, request) -> web.Response:
         """ HTTP POST handler """
         # Read request body and convert to XML tree
-        body = yield from request.read()
+        body = await request.read()
 
         root = ElementTree.fromstring(body)
-        self._parse_pm_xml(self._get_enb_label_from_request(request), root)
+        label = self._get_enb_label_from_request(request)
+        if label:
+            self._parse_pm_xml(label, root)
 
         # Return success response
         return web.Response()
@@ -224,8 +236,10 @@ class StatsManager:
                 try:
                     value = int(data_el.text)
                 except ValueError:
-                    logger.info('PM value (%s) of counter %s not integer',
-                                data_el.text, counter)
+                    logger.info(
+                        'PM value (%s) of counter %s not integer',
+                        data_el.text, counter,
+                    )
                     continue
             elif data_el.tag == 'CV':
                 # Check whether we want just one subcounter, or sum them all
@@ -252,12 +266,16 @@ class StatsManager:
                             value = value + int(sub_data_el.text)
                         index = index + 1
                 except ValueError:
-                    logger.error('PM value (%s) of counter %s not integer',
-                                 sub_data_el.text, pm_name)
+                    logger.error(
+                        'PM value (%s) of counter %s not integer',
+                        sub_data_el.text, pm_name,
+                    )
                     continue
             else:
-                logger.warning('Unknown PM data type (%s) of counter %s',
-                               data_el.tag, pm_name)
+                logger.warning(
+                    'Unknown PM data type (%s) of counter %s',
+                    data_el.tag, pm_name,
+                )
                 continue
 
             # Apply new value to metric
@@ -362,7 +380,7 @@ class StatsManager:
         """
         logger.info('Clearing performance counter statistics')
         # Set all metrics to 0 if eNodeB not connected
-        for pm_name, metric in self.PM_FILE_TO_METRIC_MAP:
+        for pm_name, metric in self.PM_FILE_TO_METRIC_MAP.items():
             # eNB data usage metrics will not be cleared
             if pm_name not in ('PDCP.UpOctUl', 'PDCP.UpOctDl'):
                 metric.set(0)

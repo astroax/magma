@@ -16,16 +16,16 @@ package main
 import (
 	"time"
 
+	"github.com/golang/glog"
+
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/radiusd/collection"
 	"magma/orc8r/lib/go/service"
-
-	"github.com/golang/glog"
 )
 
 func main() {
 	// Create the service
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.RADIUSD)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.RADIUSD)
 	if err != nil {
 		glog.Fatalf("Error creating RADIUSD service: %s", err)
 	}

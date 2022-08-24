@@ -12,14 +12,13 @@ limitations under the License.
 """
 
 import traceback
+from abc import abstractmethod
 from typing import Any, Dict
 
-from abc import abstractmethod
 from magma.common.service import MagmaService
 from magma.enodebd import metrics
 from magma.enodebd.data_models.data_model_parameters import ParameterName
-from magma.enodebd.device_config.enodeb_configuration import \
-    EnodebConfiguration
+from magma.enodebd.device_config.enodeb_configuration import EnodebConfiguration
 from magma.enodebd.exceptions import ConfigurationError
 from magma.enodebd.logger import EnodebdLogger as logger
 from magma.enodebd.state_machines.enb_acs import EnodebAcsStateMachine
@@ -55,15 +54,27 @@ class BasicEnodebAcsStateMachine(EnodebAcsStateMachine):
     # Check the MME connection status every 15 seconds
     MME_CHECK_TIMER = 15
 
+    # When a FW upgrade download is initiated, we should wait for eNB to apply
+    # the FW image. Currently for Sercomm (FreedomFi One), the eNB accepts Download,
+    # eventually reports TransferComplete, but will reboot in a random time after that.
+    # When DownloadResponse is a success, the state should start the fw upgrade timer.
+    # When FW Upgrade check indentifies that eNB Software Version matches desired
+    # SW version, the timer should be stopped.
+    # Otherwise, keep the timer (even during state reset) and attempt new fw upgrade download
+    # flow once the timer finishes
+    FW_UPGRADE_TIMEOUT = 5 * 60
+
     def __init__(
             self,
             service: MagmaService,
+            use_param_key: bool,
     ) -> None:
-        super().__init__()
-        self.state = None
+        super().__init__(use_param_key=use_param_key)
+        self.state: EnodebAcsState
         self.timeout_handler = None
         self.mme_timeout_handler = None
         self.mme_timer = None
+        self.fw_upgrade_timeout_handler = None
         self._start_state_machine(service)
 
     def get_state(self) -> str:
@@ -98,7 +109,10 @@ class BasicEnodebAcsStateMachine(EnodebAcsStateMachine):
             return self._get_tr069_msg(message)
 
     def transition(self, next_state: str) -> Any:
-        logger.debug('State transition to <%s>', next_state)
+        logger.debug(
+            'State transition from <%s> to <%s>',
+            self.state.__class__.__name__, next_state,
+        )
         self.state.exit()
         self.state = self.state_map[next_state]
         self.state.enter()
@@ -118,6 +132,48 @@ class BasicEnodebAcsStateMachine(EnodebAcsStateMachine):
         self._data_model = None
 
         self.mme_timer = None
+        self.fw_upgrade_timeout_handler = None
+
+    def start_fw_upgrade_timeout(self) -> None:
+        """
+        Start a firmware upgrade timeout timer.
+
+        When initialing a firmware upgrade download, the eNB can take
+        an unknown amount of time for the download to finish. This process
+        is indicated by a TransferComplete TR069 message, but the enB
+        can still operate and can apply the firmware at any time and reboot.
+
+        Since we do not want to re-issue a download request (eNB hasn't updated,
+        its SW version is still 'old' and the firmware version check will still detect
+        and older FW version still present on the eNB) we want to hold with the download
+        flow for some time - which is what this timer is for.
+        """
+        if self.fw_upgrade_timeout_handler is not None:
+            return
+
+        logger.debug(
+            'ACS starting fw upgrade timeout for %d seconds',
+            self.FW_UPGRADE_TIMEOUT,
+        )
+        self.fw_upgrade_timeout_handler = self.event_loop.call_later(
+            self.FW_UPGRADE_TIMEOUT,
+            self.stop_fw_upgrade_timeout,
+        )
+
+    def stop_fw_upgrade_timeout(self) -> None:
+        """
+        Stop firmware upgrade timeout timer.
+
+        Invoking this method will re-enable firmware software version checking
+        in the Download states.
+        """
+        if self.fw_upgrade_timeout_handler is not None:
+            logger.debug('ACS stopping fw upgrade timeout.')
+            self.fw_upgrade_timeout_handler.cancel()
+            self.fw_upgrade_timeout_handler = None
+
+    def is_fw_upgrade_in_progress(self) -> bool:
+        return self.fw_upgrade_timeout_handler != None
 
     def _start_state_machine(
             self,
@@ -169,12 +225,16 @@ class BasicEnodebAcsStateMachine(EnodebAcsStateMachine):
         been disconnected.
         """
         if isinstance(message, models.Inform):
-            logger.debug('ACS in (%s) state. Received an Inform message',
-                          self.state.state_description())
+            logger.debug(
+                'ACS in (%s) state. Received an Inform message',
+                self.state.state_description(),
+            )
             self._reset_state_machine(self.service)
         elif isinstance(message, models.Fault):
-            logger.debug('ACS in (%s) state. Received a Fault <%s>',
-                          self.state.state_description(), message.FaultString)
+            logger.debug(
+                'ACS in (%s) state. Received a Fault <%s>',
+                self.state.state_description(), message.FaultString,
+            )
             self.transition(self.unexpected_fault_state_name)
         else:
             raise ConfigurationError('Cannot handle unexpected TR069 msg')
@@ -223,21 +283,29 @@ class BasicEnodebAcsStateMachine(EnodebAcsStateMachine):
             and not is_mme_connected
 
         if is_mme_unexpectedly_dc:
-            logger.warning('eNodeB is connected to AGw, is configured, '
-                            'and has AdminState enabled for transmit. '
-                            'MME connection to eNB is missing.')
+            logger.warning(
+                'eNodeB is connected to AGw, is configured, '
+                'and has AdminState enabled for transmit. '
+                'MME connection to eNB is missing.',
+            )
             if self.mme_timer is None:
-                logger.warning('eNodeB will be rebooted if MME connection '
-                                'is not established in: %s seconds.',
-                                self.MME_DISCONNECT_ENODEB_REBOOT_TIMER)
+                logger.warning(
+                    'eNodeB will be rebooted if MME connection '
+                    'is not established in: %s seconds.',
+                    self.MME_DISCONNECT_ENODEB_REBOOT_TIMER,
+                )
                 metrics.STAT_ENODEB_REBOOT_TIMER_ACTIVE.set(1)
                 self.mme_timer = \
                     StateMachineTimer(self.MME_DISCONNECT_ENODEB_REBOOT_TIMER)
             elif self.mme_timer.is_done():
-                logger.warning('eNodeB has not established MME connection '
-                                'within %s seconds - rebooting!',
-                                self.MME_DISCONNECT_ENODEB_REBOOT_TIMER)
-                metrics.STAT_ENODEB_REBOOTS.labels(cause='MME disconnect').inc()
+                logger.warning(
+                    'eNodeB has not established MME connection '
+                    'within %s seconds - rebooting!',
+                    self.MME_DISCONNECT_ENODEB_REBOOT_TIMER,
+                )
+                metrics.STAT_ENODEB_REBOOTS.labels(
+                    cause='MME disconnect',
+                ).inc()
                 metrics.STAT_ENODEB_REBOOT_TIMER_ACTIVE.set(0)
                 self.mme_timer = None
                 self.reboot_asap()
@@ -254,13 +322,17 @@ class BasicEnodebAcsStateMachine(EnodebAcsStateMachine):
 
     def _dump_debug_info(self) -> None:
         if self.device_cfg is not None:
-            logger.error('Device configuration: %s',
-                          self.device_cfg.get_debug_info())
+            logger.error(
+                'Device configuration: %s',
+                self.device_cfg.get_debug_info(),
+            )
         else:
             logger.error('Device configuration: None')
         if self.desired_cfg is not None:
-            logger.error('Desired configuration: %s',
-                          self.desired_cfg.get_debug_info())
+            logger.error(
+                'Desired configuration: %s',
+                self.desired_cfg.get_debug_info(),
+            )
         else:
             logger.error('Desired configuration: None')
 

@@ -14,18 +14,18 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+
+	"github.com/go-openapi/swag"
+	"github.com/labstack/echo/v4"
 
 	"magma/lte/cloud/go/lte"
 	"magma/lte/cloud/go/serdes"
 	"magma/lte/cloud/go/services/policydb/obsidian/models"
-	"magma/orc8r/cloud/go/obsidian"
 	"magma/orc8r/cloud/go/services/configurator"
-	merrors "magma/orc8r/lib/go/errors"
-
-	"github.com/go-openapi/swag"
-	"github.com/labstack/echo"
-	"github.com/pkg/errors"
+	"magma/orc8r/cloud/go/services/obsidian"
+	"magma/orc8r/lib/go/merrors"
 )
 
 const (
@@ -38,13 +38,14 @@ func ListRatingGroups(c echo.Context) error {
 		return nerr
 	}
 
-	ents, err := configurator.LoadAllEntitiesOfType(
+	ents, _, err := configurator.LoadAllEntitiesOfType(
+		c.Request().Context(),
 		networkID, lte.RatingGroupEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsFromThis: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	groupsByID := map[models.RatingGroupID]*models.RatingGroup{}
@@ -60,18 +61,19 @@ func CreateRatingGroup(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	group := new(models.RatingGroup)
 	if err := c.Bind(group); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := group.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := group.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
-	_, err := configurator.CreateEntity(networkID, group.ToEntity(), serdes.Entity)
+	_, err := configurator.CreateEntity(reqCtx, networkID, group.ToEntity(), serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusCreated)
 }
@@ -83,6 +85,7 @@ func GetRatingGroup(c echo.Context) error {
 	}
 
 	ent, err := configurator.LoadEntity(
+		c.Request().Context(),
 		networkID, lte.RatingGroupEntityType, ratingGroupID,
 		configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsFromThis: true},
 		serdes.Entity,
@@ -91,7 +94,7 @@ func GetRatingGroup(c echo.Context) error {
 	case err == merrors.ErrNotFound:
 		return echo.ErrNotFound
 	case err != nil:
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.JSON(http.StatusOK, (&models.RatingGroup{}).FromEntity(ent))
@@ -102,31 +105,32 @@ func UpdateRatingGroup(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	ratingGroup := new(models.MutableRatingGroup)
 	if err := c.Bind(ratingGroup); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := ratingGroup.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := ratingGroup.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 	groupID, err := swag.ConvertUint32(ratingGroupID)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
 	// 404 if rating group doesn't exist
-	exists, err := configurator.DoesEntityExist(networkID, lte.RatingGroupEntityType, ratingGroupID)
+	exists, err := configurator.DoesEntityExist(reqCtx, networkID, lte.RatingGroupEntityType, ratingGroupID)
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "Failed to check if rating group exists"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Failed to check if rating group exists: %w", err))
 	}
 	if !exists {
 		return echo.ErrNotFound
 	}
 
-	_, err = configurator.UpdateEntity(networkID, ratingGroup.ToEntityUpdateCriteria(groupID), serdes.Entity)
+	_, err = configurator.UpdateEntity(reqCtx, networkID, ratingGroup.ToEntityUpdateCriteria(groupID), serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -137,9 +141,9 @@ func DeleteRatingGroup(c echo.Context) error {
 		return nerr
 	}
 
-	err := configurator.DeleteEntity(networkID, lte.RatingGroupEntityType, ratingGroupID)
+	err := configurator.DeleteEntity(c.Request().Context(), networkID, lte.RatingGroupEntityType, ratingGroupID)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

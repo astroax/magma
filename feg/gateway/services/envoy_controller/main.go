@@ -16,28 +16,60 @@ package main
 
 import (
 	"flag"
+	"io/ioutil"
+	"os"
+	"regexp"
+	"sort"
+
+	"github.com/golang/glog"
 
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/registry"
 	"magma/feg/gateway/services/envoy_controller/control_plane"
 	"magma/feg/gateway/services/envoy_controller/servicers"
 	"magma/orc8r/lib/go/service"
-
-	"github.com/golang/glog"
 )
 
 func init() {
-	// Temp
 	flag.Set("logtostderr", "true")
 	flag.Set("stderrthreshold", "INFO")
 	flag.Set("v", "2")
 	flag.Parse()
+
+	logPath := "/var/log/"
+	files, err := ioutil.ReadDir(logPath)
+	if err != nil {
+		glog.Infof("Failed reading %s dir: %s", logPath, err)
+		return
+	}
+
+	maxLogFiles := 5
+	levels := []string{"FATAL", "ERROR", "WARNING", "INFO"}
+	for _, logSeverity := range levels {
+		logFiles := []string{}
+		for _, f := range files {
+			match, _ := regexp.MatchString(".*envoy_controller.*log."+logSeverity+".*", f.Name())
+			if match {
+				logFiles = append(logFiles, f.Name())
+			}
+		}
+		if len(logFiles) < maxLogFiles {
+			continue
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(logFiles)))
+		for _, file := range logFiles[maxLogFiles:] {
+			err := os.Remove(logPath + file)
+			if err != nil {
+				glog.Infof("Failed removing file %s: %s", file, err)
+			}
+		}
+	}
 }
 
 func main() {
 	// Create the service
 	glog.Infof("Creating '%s' Service", registry.ENVOY_CONTROLLER)
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.ENVOY_CONTROLLER)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.ENVOY_CONTROLLER)
 	if err != nil {
 		glog.Fatalf("Error creating Envoy Controller service: %s", err)
 	}

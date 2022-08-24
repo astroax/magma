@@ -15,12 +15,12 @@ limitations under the License.
 package servicers
 
 import (
-	"magma/feg/cloud/go/protos"
-	"magma/feg/gateway/services/envoy_controller/control_plane"
-	//lte_proto "magma/lte/cloud/go/protos"
+	"context"
 
 	"github.com/golang/glog"
-	"golang.org/x/net/context"
+
+	"magma/feg/cloud/go/protos"
+	"magma/feg/gateway/services/envoy_controller/control_plane"
 )
 
 type envoyControllerService struct {

@@ -10,24 +10,27 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-import netifaces
 import ipaddress
-from typing import NamedTuple, Dict, List
+from typing import Dict, List, NamedTuple
 
-from ryu.lib.packet import ether_types
-from ryu.ofproto.inet import IPPROTO_TCP
-from ryu.controller.controller import Datapath
-from ryu.ofproto.ofproto_v1_4 import OFPP_LOCAL
-
-from lte.protos.pipelined_pb2 import SubscriberQuotaUpdate, SetupFlowsResult
-from magma.pipelined.app.base import MagmaController, ControllerType
-from magma.pipelined.app.inout import INGRESS, EGRESS
+import netifaces
+from lte.protos.pipelined_pb2 import SetupFlowsResult, SubscriberQuotaUpdate
+from magma.pipelined.app.base import ControllerType, MagmaController
+from magma.pipelined.app.egress import EGRESS
+from magma.pipelined.app.ingress import INGRESS
 from magma.pipelined.app.ue_mac import UEMacAddressController
 from magma.pipelined.imsi import encode_imsi
 from magma.pipelined.openflow import flows
 from magma.pipelined.openflow.magma_match import MagmaMatch
-from magma.pipelined.openflow.registers import Direction, IMSI_REG, \
-    DIRECTION_REG
+from magma.pipelined.openflow.registers import (
+    DIRECTION_REG,
+    IMSI_REG,
+    Direction,
+)
+from ryu.controller.controller import Datapath
+from ryu.lib.packet import ether_types
+from ryu.ofproto.inet import IPPROTO_TCP
+from ryu.ofproto.ofproto_v1_4 import OFPP_LOCAL
 
 
 class CheckQuotaController(MagmaController):
@@ -40,26 +43,29 @@ class CheckQuotaController(MagmaController):
 
     APP_NAME = "check_quota"
     APP_TYPE = ControllerType.LOGICAL
-    CheckQuotaConfig = NamedTuple(
-        'CheckQuotaConfig',
-        [('bridge_ip', str), ('quota_check_ip', str),
-         ('has_quota_port', int), ('no_quota_port', int),
-         ('cwf_bridge_mac', str)],
-    )
+
+    class CheckQuotaConfig(NamedTuple):
+        bridge_ip: str
+        quota_check_ip: str
+        has_quota_port: int
+        no_quota_port: int
+        cwf_bridge_mac: str
 
     def __init__(self, *args, **kwargs):
         super(CheckQuotaController, self).__init__(*args, **kwargs)
         self.config = self._get_config(kwargs['config'])
         self.tbl_num = self._service_manager.get_table_num(self.APP_NAME)
         self.next_main_table = self._service_manager.get_next_table_num(
-            self.APP_NAME)
+            self.APP_NAME,
+        )
         self.next_table = \
             self._service_manager.get_table_num(INGRESS)
         self.egress_table = self._service_manager.get_table_num(EGRESS)
         self.arpd_controller_fut = kwargs['app_futures']['arpd']
         self.arp_contoller = None
         scratch_tbls = self._service_manager.allocate_scratch_tables(
-            self.APP_NAME, 2)
+            self.APP_NAME, 2,
+        )
         self._internal_ip_allocator = kwargs['internal_ip_allocator']
         self.ip_rewrite_scratch = scratch_tbls[0]
         self.mac_rewrite_scratch = \
@@ -80,8 +86,9 @@ class CheckQuotaController(MagmaController):
             cwf_bridge_mac=get_virtual_iface_mac(config_dict['bridge_name']),
         )
 
-    def handle_restart(self, quota_updates: List[SubscriberQuotaUpdate]
-                       ) -> SetupFlowsResult:
+    def handle_restart(
+        self, quota_updates: List[SubscriberQuotaUpdate],
+    ) -> SetupFlowsResult:
         """
         Setup the check quota flows for the controller, this is used when
         the controller restarts.
@@ -102,8 +109,10 @@ class CheckQuotaController(MagmaController):
     def cleanup_on_disconnect(self, datapath: Datapath):
         self._delete_all_flows(datapath)
 
-    def update_subscriber_quota_state(self,
-                                      updates: List[SubscriberQuotaUpdate]):
+    def update_subscriber_quota_state(
+        self,
+        updates: List[SubscriberQuotaUpdate],
+    ):
         if self._datapath is None:
             self.logger.error('Datapath not initialized for adding flows')
             return
@@ -153,7 +162,7 @@ class CheckQuotaController(MagmaController):
             imsi=encode_imsi(imsi), eth_type=ether_types.ETH_TYPE_IP,
             ip_proto=IPPROTO_TCP, direction=Direction.OUT,
             vlan_vid=(0x1000, 0x1000),
-            ipv4_dst=self.config.quota_check_ip
+            ipv4_dst=self.config.quota_check_ip,
         )
         actions = [
             parser.NXActionLearn(
@@ -162,58 +171,59 @@ class CheckQuotaController(MagmaController):
                 specs=[
                     parser.NXFlowSpecMatch(
                         src=ether_types.ETH_TYPE_IP, dst=('eth_type_nxm', 0),
-                        n_bits=16
+                        n_bits=16,
                     ),
                     parser.NXFlowSpecMatch(
-                        src=IPPROTO_TCP, dst=('ip_proto_nxm', 0), n_bits=8
+                        src=IPPROTO_TCP, dst=('ip_proto_nxm', 0), n_bits=8,
                     ),
                     parser.NXFlowSpecMatch(
                         src=Direction.IN,
                         dst=(DIRECTION_REG, 0),
-                        n_bits=32
+                        n_bits=32,
                     ),
                     parser.NXFlowSpecMatch(
                         src=int(ipaddress.IPv4Address(self.config.bridge_ip)),
                         dst=('ipv4_src_nxm', 0),
-                        n_bits=32
+                        n_bits=32,
                     ),
                     parser.NXFlowSpecMatch(
                         src=int(internal_ip),
                         dst=('ipv4_dst_nxm', 0),
-                        n_bits=32
+                        n_bits=32,
                     ),
                     parser.NXFlowSpecMatch(
                         src=('tcp_src_nxm', 0),
                         dst=('tcp_dst_nxm', 0),
-                        n_bits=16
+                        n_bits=16,
                     ),
                     parser.NXFlowSpecMatch(
                         src=tcp_dst,
                         dst=('tcp_src_nxm', 0),
-                        n_bits=16
+                        n_bits=16,
                     ),
                     parser.NXFlowSpecMatch(
                         src=encode_imsi(imsi),
                         dst=(IMSI_REG, 0),
-                        n_bits=64
+                        n_bits=64,
                     ),
                     parser.NXFlowSpecLoad(
                         src=('ipv4_src_nxm', 0),
                         dst=('ipv4_dst_nxm', 0),
-                        n_bits=32
+                        n_bits=32,
                     ),
                     parser.NXFlowSpecLoad(
                         src=int(
-                            ipaddress.IPv4Address(self.config.quota_check_ip)),
+                            ipaddress.IPv4Address(self.config.quota_check_ip),
+                        ),
                         dst=('ipv4_src_nxm', 0),
-                        n_bits=32
+                        n_bits=32,
                     ),
                     parser.NXFlowSpecLoad(
                         src=80,
                         dst=('tcp_src_nxm', 0),
-                        n_bits=16
+                        n_bits=16,
                     ),
-                ]
+                ],
             ),
             parser.NXActionLearn(
                 table_id=self.mac_rewrite_scratch,
@@ -221,88 +231,99 @@ class CheckQuotaController(MagmaController):
                 specs=[
                     parser.NXFlowSpecMatch(
                         src=ether_types.ETH_TYPE_IP, dst=('eth_type_nxm', 0),
-                        n_bits=16
+                        n_bits=16,
                     ),
                     parser.NXFlowSpecMatch(
-                        src=IPPROTO_TCP, dst=('ip_proto_nxm', 0), n_bits=8
+                        src=IPPROTO_TCP, dst=('ip_proto_nxm', 0), n_bits=8,
                     ),
                     parser.NXFlowSpecMatch(
                         src=int(ipaddress.IPv4Address(self.config.bridge_ip)),
                         dst=('ipv4_src_nxm', 0),
-                        n_bits=32
+                        n_bits=32,
                     ),
                     parser.NXFlowSpecMatch(
                         src=int(internal_ip),
                         dst=('ipv4_dst_nxm', 0),
-                        n_bits=32
+                        n_bits=32,
                     ),
                     parser.NXFlowSpecMatch(
                         src=('tcp_src_nxm', 0),
                         dst=('tcp_dst_nxm', 0),
-                        n_bits=16
+                        n_bits=16,
                     ),
                     parser.NXFlowSpecMatch(
                         src=tcp_dst,
                         dst=('tcp_src_nxm', 0),
-                        n_bits=16
+                        n_bits=16,
                     ),
                     parser.NXFlowSpecLoad(
                         src=('eth_src_nxm', 0),
                         dst=('eth_dst_nxm', 0),
-                        n_bits=48
+                        n_bits=48,
                     ),
                     parser.NXFlowSpecLoad(
                         src=encode_imsi(imsi),
                         dst=(IMSI_REG, 0),
-                        n_bits=64
+                        n_bits=64,
                     ),
-                ]
+                ],
             ),
             parser.OFPActionSetField(ipv4_src=str(internal_ip)),
             parser.OFPActionSetField(ipv4_dst=self.config.bridge_ip),
             parser.OFPActionSetField(eth_dst=self.config.cwf_bridge_mac),
             parser.OFPActionSetField(tcp_dst=tcp_dst),
-            parser.OFPActionPopVlan()
+            parser.OFPActionPopVlan(),
         ]
         flows.add_output_flow(
             self._datapath, self.tbl_num, match, actions,
             priority=flows.UE_FLOW_PRIORITY,
-            output_port=OFPP_LOCAL)
+            output_port=OFPP_LOCAL,
+        )
 
         ue_tbl = self._service_manager.get_table_num(
-            UEMacAddressController.APP_NAME)
+            UEMacAddressController.APP_NAME,
+        )
         ue_next_tbl = self._service_manager.get_table_num(INGRESS)
 
         # Allows traffic back from the check quota server
         match = MagmaMatch(in_port=OFPP_LOCAL)
         actions = [
-            parser.NXActionResubmitTable(table_id=self.mac_rewrite_scratch)]
-        flows.add_resubmit_next_service_flow(self._datapath, ue_tbl,
-                                             match, actions=actions,
-                                             priority=flows.DEFAULT_PRIORITY,
-                                             resubmit_table=ue_next_tbl)
+            parser.NXActionResubmitTable(table_id=self.mac_rewrite_scratch),
+        ]
+        flows.add_resubmit_next_service_flow(
+            self._datapath, ue_tbl,
+            match, actions=actions,
+            priority=flows.DEFAULT_PRIORITY,
+            resubmit_table=ue_next_tbl,
+        )
 
         # For traffic from the check quota server rewrite src ip and port
         match = MagmaMatch(
             imsi=encode_imsi(imsi), eth_type=ether_types.ETH_TYPE_IP,
             ip_proto=IPPROTO_TCP, direction=Direction.IN,
-            ipv4_src=self.config.bridge_ip, ipv4_dst=internal_ip)
+            ipv4_src=self.config.bridge_ip, ipv4_dst=internal_ip,
+        )
         actions = [
-            parser.NXActionResubmitTable(table_id=self.ip_rewrite_scratch)]
+            parser.NXActionResubmitTable(table_id=self.ip_rewrite_scratch),
+        ]
         flows.add_resubmit_next_service_flow(
             self._datapath, self.tbl_num, match, actions,
             priority=flows.DEFAULT_PRIORITY,
-            resubmit_table=self.egress_table
+            resubmit_table=self.egress_table,
         )
 
-        self.logger.debug("Setting up fake arp for for subscriber %s(%s),"
-                          "with fake ip %s", imsi, ue_mac , internal_ip)
+        self.logger.debug(
+            "Setting up fake arp for for subscriber %s(%s),"
+            "with fake ip %s", imsi, ue_mac, internal_ip,
+        )
 
         if self.arp_contoller or self.arpd_controller_fut.done():
             if not self.arp_contoller:
                 self.arp_contoller = self.arpd_controller_fut.result()
-            self.arp_contoller.set_incoming_arp_flows(self._datapath,
-                                                      internal_ip, ue_mac)
+            self.arp_contoller.set_incoming_arp_flows(
+                self._datapath,
+                internal_ip, ue_mac,
+            )
 
     def _install_default_flows(self, datapath: Datapath):
         """
@@ -317,11 +338,13 @@ class CheckQuotaController(MagmaController):
         flows.add_resubmit_next_service_flow(
             datapath, self.tbl_num, inbound_match, [],
             priority=flows.MINIMUM_PRIORITY,
-            resubmit_table=self.next_main_table)
+            resubmit_table=self.next_main_table,
+        )
         flows.add_resubmit_next_service_flow(
             datapath, self.tbl_num, outbound_match, [],
             priority=flows.MINIMUM_PRIORITY,
-            resubmit_table=self.next_main_table)
+            resubmit_table=self.next_main_table,
+        )
 
     def _delete_all_flows(self, datapath: Datapath):
         flows.delete_all_flows_from_table(datapath, self.tbl_num)

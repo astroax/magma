@@ -17,22 +17,23 @@ limitations under the License.
 package indexer
 
 import (
+	"fmt"
+	"math"
 	"strconv"
 	"testing"
 
+	"github.com/thoas/go-funk"
+
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/pkg/errors"
-	"github.com/thoas/go-funk"
 )
 
 // GetIndexer returns the remote indexer for a desired service.
-// Returns nil if not found.
+// Returns an empty indexer if not found.
 func GetIndexer(serviceName string) (Indexer, error) {
 	x, err := getIndexer(serviceName)
 	if err != nil {
-		return nil, errors.Wrapf(err, "get indexer for service %s", serviceName)
+		return NewEmptyIndexer(serviceName), fmt.Errorf("indexer not found for service %s: %w", serviceName, err)
 	}
 	return x, nil
 }
@@ -79,11 +80,14 @@ func getIndexer(serviceName string) (Indexer, error) {
 	if err != nil {
 		return nil, err
 	}
-	versionInt, err := strconv.Atoi(versionVal)
+	versionInt, err := strconv.ParseInt(versionVal, 10, 32)
 	if err != nil {
-		return nil, errors.Wrapf(err, "convert indexer version %v to int for service %s", versionVal, serviceName)
+		return nil, fmt.Errorf("convert indexer version %v to int for service %s: %w", versionVal, serviceName, err)
 	}
-	version, err := NewIndexerVersion(int64(versionInt))
+	if versionInt < 0 || versionInt > math.MaxUint32 {
+		return nil, fmt.Errorf("number %d is outside the boundaries of uint32 type: %w", versionInt, err)
+	}
+	version, err := NewIndexerVersion(versionInt)
 	if err != nil {
 		return nil, err
 	}

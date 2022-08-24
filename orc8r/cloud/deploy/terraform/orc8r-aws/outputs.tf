@@ -47,6 +47,11 @@ output "es_endpoint" {
   value       = join("", aws_elasticsearch_domain.es.*.endpoint)
 }
 
+output "es_volume_size" {
+  description = "Endpoint of the ES cluster if deployed."
+  value       = var.elasticsearch_ebs_volume_size
+}
+
 output "secretsmanager_secret_name" {
   description = "Name of the Secrets Manager secret for deployment secrets"
   value       = aws_secretsmanager_secret.orc8r_secrets.name
@@ -67,6 +72,11 @@ output "orc8r_db_port" {
   value       = aws_db_instance.default.port
 }
 
+output "orc8r_db_dialect" {
+  description = "Database dialect for Orchestrator RDS instance"
+  value       = var.orc8r_db_dialect
+}
+
 output "orc8r_db_user" {
   description = "Database username for Orchestrator RDS instance"
   value       = aws_db_instance.default.username
@@ -75,27 +85,6 @@ output "orc8r_db_user" {
 output "orc8r_db_pass" {
   description = "Orchestrator DB password"
   value       = aws_db_instance.default.password
-  sensitive   = true
-}
-
-output "nms_db_host" {
-  description = "Hostname of the NMS RDS instance"
-  value       = aws_db_instance.nms.address
-}
-
-output "nms_db_name" {
-  description = "Database name for NMS RDS instance"
-  value       = aws_db_instance.nms.name
-}
-
-output "nms_db_user" {
-  description = "Database username for NMS RDS instance"
-  value       = aws_db_instance.nms.username
-}
-
-output "nms_db_pass" {
-  description = "NMS DB password"
-  value       = aws_db_instance.nms.password
   sensitive   = true
 }
 
@@ -112,4 +101,14 @@ output "route53_nameservers" {
 output "external_dns_role_arn" {
   description = "IAM role ARN for external-dns"
   value       = aws_iam_role.external_dns.arn
+}
+
+output "setup_cert_manager" {
+  description = "Create IAM role and policy for cert-manager."
+  value       = var.setup_cert_manager
+}
+
+output "cert_manager_route53_iam_role_arn" {
+  description = "IAM role ARN for cert-manager."
+  value       = var.setup_cert_manager ? aws_iam_role.cert_manager_route53_iam_role.0.arn : null
 }

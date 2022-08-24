@@ -30,11 +30,17 @@ Go ahead and open up 2 fresh terminal tabs. Start in
 
 ### Terminal Tab 1: Provision the AGW VM
 
-The development environment virtualizes the access gateway so you don't need
+The development environment virtualizes the access gateway, so you don't need
 any production hardware on hand to test an end-to-end setup.
 We'll be setting up the LTE AGW VM in this tab.
 
+You need to make sure that your local network setup is correct for the VM to
+start properly. Especially the entries `* 192.168.0.0/16` and `* 3001::/64` must exist in your
+`/etc/vbox/networks.conf`.
+
 ```bash
+HOST [magma]$ echo "* 192.168.0.0/16" | sudo tee -a /etc/vbox/networks.conf
+HOST [magma]$ echo "* 3001::/64" | sudo tee -a /etc/vbox/networks.conf
 HOST [magma]$ cd lte/gateway
 HOST [magma/lte/gateway]$ vagrant up magma
 ```
@@ -72,6 +78,10 @@ HOST [magma/lte/gateway]$ vagrant ssh magma
 MAGMA-VM [/home/vagrant]$ cd magma/lte/gateway
 MAGMA-VM [/home/vagrant/magma/lte/gateway]$ make run
 ```
+
+**Note**: If you encounter unexpected errors during this process, try running
+`vagrant provision magma` in the host environment for more debugging
+information.
 
 This will take a while (we have a lot of CXX files to build). With 2 extensive
 build jobs running, now is a good time to grab a coffee or lunch. The first
@@ -124,7 +134,7 @@ Creating orc8r_controller_1       ... done
 
 The Orchestrator application containers will bootstrap certificates on startup
 which are cached for future runs. Watch the directory `magma/.cache/test_certs`
-for a file `admin_operator.pfx` to show up (this may take a minute or 2), then:
+for a file `admin_operator.pfx` to show up (this may take a minute or two).
 
 ```bash
 HOST [magma/orc8r/cloud/docker]$ ls ../../../.cache/test_certs
@@ -132,7 +142,19 @@ HOST [magma/orc8r/cloud/docker]$ ls ../../../.cache/test_certs
 admin_operator.key.pem  bootstrapper.key        controller.crt          rootCA.key
 admin_operator.pem      certifier.key           controller.csr          rootCA.pem
 admin_operator.pfx      certifier.pem           controller.key          rootCA.srl
+```
 
+The owner and group of `admin_operator.key.pem` and `admin_operator.pfx` in `/magma/.cache/test_certs/` are `root`.
+You need to change ownership of these files to your user with `chown`, e.g.
+
+```bash
+HOST [magma/orc8r/cloud/docker] sudo chown ${USER}:${USER} ../../../.cache/test_certs/admin_operator.key.pem
+HOST [magma/orc8r/cloud/docker] sudo chown ${USER}:${USER} ../../../.cache/test_certs/admin_operator.pfx
+```
+
+then:
+
+```bash
 HOST [magma/orc8r/cloud/docker]$ open ../../../.cache/test_certs
 ```
 
@@ -145,6 +167,13 @@ If you use Firefox, you'll have to import this .pfx file into your browser's
 installed client certificates. See [here](https://support.globalsign.com/customer/en/portal/articles/1211486-install-client-digital-certificate---firefox-for-windows)
 for instructions. If you use Chrome or Safari, you may have to restart the
 browser before the certificate can be used.
+
+After starting the Orchestrator with `HOST [magma/orc8r/cloud/docker]$ ./run.py`
+and importing `admin_operator.pfx`, you should be able to visit the Swagger UI
+at [https://localhost:9443/swagger/v1/ui](https://localhost:9443/swagger/v1/ui).
+Note that your browser may refuse to accept the server certificate from
+`localhost:9443`. Firefox and Safari will let you override this warning. Chrome
+will also let you [bypass the warning if you type `thisisunsafe`](https://www.technipages.com/google-chrome-bypass-your-connection-is-not-private-message).
 
 ### Connecting Your Local LTE Gateway to Your Local Cloud
 
@@ -184,20 +213,21 @@ Magma provides an UI for configuring and monitoring the networks. To set up
 the NMS to talk to your local Orchestrator:
 
 ```bash
-HOST [magma]$ cd nms/app/packages/magmalte
-HOST [magma/nms/app/packages/magmalte] $ docker-compose build magmalte
-HOST [magma/nms/app/packages/magmalte] $ docker-compose up -d
-HOST [magma/nms/app/packages/magmalte] $ ./scripts/dev_setup.sh
+HOST [magma]$ cd nms
+HOST [magma/nms] $ COMPOSE_PROJECT_NAME=magmalte docker-compose build magmalte
+HOST [magma/nms] $ docker-compose up -d
+HOST [magma/nms] $ ./scripts/dev_setup.sh
 ```
 
 After this, you will be able to access the UI by visiting
 [https://magma-test.localhost](https://magma-test.localhost), and using the email `admin@magma.test`
 and password `password1234`. We recommend Firefox or Chrome. If you see Gateway Error 502, don't worry, the
 NMS can take upto 60 seconds to finish starting up.
+Note that you will only see a network if you connected your local LTE gateway as described above.
 
-You will probably want to enable this organization (magma-test) to access all networks,
-so go to [master.localhost](https://master.localhost) and login with the same credentials.
-Once there, you can click on the organization and then select "Enable all networks".
+`magma-test` is the default organization.
+Organizations are managed at [host.localhost](https://host.localhost)
+where you can log in with the same credentials.
 
 **Note**: If you want to test the access gateway VM with a physical eNB and UE,
 refer to

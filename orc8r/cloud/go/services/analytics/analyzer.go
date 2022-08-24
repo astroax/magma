@@ -18,15 +18,16 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/golang/glog"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"github.com/robfig/cron/v3"
+
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/analytics/calculations"
 	"magma/orc8r/cloud/go/services/analytics/protos"
 	"magma/orc8r/cloud/go/services/analytics/query_api"
+	lib_protos "magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/golang/glog"
-	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	"github.com/robfig/cron/v3"
 )
 
 // Analyzer generic interface to schedule any analysis to run.
@@ -77,7 +78,7 @@ func (a *PrometheusAnalyzer) Schedule() error {
 
 // Analyze methods runs through collectors and exports their metrics
 func (a *PrometheusAnalyzer) Analyze() {
-	glog.Info("Running  Analyze")
+	glog.V(2).Info("Running Analyze")
 	collectorClients, err := getRemoteCollectors()
 	if err != nil {
 		glog.Infof("err %v failed to get remote collectors", err)
@@ -117,7 +118,7 @@ func getRemoteCollectors() ([]protos.AnalyticsCollectorClient, error) {
 
 	var collectorClientList []protos.AnalyticsCollectorClient
 	for _, s := range services {
-		conn, err := registry.GetConnection(s)
+		conn, err := registry.GetConnection(s, lib_protos.ServiceType_PROTECTED)
 		if err != nil {
 			glog.Errorf("Unable to get a remote connection %s error %v", s, err)
 			continue

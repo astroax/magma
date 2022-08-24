@@ -21,17 +21,17 @@ import (
 	"testing"
 	"time"
 
-	models2 "magma/feg/cloud/go/services/feg/obsidian/models"
-
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 
 	"magma/feg/cloud/go/feg"
 	feg_protos "magma/feg/cloud/go/protos"
 	"magma/feg/cloud/go/serdes"
+	models2 "magma/feg/cloud/go/services/feg/obsidian/models"
 	"magma/feg/cloud/go/services/feg_relay/gw_to_feg_relay"
-	"magma/feg/cloud/go/services/feg_relay/gw_to_feg_relay/servicers"
+	servicers "magma/feg/cloud/go/services/feg_relay/gw_to_feg_relay/servicers/southbound"
 	healthTestUtils "magma/feg/cloud/go/services/health/test_utils"
+	lte_protos "magma/lte/cloud/go/protos"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/device"
@@ -86,14 +86,158 @@ type testHelloServer struct {
 }
 
 func (tp *testHelloServer) SayHello(c context.Context, req *feg_protos.HelloRequest) (*feg_protos.HelloReply, error) {
-	return &feg_protos.HelloReply{Greeting: "testHelloService reply to: " + req.GetGreeting()}, nil
+	return &feg_protos.HelloReply{
+		Greeting:   "testHelloService reply to: " + req.GetGreeting(),
+		Timestamps: &feg_protos.ResponseTimestamps{},
+	}, nil
+}
+
+type testCentralSessionController struct {
+	lte_protos.UnimplementedCentralSessionControllerServer
+	resultChan chan string // Calling FeG ID string on success
+}
+
+func (tp *testCentralSessionController) UpdateSession(
+	ctx context.Context,
+	req *lte_protos.UpdateSessionRequest) (*lte_protos.UpdateSessionResponse, error) {
+
+	var res *lte_protos.UpdateSessionResponse
+	var ratType lte_protos.RATType
+
+	if tp == nil {
+		return nil, fmt.Errorf("nil test Central Session Controller")
+	}
+	if tp.resultChan == nil {
+		return nil, fmt.Errorf("nil test Central Session Controller channel")
+	}
+	var targetFegId = "<MISSING METADATA>"
+	ctxMetadata, ok := metadata.FromIncomingContext(ctx)
+	if ok && ctxMetadata != nil {
+		targetFegId = "<MISSING GW ID>"
+		values, ok := ctxMetadata[gateway_registry.GatewayIdHeaderKey]
+		if !ok {
+			values, ok = ctxMetadata[strings.ToLower(gateway_registry.GatewayIdHeaderKey)]
+		}
+		if ok && len(values) > 0 {
+			targetFegId = values[0]
+		}
+	}
+	tp.resultChan <- targetFegId
+
+	if len(req.Updates) > 0 {
+		ratType = req.Updates[0].GetCommonContext().GetRatType()
+	} else if len(req.UsageMonitors) > 0 {
+		ratType = req.UsageMonitors[0].GetRatType()
+	} else {
+		return nil, fmt.Errorf("empty data in UpdateSessionRequest")
+	}
+
+	if ratType == lte_protos.RATType_TGPP_NR {
+		res = &lte_protos.UpdateSessionResponse{
+			Responses: []*lte_protos.CreditUpdateResponse{
+				createCreditUsageResponse(nhImsi2, 2),
+			},
+			UsageMonitorResponses: []*lte_protos.UsageMonitoringUpdateResponse{
+				createUsageMonitoringResponse(nhImsi2, "mkey2"),
+				createUsageMonitoringResponse(nhImsi2, "mkey3"),
+			},
+		}
+	} else {
+		res = &lte_protos.UpdateSessionResponse{
+			Responses: []*lte_protos.CreditUpdateResponse{
+				createCreditUsageResponse(nhImsi, 1),
+			},
+			UsageMonitorResponses: []*lte_protos.UsageMonitoringUpdateResponse{
+				createUsageMonitoringResponse(nhImsi, "mkey"),
+			},
+		}
+	}
+
+	return res, nil
+}
+
+func createCreditUsageRequest(
+	imsi string,
+	chargingKey uint32,
+	requestNumber uint32,
+	requestType lte_protos.CreditUsage_UpdateType,
+	ratType lte_protos.RATType,
+) *lte_protos.CreditUsageUpdate {
+	return &lte_protos.CreditUsageUpdate{
+		Usage: &lte_protos.CreditUsage{
+			BytesTx:     1024,
+			BytesRx:     2048,
+			ChargingKey: chargingKey,
+			Type:        requestType,
+		},
+		SessionId:     imsi,
+		RequestNumber: requestNumber,
+		CommonContext: &lte_protos.CommonSessionContext{
+			Sid: &lte_protos.SubscriberID{
+				Id: imsi,
+			},
+			RatType: ratType,
+		},
+	}
+}
+
+func createCreditUsageResponse(
+	imsi string,
+	chargingKey uint32,
+) *lte_protos.CreditUpdateResponse {
+	return &lte_protos.CreditUpdateResponse{
+		Success:     true,
+		SessionId:   genSessionID(imsi),
+		Sid:         imsi,
+		ChargingKey: chargingKey,
+	}
+}
+
+func createUsageMonitoringRequest(
+	imsi string,
+	monitoringKey string,
+	requestNumber uint32,
+	monitoringLevel lte_protos.MonitoringLevel,
+	ratType lte_protos.RATType,
+) *lte_protos.UsageMonitoringUpdateRequest {
+	return &lte_protos.UsageMonitoringUpdateRequest{
+		Update: &lte_protos.UsageMonitorUpdate{
+			BytesTx:       1024,
+			BytesRx:       2048,
+			MonitoringKey: []byte(monitoringKey),
+			Level:         monitoringLevel,
+		},
+		SessionId:     genSessionID(imsi),
+		RequestNumber: requestNumber,
+		Sid:           imsi,
+		EventTrigger:  lte_protos.EventTrigger_USAGE_REPORT,
+		RatType:       ratType,
+	}
+}
+
+func createUsageMonitoringResponse(
+	imsi string,
+	monitoringKey string,
+) *lte_protos.UsageMonitoringUpdateResponse {
+	return &lte_protos.UsageMonitoringUpdateResponse{
+		Success:   true,
+		SessionId: genSessionID(imsi),
+		Sid:       imsi,
+		Credit: &lte_protos.UsageMonitoringCredit{
+			MonitoringKey: []byte(monitoringKey),
+		},
+	}
+}
+
+func genSessionID(imsi string) string {
+	return fmt.Sprintf("%s-1234", imsi)
 }
 
 func TestNHRouting(t *testing.T) {
 	testHealthServiser := setupNeutralHostNetworks(t)
 
 	// test # 1: Verify, relay finds the right serving FeG for IMSI's PLMN ID
-	foundFegHwId, err := gw_to_feg_relay.FindServingFeGHwId(federatedLteNetworkID, nhImsi)
+	foundFegHwId, err := gw_to_feg_relay.FindServingFeGHwId(context.Background(), federatedLteNetworkID, nhImsi)
 	assert.NoError(t, err)
 	assert.Equal(t, fegHwId, foundFegHwId)
 
@@ -101,7 +245,7 @@ func TestNHRouting(t *testing.T) {
 	//
 	// Start & register Serving FeG's test S6a Proxy Server
 	s6aProxy := &testS6aProxy{resultChan: make(chan string, 3)}
-	srv, lis := test_utils.NewTestService(t, "feg", s6aProxyService)
+	srv, lis, _ := test_utils.NewTestService(t, "feg", s6aProxyService)
 	s6aAddr := lis.Addr().(*net.TCPAddr)
 	s6aHost := "localhost"
 	t.Logf("Serving FeG S6a Proxy Address: %s", s6aAddr)
@@ -111,22 +255,26 @@ func TestNHRouting(t *testing.T) {
 	// Register FeG's test Hello Server
 	feg_protos.RegisterHelloServer(srv.GrpcServer, &testHelloServer{})
 
-	go srv.RunTest(lis)
+	// Register FeG's Central Session Controller Server
+	sessionProxy := &testCentralSessionController{resultChan: make(chan string, 2)}
+	lte_protos.RegisterCentralSessionControllerServer(srv.GrpcServer, sessionProxy)
+	go srv.RunTest(lis, nil)
 
 	// Add Serving FeG Host to directoryd
 	directoryd_test_init.StartTestService(t)
-	directoryd.MapHWIDToHostname(fegHwId, s6aHost)
+	directoryd.MapHWIDToHostname(context.Background(), fegHwId, s6aHost)
 	gateway_registry.SetPort(s6aAddr.Port)
 
 	// Start S6a relay Service
-	relaySrv, relayLis := test_utils.NewTestService(t, "", s6aProxyService)
+	relaySrv, relayLis, _ := test_utils.NewTestService(t, "", s6aProxyService)
 
 	t.Logf("Relay S6a Proxy Address: %s", relayLis.Addr())
 
 	relayRouter := servicers.NewRelayRouter()
 	feg_protos.RegisterS6AProxyServer(relaySrv.GrpcServer, relayRouter)
 	feg_protos.RegisterHelloServer(relaySrv.GrpcServer, relayRouter)
-	go relaySrv.RunTest(relayLis)
+	lte_protos.RegisterCentralSessionControllerServer(relaySrv.GrpcServer, relayRouter)
+	go relaySrv.RunTest(relayLis, nil)
 
 	ctx := service_test_utils.GetContextWithCertificate(t, agwHwId)
 	connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -147,6 +295,37 @@ func TestNHRouting(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("Neutral Host Routed S6a Proxy Call timed out")
 	}
+
+	// Test UpdateSession routing
+	sessProxyClient := lte_protos.NewCentralSessionControllerClient(conn)
+	toutctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+	updateSessReq := &lte_protos.UpdateSessionRequest{
+		Updates: []*lte_protos.CreditUsageUpdate{
+			createCreditUsageRequest(nhImsi, 1, 1, lte_protos.CreditUsage_QUOTA_EXHAUSTED, lte_protos.RATType_TGPP_LTE),
+			createCreditUsageRequest(nhImsi2, 2, 2, lte_protos.CreditUsage_TERMINATED, lte_protos.RATType_TGPP_NR),
+		},
+		UsageMonitors: []*lte_protos.UsageMonitoringUpdateRequest{
+			createUsageMonitoringRequest(nhImsi, "mkey", 1, lte_protos.MonitoringLevel_SESSION_LEVEL, lte_protos.RATType_TGPP_LTE),
+			createUsageMonitoringRequest(nhImsi2, "mkey2", 2, lte_protos.MonitoringLevel_PCC_RULE_LEVEL, lte_protos.RATType_TGPP_NR),
+			createUsageMonitoringRequest(nhImsi2, "mkey3", 3, lte_protos.MonitoringLevel_SESSION_LEVEL, lte_protos.RATType_TGPP_NR),
+		},
+	}
+
+	res, err := sessProxyClient.UpdateSession(toutctx, updateSessReq)
+	cancel()
+	assert.NoError(t, err)
+
+	// Based on RATType, feg_relay UpdateSession splits and relays the request to session_proxy and n7_n40_proxy
+	// in serving feg. As testCentralSessionController UpdateSession is executed twice,
+	// verifying the servingFegHwId twice
+	for i := len(sessionProxy.resultChan); i > 0; i-- {
+		servingFegHwId := <-sessionProxy.resultChan
+		assert.Equal(t, fegHwId, servingFegHwId)
+	}
+
+	// Verifying the collective response from session_proxy and n7_n40_proxy of serving Feg
+	assert.Equal(t, len(updateSessReq.Updates), len(res.Responses))
+	assert.Equal(t, len(updateSessReq.UsageMonitors), len(res.UsageMonitorResponses))
 
 	// Test SayHello routing & NH argumentation regex
 	helloClient := feg_protos.NewHelloClient(conn)
@@ -188,38 +367,30 @@ func TestNHRouting(t *testing.T) {
 	// test #4: Verify serving of non-matching PLMN IDs by default NH FeG (if exist)
 	//
 	// Add a FeG to serve non-matching PLMN IDs to NH network
-	_, err = configurator.CreateEntities(
-		nhNetworkID,
-		[]configurator.NetworkEntity{
-			{
-				Type: feg.FegGatewayType, Key: nhFegId,
-			},
-			{
-				Type: orc8r.MagmadGatewayType, Key: nhFegId,
-				Name: "nh_feg_gateway", Description: "neutral host federation gateway",
-				PhysicalID:   nhFegHwId,
-				Config:       &models.MagmadGatewayConfigs{},
-				Associations: []storage.TypeAndKey{{Type: feg.FegGatewayType, Key: nhFegId}},
-			},
-			{
-				Type: orc8r.UpgradeTierEntityType, Key: "t1",
-				Associations: []storage.TypeAndKey{
-					{Type: orc8r.MagmadGatewayType, Key: nhFegId},
-				},
+	_, err = configurator.CreateEntities(context.Background(), nhNetworkID, []configurator.NetworkEntity{
+		{
+			Type: feg.FegGatewayType, Key: nhFegId,
+		},
+		{
+			Type: orc8r.MagmadGatewayType, Key: nhFegId,
+			Name: "nh_feg_gateway", Description: "neutral host federation gateway",
+			PhysicalID:   nhFegHwId,
+			Config:       &models.MagmadGatewayConfigs{},
+			Associations: storage.TKs{{Type: feg.FegGatewayType, Key: nhFegId}},
+		},
+		{
+			Type: orc8r.UpgradeTierEntityType, Key: "t1",
+			Associations: storage.TKs{
+				{Type: orc8r.MagmadGatewayType, Key: nhFegId},
 			},
 		},
-		serdes.Entity,
-	)
+	}, serdes.Entity)
 	assert.NoError(t, err)
-	err = device.RegisterDevice(
-		nhNetworkID, orc8r.AccessGatewayRecordType, nhFegHwId,
-		&models.GatewayDevice{HardwareID: nhFegHwId, Key: &models.ChallengeKey{KeyType: "ECHO"}},
-		serdes.Device,
-	)
+	err = device.RegisterDevice(context.Background(), nhNetworkID, orc8r.AccessGatewayRecordType, nhFegHwId, &models.GatewayDevice{HardwareID: nhFegHwId, Key: &models.ChallengeKey{KeyType: "ECHO"}}, serdes.Device)
 	assert.NoError(t, err)
 
 	// Map NH FeG to already running test S6a proxy address
-	directoryd.MapHWIDToHostname(nhFegHwId, "localhost")
+	directoryd.MapHWIDToHostname(context.Background(), nhFegHwId, "localhost")
 
 	// Update Serving FeG Health status
 	healthctx := protos.NewGatewayIdentity(nhFegHwId, nhNetworkID, nhFegId).NewContextWithIdentity(context.Background())
@@ -228,11 +399,11 @@ func TestNHRouting(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify that NH FeG will be used as "catch all" for all but nhPlmnId
-	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(federatedLteNetworkID, "") // no IMSI
+	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(context.Background(), federatedLteNetworkID, "") // no IMSI
 	assert.NoError(t, err)
 	assert.Equal(t, nhFegHwId, foundFegHwId)
 
-	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(federatedLteNetworkID, nhImsi) // NH IMSI
+	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(context.Background(), federatedLteNetworkID, nhImsi) // NH IMSI
 	assert.NoError(t, err)
 	assert.Equal(t, fegHwId, foundFegHwId)
 
@@ -262,7 +433,7 @@ func TestNHRouting(t *testing.T) {
 
 	// test #5: Remove Neutral Host settings (making NH FeG network a legacy FeG Network) and verify that
 	//			legacy (non NH) relay logic works as expected (GW requests with NH IMSI are routed to NH FeG)
-	nhNet, err := configurator.LoadNetwork(nhNetworkID, true, true, serdes.Network)
+	nhNet, err := configurator.LoadNetwork(context.Background(), nhNetworkID, true, true, serdes.Network)
 	assert.NoError(t, err)
 	assert.NotNil(t, nhNet)
 	cfg, ok := nhNet.Configs[feg.FegNetworkType]
@@ -272,17 +443,17 @@ func TestNHRouting(t *testing.T) {
 	assert.True(t, ok)
 	assert.NotNil(t, fegCfg)
 	fegCfg.NhRoutes = nil // delete NH configuration, now FeG Network is just a regular FeG Network
-	err = configurator.UpdateNetworkConfig(nhNetworkID, feg.FegNetworkType, fegCfg, serdes.Network)
+	err = configurator.UpdateNetworkConfig(context.Background(), nhNetworkID, feg.FegNetworkType, fegCfg, serdes.Network)
 	assert.NoError(t, err)
 
 	// Verify, relay now finds the NH local FeG for any IMSI
-	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(federatedLteNetworkID, nhImsi)
+	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(context.Background(), federatedLteNetworkID, nhImsi)
 	assert.NoError(t, err)
 	assert.Equal(t, nhFegHwId, foundFegHwId)
-	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(federatedLteNetworkID, nonNhImsi)
+	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(context.Background(), federatedLteNetworkID, nonNhImsi)
 	assert.NoError(t, err)
 	assert.Equal(t, nhFegHwId, foundFegHwId)
-	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(federatedLteNetworkID, "") // no IMSI
+	foundFegHwId, err = gw_to_feg_relay.FindServingFeGHwId(context.Background(), federatedLteNetworkID, "") // no IMSI
 	assert.NoError(t, err)
 	assert.Equal(t, nhFegHwId, foundFegHwId)
 

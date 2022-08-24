@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Copyright 2020 The Magma Authors.
 
 # This source code is licensed under the BSD-style license found in the
@@ -15,6 +15,14 @@ sed -i "s/.*OVS_CTL_OPTS.*/OVS_CTL_OPTS='--delete-bridges'/" /etc/default/openvs
 
 # Create /var/core directory
 mkdir -p /var/core
+
+value=`cat /usr/local/share/magma/commit_hash`
+if grep -q "COMMIT_HASH" /etc/environment
+then
+    sudo sed -i -e "s/^COMMIT_HASH.*/$value/" /etc/environment
+else
+    echo "$value" | sudo tee -a /etc/environment
+fi
 
 # Set magmad service to start on boot
 systemctl enable -f magma@magmad.service
@@ -34,7 +42,17 @@ systemctl disable dnsmasq
 systemctl stop lighttpd
 systemctl disable lighttpd
 
+# Copy over ipfix patch
+cp /usr/local/lib/python3.8/dist-packages/ryu/ofproto/nx_actions.py.magma /usr/local/lib/python3.8/dist-packages/ryu/ofproto/nx_actions.py
+cp /usr/local/lib/python3.8/dist-packages/ryu/app/ofctl/service.py.magma /usr/local/lib/python3.8/dist-packages/ryu/app/ofctl/service.py
+if [ -f /usr/lib/python3/dist-packages/ryu/ofproto/nx_actions.py ]; then
+  cp /usr/local/lib/python3.8/dist-packages/ryu/ofproto/nx_actions.py /usr/lib/python3/dist-packages/ryu/ofproto/
+  cp /usr/local/lib/python3.8/dist-packages/ryu/app/ofctl/service.py /usr/lib/python3/dist-packages/ryu/app/ofctl/service.py
+fi
+
 # Restart rsyslog to pick up fluent-bit config, create fluent-bit DB directory
+cp /etc/logrotate.d/rsyslog /etc/logrotate.d/rsyslog.orig
+cp /etc/logrotate.d/rsyslog.magma /etc/logrotate.d/rsyslog
 systemctl restart rsyslog
 mkdir -p /var/opt/magma/fluent-bit
 

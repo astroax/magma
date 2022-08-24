@@ -10,24 +10,23 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from enum import Enum
 import time
-
-from ryu import utils
-from ryu.base import app_manager
-from ryu.controller import dpset
-from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER
-from ryu.controller.handler import MAIN_DISPATCHER
-from ryu.controller.handler import HANDSHAKE_DISPATCHER
-from ryu.controller.handler import set_ev_cls
-from ryu.ofproto import ofproto_v1_4
+from enum import Enum
 
 from lte.protos.pipelined_pb2 import SetupFlowsResult
 from magma.pipelined.bridge_util import BridgeTools, DatapathLookupError
 from magma.pipelined.metrics import OPENFLOW_ERROR_MSG
 from magma.pipelined.openflow.exceptions import MagmaOFError
-
+from ryu import utils
+from ryu.base import app_manager
+from ryu.controller import dpset, ofp_event
+from ryu.controller.handler import (
+    CONFIG_DISPATCHER,
+    HANDSHAKE_DISPATCHER,
+    MAIN_DISPATCHER,
+    set_ev_cls,
+)
+from ryu.ofproto import ofproto_v1_4
 
 global_epoch = int(time.time())
 
@@ -62,11 +61,12 @@ class MagmaController(app_manager.RyuApp):
         self._app_futures = kwargs['app_futures']
         try:
             self._datapath_id = BridgeTools.get_datapath_id(
-                kwargs['config']['bridge_name']
+                kwargs['config']['bridge_name'],
             )
         except DatapathLookupError as e:
             self.logger.error(
-                'Exception in %s contoller: %s', self.APP_NAME, e)
+                'Exception in %s contoller: %s', self.APP_NAME, e,
+            )
             raise
         if 'controller_port' in kwargs['config']:
             self.CONF.ofp_tcp_listen_port = kwargs['config']['controller_port']
@@ -75,16 +75,21 @@ class MagmaController(app_manager.RyuApp):
         self._startup_flows_fut = kwargs['app_futures']['startup_flows']
         self.init_finished = False
 
-    @set_ev_cls(ofp_event.EventOFPErrorMsg,
-                [HANDSHAKE_DISPATCHER, CONFIG_DISPATCHER, MAIN_DISPATCHER])
+    @set_ev_cls(
+        ofp_event.EventOFPErrorMsg,
+        [HANDSHAKE_DISPATCHER, CONFIG_DISPATCHER, MAIN_DISPATCHER],
+    )
     def record_of_errors(self, ev):
         msg = ev.msg
-        self.logger.error("OF Error: type=0x%02x code=0x%02x "
-                          "message=%s",
-                          msg.type, msg.code, utils.hex_array(msg.data))
+        self.logger.error(
+            "OF Error: type=0x%02x code=0x%02x "
+            "message=%s",
+            msg.type, msg.code, utils.hex_array(msg.data),
+        )
         OPENFLOW_ERROR_MSG.labels(
             error_type="0x%02x" % msg.type,
-            error_code="0x%02x" % msg.code).inc()
+            error_code="0x%02x" % msg.code,
+        ).inc()
 
     @set_ev_cls(dpset.EventDP, MAIN_DISPATCHER)
     def datapath_event_handler(self, ev):
@@ -104,14 +109,16 @@ class MagmaController(app_manager.RyuApp):
             if ev.enter:
                 self.initialize_on_connect(datapath)
                 # set a barrier to ensure things are applied
-                if self.APP_NAME in self._app_futures:
-                    self._app_futures[self.APP_NAME].set_result(self)
+                app_future = self._app_futures.get(self.APP_NAME)
+                if app_future and not app_future.done():
+                    app_future.set_result(self)
             else:
                 self.cleanup_on_disconnect(datapath)
         except MagmaOFError as e:
             act = 'initializing' if ev.enter else 'cleaning'
             self.logger.error(
-                'Error %s %s flow rules: %s', act, self.APP_NAME, e)
+                'Error %s %s flow rules: %s', act, self.APP_NAME, e,
+            )
 
     def check_setup_request_epoch(self, epoch):
         """
@@ -119,12 +126,15 @@ class MagmaController(app_manager.RyuApp):
         returns:    status code if epoch is invalid/controller is initialized
                     None if controller can be initialized
         """
-        self.logger.info("Received Setup request with epoch - %d, current "
-                         "epoch  is - %d", epoch, global_epoch)
+        self.logger.info(
+            "Received Setup request with epoch - %d, current "
+            "epoch  is - %d", epoch, global_epoch,
+        )
         if epoch != global_epoch:
             self.logger.warning(
                 "Received SetupFlowsRequest has outdated epoch - %d, current "
-                "epoch is - %d.", epoch, global_epoch)
+                "epoch is - %d.", epoch, global_epoch,
+            )
             return SetupFlowsResult.OUTDATED_EPOCH
 
         if self._datapath is None:
@@ -136,6 +146,12 @@ class MagmaController(app_manager.RyuApp):
             return SetupFlowsResult.SUCCESS
 
         return None
+
+    def is_controller_ready(self):
+        """
+        Check if the controller is setup & ready to process requests
+        """
+        return self._datapath and self.init_finished
 
     def initialize_on_connect(self, datapath):
         """

@@ -12,18 +12,18 @@ limitations under the License.
 """
 
 
+import ipaddress
+import time
 import unittest
 
 import s1ap_types
 import s1ap_wrapper
-import time
-import ipaddress
 from integ_tests.s1aptests.s1ap_utils import SessionManagerUtil
 from lte.protos.policydb_pb2 import FlowMatch
 
 
 class TestAttachStandaloneActvDfltBearCtxtRejDedBerActivation(
-    unittest.TestCase
+    unittest.TestCase,
 ):
     def setUp(self):
         self._s1ap_wrapper = s1ap_wrapper.TestWrapper()
@@ -146,7 +146,7 @@ class TestAttachStandaloneActvDfltBearCtxtRejDedBerActivation(
         apn_list = [ims]
 
         self._s1ap_wrapper.configAPN(
-            "IMSI" + "".join([str(i) for i in req.imsi]), apn_list
+            "IMSI" + "".join([str(i) for i in req.imsi]), apn_list,
         )
         print(
             "************************* Running End to End attach for UE id ",
@@ -175,7 +175,7 @@ class TestAttachStandaloneActvDfltBearCtxtRejDedBerActivation(
         # 1 UL flow for the default bearer
         num_ul_flows = 1
         self._s1ap_wrapper.s1_util.verify_flow_rules(
-            num_ul_flows, dl_flow_rules
+            num_ul_flows, dl_flow_rules,
         )
 
         print("Sleeping for 5 seconds")
@@ -194,7 +194,7 @@ class TestAttachStandaloneActvDfltBearCtxtRejDedBerActivation(
             def_ber_rej,
         )
         print(
-            "Sent STANDALONE_ACTV_DEFAULT_EPS_BEARER_CNTXT_REJECT indication"
+            "Sent STANDALONE_ACTV_DEFAULT_EPS_BEARER_CNTXT_REJECT indication",
         )
         print("Sleeping for 5 seconds")
         time.sleep(5)
@@ -204,26 +204,26 @@ class TestAttachStandaloneActvDfltBearCtxtRejDedBerActivation(
         # Receive PDN CONN RSP/Activate default EPS bearer context request
         response = self._s1ap_wrapper.s1_util.get_response()
         self.assertEqual(
-            response.msg_type, s1ap_types.tfwCmd.UE_PDN_CONN_RSP_IND.value
+            response.msg_type, s1ap_types.tfwCmd.UE_PDN_CONN_RSP_IND.value,
         )
         act_def_bearer_req = response.cast(s1ap_types.uePdnConRsp_t)
 
         print(
             "************************* Sending Activate default EPS bearer "
             "context reject for UE id %d and bearer %d"
-            % (req.ue_id, act_def_bearer_req.m.pdnInfo.epsBearerId)
+            % (req.ue_id, act_def_bearer_req.m.pdnInfo.epsBearerId),
         )
 
         print("Sleeping for 5 seconds")
         time.sleep(5)
 
-        # Dedicated bearer will not be established as the seconday PDN
+        # Dedicated bearer will not be established as the secondary PDN
         # establishment failed
         print(
             "********************** Sending RAR for IMSI",
             "".join([str(i) for i in req.imsi]),
         )
-        self._sessionManager_util.create_ReAuthRequest(
+        self._sessionManager_util.send_ReAuthRequest(
             "IMSI" + "".join([str(i) for i in req.imsi]),
             policy_id,
             flow_list,
@@ -232,11 +232,11 @@ class TestAttachStandaloneActvDfltBearCtxtRejDedBerActivation(
 
         print("Sleeping for 5 seconds")
         time.sleep(5)
-        # Verify that ovs rules are not created for the seconday pdn and
+        # Verify that ovs rules are not created for the secondary pdn and
         # dedicated bearer as UE rejected the establishment of secondary pdn
 
         self._s1ap_wrapper.s1_util.verify_flow_rules(
-            num_ul_flows, dl_flow_rules
+            num_ul_flows, dl_flow_rules,
         )
 
         print("Sleeping for 5 seconds")

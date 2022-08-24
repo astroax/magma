@@ -14,6 +14,12 @@
 package calculations
 
 import (
+	"context"
+
+	"github.com/go-openapi/swag"
+	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/serdes"
 	"magma/orc8r/cloud/go/services/analytics/calculations"
@@ -22,12 +28,8 @@ import (
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
 	"magma/orc8r/cloud/go/services/state/wrappers"
-	merrors "magma/orc8r/lib/go/errors"
+	"magma/orc8r/lib/go/merrors"
 	"magma/orc8r/lib/go/metrics"
-
-	"github.com/go-openapi/swag"
-	"github.com/golang/glog"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 type NetworkMetricsCalculation struct {
@@ -38,7 +40,7 @@ func (x *NetworkMetricsCalculation) Calculate(prometheusClient query_api.Prometh
 	glog.V(1).Info("Calculate Network Metrics")
 
 	var results []*protos.CalculationResult
-	networks, err := configurator.ListNetworkIDs()
+	networks, err := configurator.ListNetworkIDs(context.Background())
 	if err != nil || networks == nil {
 		return results, err
 	}
@@ -50,7 +52,7 @@ func (x *NetworkMetricsCalculation) Calculate(prometheusClient query_api.Prometh
 	}
 
 	for _, networkID := range networks {
-		network, err := configurator.LoadNetwork(networkID, true, true, serdes.Network)
+		network, err := configurator.LoadNetwork(context.TODO(), networkID, true, true, serdes.Network)
 		if err == merrors.ErrNotFound {
 			glog.Errorf("Network %s not found", networkID)
 			continue
@@ -83,13 +85,16 @@ func (x *SiteMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 	var results []*protos.CalculationResult
 
 	gatewayVersionCfg, gatewayVersionCfgOk := x.AnalyticsConfig.Metrics[metrics.GatewayMagmaVersionMetric]
-	networks, err := configurator.ListNetworkIDs()
+	networks, err := configurator.ListNetworkIDs(context.Background())
 	if err != nil || networks == nil || !gatewayVersionCfgOk {
 		return results, err
 	}
 
+	// TODO: you'll want to set some tracing params on this context
+	outgoingCtx := context.TODO()
 	for _, networkID := range networks {
 		gatewayEnts, _, err := configurator.LoadEntities(
+			context.Background(),
 			networkID,
 			swag.String(orc8r.MagmadGatewayType),
 			nil,
@@ -102,7 +107,7 @@ func (x *SiteMetricsCalculation) Calculate(prometheusClient query_api.Prometheus
 			continue
 		}
 		for _, ent := range gatewayEnts {
-			status, err := wrappers.GetGatewayStatus(networkID, ent.PhysicalID)
+			status, err := wrappers.GetGatewayStatus(outgoingCtx, networkID, ent.PhysicalID)
 			if err != nil ||
 				status == nil ||
 				status.PlatformInfo == nil ||

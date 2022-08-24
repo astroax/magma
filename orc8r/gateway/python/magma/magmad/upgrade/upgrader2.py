@@ -24,38 +24,36 @@ In order for that to be possible, upgrading must be broken into stages:
 4) Upgrade
 """
 
+import abc
 import asyncio
 import http.client
 import logging
 import pathlib
 import ssl
 import time
-import typing
 import urllib.request  # TODO: Figure out how to get aiohttp
+from typing import NamedTuple, NewType, Set
 
-import abc
 from magma.common.service import MagmaService
 from magma.common.service_registry import ServiceRegistry
 from magma.magmad.upgrade.upgrader import Upgrader
 from prometheus_client import Gauge
 
-VersionT = typing.NewType("VersionT", str)
-ImageNameT = typing.NewType("ImageNameT", str)
+VersionT = NewType("VersionT", str)
+ImageNameT = NewType("ImageNameT", str)
 
 # TODO - Add gauges for upgrade actions and failure
 
-UpgraderGauges = typing.NamedTuple(
-    'UpgraderGauges',
-    [
-        ('time_taken', Gauge),
-        ('error', Gauge),
-        ('downloaded', Gauge),
-        ('prepared', Gauge),
-        ('canary', Gauge),
-        ('stable', Gauge),
-        ('idle', Gauge),
-    ]
-)
+
+class UpgraderGauges(NamedTuple):
+    time_taken: Gauge
+    error: Gauge
+    downloaded: Gauge
+    prepared: Gauge
+    canary: Gauge
+    stable: Gauge
+    idle: Gauge
+
 
 _GAUGES = None  # type: typing.Optional[UpgraderGauges]
 
@@ -101,25 +99,19 @@ class ImageDownloadFailed(Exception):
     pass
 
 
-class VersionInfo(
-    # In 3.6, use the much shorter typing.NamedTuple syntax
-    typing.NamedTuple(
-        "VersionInfo",
-        [
-            # Use empty string for "no version"
-            ("current_version", VersionT),
-            # available_versions are those that have already had the
-            # prepare_upgrade() work done on them, and can be kicked off with a
-            # upgrade() call.
-            #
-            # available_versions does not need to contain current_version, but
-            # it can if you want.
-            ("available_versions", typing.Set[VersionT]),
-        ],
-    )
-):
+class VersionInfo(NamedTuple):
+    # Use empty string for "no version"
+    current_version: VersionT
+    # available_versions are those that have already had the
+    # prepare_upgrade() work done on them, and can be kicked off with a
+    # upgrade() call.
+    #
+    # available_versions does not need to contain current_version, but
+    # it can if you want.
+    available_versions: Set[VersionT]
+
     @property
-    def all_versions(self) -> typing.Set[VersionT]:
+    def all_versions(self) -> Set[VersionT]:
         """All versions available on the device (including the current one)"""
         ret = set(self.available_versions)
         if self.current_version:
@@ -127,28 +119,31 @@ class VersionInfo(
         return ret
 
 
-class UpgradeIntent(
-    typing.NamedTuple(
-        "UpgradeIntent",
-        [
-            # If set, force upgrading to this version if the current version is
-            # not in stable or canary
-            # use empty string for "no version set"
-            ("stable", VersionT),
-            # If set, install this version and wait to be told to upgrade
-            # by a controller RPC
-            # use empty string for "no version set"
-            ("canary", VersionT),
-        ],
-    )
-):
+class UpgradeIntent(NamedTuple):
+    # If set, force upgrading to this version if the current version is
+    # not in stable or canary
+    # use empty string for "no version set"
+    stable: VersionT
+    # If set, install this version and wait to be told to upgrade
+    # by a controller RPC
+    # use empty string for "no version set"
+    canary: VersionT
+
+    @property
+    def active_version(self) -> VersionT:
+        return self.stable or self.canary
+
     def version_to_prepare(self, version_info: VersionInfo) -> VersionT:
         """
         Returns the version to prepare for upgrade this loop, if needed.
         Else returns empty string.
         """
         available_versions = version_info.all_versions
-        preference = [version for version in (self.stable, self.canary) if version]
+        preference = [
+            version for version in (
+                self.stable, self.canary,
+            ) if version
+        ]
         for version in preference:
             if version not in available_versions:
                 return version
@@ -166,10 +161,6 @@ class UpgradeIntent(
         ):
             return self.stable
         return VersionT("")
-
-    @property
-    def active_version(self) -> VersionT:
-        return self.stable or self.canary
 
 
 class Upgrader2(Upgrader, metaclass=abc.ABCMeta):
@@ -226,7 +217,7 @@ class Upgrader2(Upgrader, metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     async def prepare_upgrade(
-        self, version: VersionT, path_to_image: pathlib.Path
+        self, version: VersionT, path_to_image: pathlib.Path,
     ) -> None:
         """
         Prepare the device for upgrade, i.e. by unpacking the image on disk.
@@ -271,7 +262,7 @@ async def do_upgrade2(upgrader: Upgrader2) -> None:
 async def _do_upgrade2(upgrader: Upgrader) -> None:
     gauges = get_gauges()
     upgrade_intent, version_info = await asyncio.gather(
-        upgrader.get_upgrade_intent(), upgrader.get_versions()
+        upgrader.get_upgrade_intent(), upgrader.get_versions(),
     )
 
     current_version = version_info.current_version or object()
@@ -320,12 +311,13 @@ async def _do_upgrade2(upgrader: Upgrader) -> None:
         logging.info("Preparing %r, image is %r", to_prepare, image_name)
         image_path = image_local_path(image_name)
         await ensure_downloaded(
-            upgrader.service.config, image_name, image_path, gauges.downloaded)
+            upgrader.service.config, image_name, image_path, gauges.downloaded,
+        )
         await upgrader.prepare_upgrade(to_prepare, image_path)
         logging.info("%r is prepared", to_prepare)
         gauges.prepared.set(1)
     elif upgrade_intent.active_version not in (
-        VersionT(""), version_info.current_version
+        VersionT(""), version_info.current_version,
     ):
         # We're not the version to be installed, but we don't need to prepare,
         # so we must be prepared
@@ -342,7 +334,8 @@ async def _do_upgrade2(upgrader: Upgrader) -> None:
         image_name = upgrader.version_to_image_name(to_upgrade_to)
         image_path = image_local_path(image_name)
         await ensure_downloaded(
-            upgrader.service.config, image_name, image_path, gauges.downloaded)
+            upgrader.service.config, image_name, image_path, gauges.downloaded,
+        )
         logging.warning(
             "Performing upgrade to %r, device may reboot",
             to_upgrade_to,
@@ -374,7 +367,8 @@ async def ensure_downloaded(
         gauge.set(0)
         logging.info("Downloading %r to %s from s3", image_name, image_path)
         base_url = config["upgrader_factory"].get(
-            "http_base_url", "https://api.magma.test/s3")
+            "http_base_url", "https://api.magma.test/s3",
+        )
         size = await asyncio.get_event_loop().run_in_executor(
             None,
             download,
@@ -392,7 +386,7 @@ async def ensure_downloaded(
     else:
         gauge.set(1)
         logging.info(
-            "Skipping download, image %r is already in %s", image_name, image_path
+            "Skipping download, image %r is already in %s", image_name, image_path,
         )
 
 
@@ -407,7 +401,7 @@ def get_ssl_context() -> ssl.SSLContext:
     try:
         ret.load_cert_chain(
             certfile=proxy_config["gateway_cert"],
-            keyfile=proxy_config["gateway_key"]
+            keyfile=proxy_config["gateway_key"],
         )
     except FileNotFoundError:
         raise RuntimeError("Gateway cert or key file not found")
@@ -441,7 +435,7 @@ def download(
     with urllib.request.urlopen(
         req,
         context=get_ssl_context(),
-        timeout=30  # How long without getting data, not total time
+        timeout=30,  # How long without getting data, not total time
     ) as response:
         assert isinstance(response, http.client.HTTPResponse)  # for types
         # For some reason, talking to any url on api.magma always returns
@@ -489,5 +483,5 @@ async def run_command(*args, **kwargs):
     stdout, stderr = await process.communicate()
     if check:
         if process.returncode != 0:
-            raise Exception("Command failed: %s" % args)
+            raise Exception(f"Command failed: {args}")
     return process.returncode, stdout, stderr

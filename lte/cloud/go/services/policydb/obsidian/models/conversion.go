@@ -14,10 +14,14 @@
 package models
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/go-openapi/swag"
+	"github.com/golang/glog"
 
 	"magma/lte/cloud/go/lte"
 	"magma/lte/cloud/go/protos"
@@ -25,9 +29,6 @@ import (
 	orc8rModels "magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
 	"magma/orc8r/cloud/go/storage"
 	orc8rProtos "magma/orc8r/lib/go/protos"
-
-	"github.com/go-openapi/swag"
-	"github.com/golang/glog"
 )
 
 // TODO(8/21/20): provide entity-wise namespacing support from configurator
@@ -109,10 +110,10 @@ func (m *BaseNameRecord) GetAssocs() storage.TKs {
 	return m.RuleNames.ToTKs()
 }
 
-func (m *BaseNameRecord) GetParentAssocs() []storage.TypeAndKey {
+func (m *BaseNameRecord) GetParentAssocs() storage.TKs {
 	var parents storage.TKs
 	for _, sid := range m.AssignedSubscribers {
-		parents = append(parents, storage.TypeAndKey{Type: lte.SubscriberEntityType, Key: string(sid)})
+		parents = append(parents, storage.TK{Type: lte.SubscriberEntityType, Key: string(sid)})
 	}
 	return parents
 }
@@ -124,7 +125,7 @@ func (m RuleNames) ToTKs() storage.TKs {
 func (m *PolicyRule) ToEntity() configurator.NetworkEntity {
 	ent := configurator.NetworkEntity{
 		Type:         lte.PolicyRuleEntityType,
-		Key:          string(m.ID),
+		Key:          string(*m.ID),
 		Config:       m.getConfig(),
 		Associations: m.GetAssocs(),
 	}
@@ -132,7 +133,8 @@ func (m *PolicyRule) ToEntity() configurator.NetworkEntity {
 }
 
 func (m *PolicyRule) FromEntity(ent configurator.NetworkEntity) *PolicyRule {
-	m.ID = PolicyID(ent.Key)
+	policyID := PolicyID(ent.Key)
+	m.ID = &policyID
 	m.fillFromConfig(ent.Config)
 
 	for _, assoc := range ent.ParentAssociations.Filter(lte.SubscriberEntityType) {
@@ -146,28 +148,29 @@ func (m *PolicyRule) FromEntity(ent configurator.NetworkEntity) *PolicyRule {
 	return m
 }
 
-func (m *PolicyRule) ToEntityUpdateCriteria() configurator.EntityUpdateCriteria {
+func (m *PolicyRule) ToEntityUpdateCriteria(associationsToAdd storage.TKs, associationsToDelete storage.TKs) configurator.EntityUpdateCriteria {
 	update := configurator.EntityUpdateCriteria{
-		Type:              lte.PolicyRuleEntityType,
-		Key:               string(m.ID),
-		NewConfig:         m.getConfig(),
-		AssociationsToAdd: m.GetAssocs(),
+		Type:                 lte.PolicyRuleEntityType,
+		Key:                  string(*m.ID),
+		NewConfig:            m.getConfig(),
+		AssociationsToAdd:    associationsToAdd,
+		AssociationsToDelete: associationsToDelete,
 	}
 	return update
 }
 
 func (m *PolicyRule) GetParentAssocs() storage.TKs {
-	var parents []storage.TypeAndKey
+	var parents storage.TKs
 	for _, sid := range m.AssignedSubscribers {
-		parents = append(parents, storage.TypeAndKey{Type: lte.SubscriberEntityType, Key: string(sid)})
+		parents = append(parents, storage.TK{Type: lte.SubscriberEntityType, Key: string(sid)})
 	}
 	return parents
 }
 
 func (m *PolicyRule) GetAssocs() storage.TKs {
-	var children []storage.TypeAndKey
+	var children storage.TKs
 	if m.QosProfile != "" {
-		children = append(children, storage.TypeAndKey{Type: lte.PolicyQoSProfileEntityType, Key: m.QosProfile})
+		children = append(children, storage.TK{Type: lte.PolicyQoSProfileEntityType, Key: m.QosProfile})
 	}
 	return children
 }
@@ -178,6 +181,7 @@ func (m *PolicyRule) getConfig() *PolicyRuleConfig {
 		MonitoringKey:           m.MonitoringKey,
 		Priority:                m.Priority,
 		RatingGroup:             m.RatingGroup,
+		ServiceIdentifier:       m.ServiceIdentifier,
 		Redirect:                m.Redirect,
 		TrackingType:            m.TrackingType,
 		AppName:                 m.AppName,
@@ -200,6 +204,7 @@ func (m *PolicyRule) fillFromConfig(entConfig interface{}) *PolicyRule {
 	m.MonitoringKey = monKey
 	m.Priority = cfg.Priority
 	m.RatingGroup = cfg.RatingGroup
+	m.ServiceIdentifier = cfg.ServiceIdentifier
 	m.Redirect = cfg.Redirect
 	m.TrackingType = cfg.TrackingType
 	m.AppName = cfg.AppName
@@ -208,10 +213,10 @@ func (m *PolicyRule) fillFromConfig(entConfig interface{}) *PolicyRule {
 	return m
 }
 
-func (m PolicyIdsByApn) ToTKs(subscriberID string) []storage.TypeAndKey {
-	var tks []storage.TypeAndKey
+func (m PolicyIdsByApn) ToTKs(subscriberID string) storage.TKs {
+	var tks storage.TKs
 	for apnName := range m {
-		tks = append(tks, storage.TypeAndKey{Type: lte.APNPolicyProfileEntityType, Key: makeAPNPolicyKey(subscriberID, apnName)})
+		tks = append(tks, storage.TK{Type: lte.APNPolicyProfileEntityType, Key: makeAPNPolicyKey(subscriberID, apnName)})
 	}
 	return tks
 }
@@ -241,11 +246,11 @@ func makeAPNPolicyKey(subscriberID, apnName string) string {
 	return subscriberID + magicNamespaceSeparator + apnName
 }
 
-func getAPNPolicyAssocs(apnName string, policyIDs PolicyIds) []storage.TypeAndKey {
-	var assocs []storage.TypeAndKey
-	assocs = append(assocs, storage.TypeAndKey{Type: lte.APNEntityType, Key: apnName})
+func getAPNPolicyAssocs(apnName string, policyIDs PolicyIds) storage.TKs {
+	var assocs storage.TKs
+	assocs = append(assocs, storage.TK{Type: lte.APNEntityType, Key: apnName})
 	for _, policyID := range policyIDs {
-		assocs = append(assocs, storage.TypeAndKey{Type: lte.PolicyRuleEntityType, Key: string(policyID)})
+		assocs = append(assocs, storage.TK{Type: lte.PolicyRuleEntityType, Key: string(policyID)})
 	}
 	return assocs
 }
@@ -262,6 +267,7 @@ func (m *PolicyRuleConfig) ToProto(id string, qos *protos.FlowQos) *protos.Polic
 			protoMKey = []byte(m.MonitoringKey)
 		}
 	}
+
 	rule := &protos.PolicyRule{
 		Id:             id,
 		Priority:       swag.Uint32Value(m.Priority),
@@ -272,6 +278,9 @@ func (m *PolicyRuleConfig) ToProto(id string, qos *protos.FlowQos) *protos.Polic
 		AppServiceType: protos.PolicyRule_AppServiceType(protos.PolicyRule_AppServiceType_value[m.AppServiceType]),
 		HardTimeout:    0,
 		Qos:            qos,
+	}
+	if m.ServiceIdentifier != 0 {
+		rule.ServiceIdentifier = &protos.ServiceIdentifier{Value: m.ServiceIdentifier}
 	}
 	if m.Redirect != nil {
 		rule.Redirect = m.Redirect.ToProto()
@@ -396,8 +405,8 @@ func (m *NetworkSubscriberConfig) ToUpdateCriteria(network configurator.Network)
 	return orc8rModels.GetNetworkConfigUpdateCriteria(network.ID, lte.NetworkSubscriberConfigType, m), nil
 }
 
-func (m *PolicyQosProfile) FromBackendModels(networkID string, key string) error {
-	config, err := configurator.LoadEntityConfig(networkID, lte.PolicyQoSProfileEntityType, key, EntitySerdes)
+func (m *PolicyQosProfile) FromBackendModels(ctx context.Context, networkID string, key string) error {
+	config, err := configurator.LoadEntityConfig(ctx, networkID, lte.PolicyQoSProfileEntityType, key, EntitySerdes)
 	if err != nil {
 		return err
 	}
@@ -405,12 +414,12 @@ func (m *PolicyQosProfile) FromBackendModels(networkID string, key string) error
 	return nil
 }
 
-func (m *PolicyQosProfile) ToUpdateCriteria(networkID string, key string) ([]configurator.EntityUpdateCriteria, error) {
+func (m *PolicyQosProfile) ToUpdateCriteria(ctx context.Context, networkID string, key string) ([]configurator.EntityUpdateCriteria, error) {
 	if key != m.ID {
 		return nil, errors.New("id field is read-only")
 	}
 
-	exists, err := configurator.DoesEntityExist(networkID, lte.PolicyQoSProfileEntityType, key)
+	exists, err := configurator.DoesEntityExist(ctx, networkID, lte.PolicyQoSProfileEntityType, key)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +454,7 @@ func (m *PolicyQosProfile) ToProto() *protos.FlowQos {
 	proto := &protos.FlowQos{
 		MaxReqBwUl: swag.Uint32Value(m.MaxReqBwUl),
 		MaxReqBwDl: swag.Uint32Value(m.MaxReqBwDl),
-		Qci:        protos.FlowQos_Qci(m.ClassID),
+		Qci:        protos.FlowQos_Qci(*m.ClassID),
 	}
 	if m.Gbr != nil {
 		proto.GbrUl = swag.Uint32Value(m.Gbr.Uplink)
@@ -464,18 +473,18 @@ func (m *PolicyQosProfile) ToProto() *protos.FlowQos {
 	return proto
 }
 
-func (m PolicyIds) ToTKs() []storage.TypeAndKey {
-	var tks []storage.TypeAndKey
+func (m PolicyIds) ToTKs() storage.TKs {
+	var tks storage.TKs
 	for _, policyID := range m {
-		tks = append(tks, storage.TypeAndKey{Type: lte.PolicyRuleEntityType, Key: string(policyID)})
+		tks = append(tks, storage.TK{Type: lte.PolicyRuleEntityType, Key: string(policyID)})
 	}
 	return tks
 }
 
-func (m BaseNames) ToTKs() []storage.TypeAndKey {
-	var tks []storage.TypeAndKey
+func (m BaseNames) ToTKs() storage.TKs {
+	var tks storage.TKs
 	for _, baseName := range m {
-		tks = append(tks, storage.TypeAndKey{Type: lte.BaseNameEntityType, Key: string(baseName)})
+		tks = append(tks, storage.TK{Type: lte.BaseNameEntityType, Key: string(baseName)})
 	}
 	return tks
 }

@@ -18,14 +18,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/golang/glog"
+
 	"magma/feg/gateway/diameter"
 	"magma/feg/gateway/policydb"
 	"magma/feg/gateway/services/session_proxy/credit_control"
 	"magma/feg/gateway/services/session_proxy/credit_control/gy"
 	"magma/feg/gateway/services/session_proxy/metrics"
 	"magma/lte/cloud/go/protos"
-
-	"github.com/golang/glog"
 )
 
 // sendSingleCreditRequest sends a CCR message through the gy client
@@ -46,7 +46,7 @@ func (srv *CentralSessionController) sendSingleCreditRequest(request *gy.CreditC
 				answer.ResultCode, request.SessionID, request.IMSI)
 		}
 		return answer, nil
-	case <-time.After(srv.cfg.RequestTimeout):
+	case <-time.After(srv.cfg.RequestTimeoutGy):
 		metrics.GyTimeouts.Inc()
 		srv.creditClient.IgnoreAnswer(request)
 		return nil, fmt.Errorf("Did not receive Gy CCA for session: %s, IMSI: %s", request.SessionID, request.IMSI)
@@ -88,7 +88,6 @@ func makeCCRInit(
 					ApnAggMaxBitRateUL: lteContext.GetQosInfo().GetApnAmbrUl(),
 				}
 			}
-			break
 		}
 	} else {
 		glog.Warning("No RatSpecificContext is specified")
@@ -177,7 +176,7 @@ func (srv *CentralSessionController) waitForGyResponses(
 ) []*protos.CreditUpdateResponse {
 	requestMap := createRequestKeyMap(requests)
 	responses := []*protos.CreditUpdateResponse{}
-	timeout := time.After(timeoutDuration) // TODO constant
+	timeout := time.After(timeoutDuration)
 	numResponses := len(requests)
 loop:
 	for i := 0; i < numResponses; i++ {
@@ -190,8 +189,8 @@ loop:
 				metrics.GyResultCodes.WithLabelValues(strconv.FormatUint(uint64(ans.ResultCode), 10)).Inc()
 				metrics.UpdateGyRecentRequestMetrics(nil)
 				key := credit_control.GetRequestKey(credit_control.Gy, ans.SessionID, ans.RequestNumber)
-				newResponse := getSingleCreditResponseFromCCA(ans, requestMap[key])
-				responses = append(responses, newResponse)
+				newResponses := getGroupedCreditResponseFromCCA(ans, requestMap[key])
+				responses = append(responses, newResponses...)
 				// satisfied request, remove
 				delete(requestMap, key)
 			default:
@@ -254,45 +253,48 @@ func addMissingResponses(
 	return responses
 }
 
-// getSingleCreditResponseFromCCA creates a CreditUpdateResponse proto from a CCA
-func getSingleCreditResponseFromCCA(
+// getGroupedCreditResponseFromCCA creates a CreditUpdateResponse proto from a CCA
+func getGroupedCreditResponseFromCCA(
 	answer *gy.CreditControlAnswer,
 	request *gy.CreditControlRequest,
-) *protos.CreditUpdateResponse {
+) []*protos.CreditUpdateResponse {
 	success := answer.ResultCode == diameter.SuccessCode
 	imsi := credit_control.AddIMSIPrefix(request.IMSI)
 
 	if len(answer.Credits) == 0 {
-		return &protos.CreditUpdateResponse{
+		return []*protos.CreditUpdateResponse{{
 			Success:    false,
 			Sid:        imsi,
 			SessionId:  request.SessionID,
 			ResultCode: answer.ResultCode,
+		}}
+	}
+	responses := []*protos.CreditUpdateResponse{}
+	for _, receivedCredit := range answer.Credits {
+		msccSuccess := receivedCredit.ResultCode == diameter.SuccessCode || receivedCredit.ResultCode == 0 // 0: not set
+		tgppCtx := request.TgppCtx
+		if len(answer.OriginHost) > 0 {
+			if tgppCtx == nil {
+				tgppCtx = new(protos.TgppContext)
+			}
+			tgppCtx.GyDestHost = answer.OriginHost
 		}
-	}
-	receivedCredit := answer.Credits[0]
-	msccSuccess := receivedCredit.ResultCode == diameter.SuccessCode || receivedCredit.ResultCode == 0 // 0: not set
-	tgppCtx := request.TgppCtx
-	if len(answer.OriginHost) > 0 {
-		if tgppCtx == nil {
-			tgppCtx = new(protos.TgppContext)
+		res := &protos.CreditUpdateResponse{
+			Success:     success && msccSuccess,
+			SessionId:   request.SessionID,
+			Sid:         imsi,
+			ChargingKey: receivedCredit.RatingGroup,
+			Credit:      getSingleChargingCreditFromCCA(receivedCredit),
+			TgppCtx:     tgppCtx,
+			ResultCode:  receivedCredit.ResultCode, // answer.ResultCode is returned in case of general failure
 		}
-		tgppCtx.GyDestHost = answer.OriginHost
-	}
-	res := &protos.CreditUpdateResponse{
-		Success:     success && msccSuccess,
-		SessionId:   request.SessionID,
-		Sid:         imsi,
-		ChargingKey: receivedCredit.RatingGroup,
-		Credit:      getSingleChargingCreditFromCCA(receivedCredit),
-		TgppCtx:     tgppCtx,
-		ResultCode:  receivedCredit.ResultCode, //answer.ResultCode is returned in case of general failure
-	}
 
-	if receivedCredit.ServiceIdentifier != nil {
-		res.ServiceIdentifier = &protos.ServiceIdentifier{Value: *receivedCredit.ServiceIdentifier}
+		if receivedCredit.ServiceIdentifier != nil {
+			res.ServiceIdentifier = &protos.ServiceIdentifier{Value: *receivedCredit.ServiceIdentifier}
+		}
+		responses = append(responses, res)
 	}
-	return res
+	return responses
 }
 
 func getInitialCreditResponsesFromCCA(request *gy.CreditControlRequest, answer *gy.CreditControlAnswer) []*protos.CreditUpdateResponse {
@@ -339,15 +341,6 @@ func getSingleChargingCreditFromCCA(
 		chargingCredit.RestrictRules = credits.FinalUnitIndication.RestrictRules
 	}
 	return chargingCredit
-}
-
-// getUpdateRequestsFromUsage returns a slice of CCRs from usage update protos
-func getGyUpdateRequestsFromUsage(updates []*protos.CreditUsageUpdate) []*gy.CreditControlRequest {
-	requests := []*gy.CreditControlRequest{}
-	for _, update := range updates {
-		requests = append(requests, (&gy.CreditControlRequest{}).FromCreditUsageUpdate(update))
-	}
-	return requests
 }
 
 // getTerminateRequestFromUsage returns a slice of CCRs from usage update protos

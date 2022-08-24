@@ -14,9 +14,13 @@ limitations under the License.
 package health_manager_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/registry"
@@ -25,10 +29,6 @@ import (
 	"magma/gateway/mconfig"
 	"magma/orc8r/cloud/go/test_utils"
 	orcprotos "magma/orc8r/lib/go/protos"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"golang.org/x/net/context"
 )
 
 type MockHealthServicer struct {
@@ -102,17 +102,17 @@ func initTestServices(t *testing.T, mockServiceHealth *MockServiceHealthServicer
 		t.Log(err)
 	}
 
-	srv1, lis1 := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
-	srv2, lis2 := test_utils.NewTestService(t, registry.ModuleName, registry.SESSION_PROXY)
-	srv3, lis3 := test_utils.NewTestService(t, registry.ModuleName, registry.HEALTH)
+	srv1, lis1, _ := test_utils.NewTestService(t, registry.ModuleName, registry.SWX_PROXY)
+	srv2, lis2, _ := test_utils.NewTestService(t, registry.ModuleName, registry.SESSION_PROXY)
+	srv3, lis3, _ := test_utils.NewTestService(t, registry.ModuleName, registry.HEALTH)
 
 	protos.RegisterServiceHealthServer(srv1.GrpcServer, mockServiceHealth)
 	protos.RegisterServiceHealthServer(srv2.GrpcServer, mockServiceHealth)
 	protos.RegisterHealthServer(srv3.GrpcServer, mockHealth)
 
-	go srv1.RunTest(lis1)
-	go srv2.RunTest(lis2)
-	go srv3.RunTest(lis3)
+	go srv1.RunTest(lis1, nil)
+	go srv2.RunTest(lis2, nil)
+	go srv3.RunTest(lis3, nil)
 
 	return &mocks.MockCloudRegistry{ServerAddr: lis3.Addr().String()}
 }

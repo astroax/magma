@@ -14,7 +14,10 @@ limitations under the License.
 package directoryd_test
 
 import (
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"magma/orc8r/cloud/go/orc8r"
 	configurator_test_init "magma/orc8r/cloud/go/services/configurator/test_init"
@@ -30,8 +33,6 @@ import (
 	state_types "magma/orc8r/cloud/go/services/state/types"
 	"magma/orc8r/lib/go/protos"
 	"magma/orc8r/lib/go/registry"
-
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -42,8 +43,14 @@ const (
 	imsi0             = "some_imsi_0"
 	nid0              = "some_network_id_0"
 	sid0              = "some_session_id_0"
+	teid0             = "10"
+	teids0            = "10,20,30"
 	sidWithoutPrefix  = "155129"
 	sidWithIMSIPrefix = "IMSI156304337849371-" + sidWithoutPrefix
+)
+
+var (
+	teid0Slice = []string{"10", "20", "30"}
 )
 
 func TestGetSessionID(t *testing.T) {
@@ -77,41 +84,137 @@ func TestGetSessionID(t *testing.T) {
 	assert.Equal(t, "", sid)
 }
 
+func TestGetHWIDForSgwCTeid(t *testing.T) {
+	record := &types.DirectoryRecord{
+		LocationHistory: []string{hwid0},
+		Identifiers: map[string]interface{}{
+			types.RecordKeySgwCTeid: teids0,
+		},
+	}
+
+	// Default path
+	teids, err := record.GetSgwCTeids()
+	assert.NoError(t, err)
+	assert.Equal(t, teid0Slice, teids)
+
+	// Err on non-string teid
+	record.Identifiers[types.RecordKeySgwCTeid] = 10
+	_, err = record.GetSgwCTeids()
+	assert.Error(t, err)
+
+	// Error on empty teid
+	record.Identifiers = map[string]interface{}{}
+	teids, err = record.GetSgwCTeids()
+	assert.NoError(t, err)
+	assert.Exactly(t, []string{}, teids)
+}
+
+func TestGetHWIDForSgwUTeid(t *testing.T) {
+	record := &types.DirectoryRecord{
+		LocationHistory: []string{hwid0},
+		Identifiers: map[string]interface{}{
+			types.RecordKeySgwUTeid: teids0,
+		},
+	}
+
+	// Default path
+	teids, err := record.GetSgwUTeids()
+	assert.NoError(t, err)
+	assert.Equal(t, teid0Slice, teids)
+
+	// Err on non-string teid
+	record.Identifiers[types.RecordKeySgwUTeid] = 10
+	_, err = record.GetSgwUTeids()
+	assert.Error(t, err)
+
+	// Error on empty teid
+	record.Identifiers = map[string]interface{}{}
+	teids, err = record.GetSgwUTeids()
+	assert.NoError(t, err)
+	assert.Exactly(t, []string{}, teids)
+}
+
 func TestDirectorydMethods(t *testing.T) {
 	directoryd_test_init.StartTestService(t)
 
 	// Empty initially
-	_, err := directoryd.GetSessionIDForIMSI(nid0, imsi0)
+	_, err := directoryd.GetSessionIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
-	_, err = directoryd.GetHostnameForHWID(hwid0)
+	_, err = directoryd.GetHostnameForHWID(context.Background(), hwid0)
+	assert.Error(t, err)
+	_, err = directoryd.GetHWIDForSgwCTeid(context.Background(), nid0, teid0)
+	assert.Error(t, err)
+	_, err = directoryd.GetHWIDForSgwUTeid(context.Background(), nid0, teid0)
 	assert.Error(t, err)
 
 	// Put sid0->imsi0
-	err = directoryd.MapSessionIDsToIMSIs(nid0, map[string]string{sid0: imsi0})
+	err = directoryd.MapSessionIDsToIMSIs(context.Background(), nid0, map[string]string{sid0: imsi0})
 	assert.NoError(t, err)
 
 	// Put Many hwid0->hn0
-	err = directoryd.MapHWIDsToHostnames(map[string]string{hwid0: hn0})
+	err = directoryd.MapHWIDsToHostnames(context.Background(), map[string]string{hwid0: hn0})
 	assert.NoError(t, err)
 
 	// Put Single hwid1->hn1
-	err = directoryd.MapHWIDToHostname(hwid1, hn1)
+	err = directoryd.MapHWIDToHostname(context.Background(), hwid1, hn1)
 	assert.NoError(t, err)
 
 	// Get sid0->imsi0
-	imsi, err := directoryd.GetIMSIForSessionID(nid0, sid0)
+	imsi, err := directoryd.GetIMSIForSessionID(context.Background(), nid0, sid0)
 	assert.NoError(t, err)
 	assert.Equal(t, imsi, imsi0)
 
 	// Get hwid0->hn0
-	hn, err := directoryd.GetHostnameForHWID(hwid0)
+	hn, err := directoryd.GetHostnameForHWID(context.Background(), hwid0)
 	assert.NoError(t, err)
 	assert.Equal(t, hn0, hn)
 
 	// Get hwid1->hn1
-	hn, err = directoryd.GetHostnameForHWID(hwid1)
+	hn, err = directoryd.GetHostnameForHWID(context.Background(), hwid1)
 	assert.NoError(t, err)
 	assert.Equal(t, hn1, hn)
+
+	// Put Control teid->hwid
+	err = directoryd.MapSgwCTeidToHWID(context.Background(), nid0, map[string]string{teid0: hwid0})
+	assert.NoError(t, err)
+
+	// Get Control teid->hwid
+	hwidC, err := directoryd.GetHWIDForSgwCTeid(context.Background(), nid0, teid0)
+	assert.NoError(t, err)
+	assert.Equal(t, hwid0, hwidC)
+
+	// Put User teid->hwid
+	err = directoryd.MapSgwUTeidToHWID(context.Background(), nid0, map[string]string{teid0: hwid0})
+	assert.NoError(t, err)
+
+	// Get User teid->hwid
+	hwidU, err := directoryd.GetHWIDForSgwUTeid(context.Background(), nid0, teid0)
+	assert.NoError(t, err)
+	assert.Equal(t, hwid0, hwidU)
+
+	// Remove sid0->imsi0 mapping
+	err = directoryd.UnmapSessionIDsToIMSIs(context.Background(), nid0, []string{sid0})
+	assert.NoError(t, err)
+	_, err = directoryd.GetIMSIForSessionID(context.Background(), nid0, sid0)
+	assert.Error(t, err)
+
+	// Remove hwid->imsi mapping
+	err = directoryd.UnmapHWIDsToHostnames(context.Background(), []string{hwid1})
+	assert.NoError(t, err)
+	_, err = directoryd.GetHostnameForHWID(context.Background(), hwid1)
+	assert.Error(t, err)
+
+	// Remove Control teid->hwid mapping
+	err = directoryd.UnmapSgwCTeidToHWID(context.Background(), nid0, []string{teid0})
+	assert.NoError(t, err)
+	_, err = directoryd.GetHWIDForSgwCTeid(context.Background(), nid0, teid0)
+	assert.Error(t, err)
+
+	// Remove User teid->hwid mapping
+	err = directoryd.UnmapSgwUTeidToHWID(context.Background(), nid0, []string{teid0})
+	assert.NoError(t, err)
+	_, err = directoryd.GetHWIDForSgwUTeid(context.Background(), nid0, teid0)
+	assert.Error(t, err)
 }
 
 func TestDirectorydStateMethods(t *testing.T) {
@@ -148,9 +251,9 @@ func TestDirectorydStateMethods(t *testing.T) {
 	}
 
 	// Empty initially
-	_, err = directoryd.GetHWIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetHWIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
-	_, err = directoryd.GetSessionIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetSessionIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
 
 	// Report state
@@ -160,25 +263,25 @@ func TestDirectorydStateMethods(t *testing.T) {
 	assert.Empty(t, res.UnreportedStates)
 
 	// Get imsi0->hwid0
-	hwid, err := directoryd.GetHWIDForIMSI(nid0, imsi0)
+	hwid, err := directoryd.GetHWIDForIMSI(context.Background(), nid0, imsi0)
 	assert.NoError(t, err)
 	assert.Equal(t, hwid0, hwid)
 
 	// Get imsi0->sid0
-	sid, err := directoryd.GetSessionIDForIMSI(nid0, imsi0)
+	sid, err := directoryd.GetSessionIDForIMSI(context.Background(), nid0, imsi0)
 	assert.NoError(t, err)
 	assert.Equal(t, sid0, sid)
 
 	// Delete state
-	err = state.DeleteStates(nid0, state_types.IDs{stateID})
+	err = state.DeleteStates(context.Background(), nid0, state_types.IDs{stateID})
 	assert.NoError(t, err)
 
 	// Get imsi0->hwid0, should be gone
-	_, err = directoryd.GetHWIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetHWIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
 
 	// Get imsi0->sid0, should be gone
-	_, err = directoryd.GetSessionIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetSessionIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
 }
 
@@ -197,9 +300,9 @@ func TestDirectorydUpdateMethods(t *testing.T) {
 	ctx := test_utils.GetContextWithCertificate(t, hwid0)
 
 	// Empty initially
-	_, err = directoryd.GetHWIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetHWIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
-	_, err = directoryd.GetSessionIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetSessionIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
 
 	// Update
@@ -211,12 +314,12 @@ func TestDirectorydUpdateMethods(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Get imsi0->hwid0
-	hwid, err := directoryd.GetHWIDForIMSI(nid0, imsi0)
+	hwid, err := directoryd.GetHWIDForIMSI(context.Background(), nid0, imsi0)
 	assert.NoError(t, err)
 	assert.Equal(t, hwid0, hwid)
 
 	// Get imsi0->sid0
-	sid, err := directoryd.GetSessionIDForIMSI(nid0, imsi0)
+	sid, err := directoryd.GetSessionIDForIMSI(context.Background(), nid0, imsi0)
 	assert.NoError(t, err)
 	assert.Equal(t, sid0, sid)
 
@@ -236,22 +339,22 @@ func TestDirectorydUpdateMethods(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Get imsi0->hwid0, should be gone
-	_, err = directoryd.GetHWIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetHWIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
 
 	// Get imsi0->sid0, should be gone
-	_, err = directoryd.GetSessionIDForIMSI(nid0, imsi0)
+	_, err = directoryd.GetSessionIDForIMSI(context.Background(), nid0, imsi0)
 	assert.Error(t, err)
 }
 
 func getStateServiceClient(t *testing.T) (protos.StateServiceClient, error) {
-	conn, err := registry.GetConnection(state.ServiceName)
+	conn, err := registry.GetConnection(state.ServiceName, protos.ServiceType_SOUTHBOUND)
 	assert.NoError(t, err)
 	return protos.NewStateServiceClient(conn), err
 }
 
 func getDirectorydUpdaterClient(t *testing.T) (protos.GatewayDirectoryServiceClient, error) {
-	conn, err := registry.GetConnection(directoryd.ServiceName)
+	conn, err := registry.GetConnection(directoryd.ServiceName, protos.ServiceType_SOUTHBOUND)
 	assert.NoError(t, err)
 	return protos.NewGatewayDirectoryServiceClient(conn), err
 }

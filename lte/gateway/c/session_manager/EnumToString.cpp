@@ -11,7 +11,14 @@
  * limitations under the License.
  */
 
-#include "EnumToString.h"
+#include "lte/gateway/c/session_manager/EnumToString.hpp"
+
+#include <lte/protos/abort_session.pb.h>
+#include <lte/protos/session_manager.pb.h>
+#include <sstream>
+#include <string>
+
+#include "lte/gateway/c/session_manager/ChargingGrant.hpp"
 
 namespace magma {
 std::string reauth_state_to_str(ReAuthState state) {
@@ -83,17 +90,17 @@ std::string grant_type_to_str(GrantTrackingType grant_type) {
 std::string session_fsm_state_to_str(SessionFsmState state) {
   switch (state) {
     case SESSION_ACTIVE:
-    case ACTIVE:
       return "SESSION_ACTIVE";
     case SESSION_TERMINATED:
       return "SESSION_TERMINATED";
     case SESSION_RELEASED:
-    case RELEASE:
       return "SESSION_RELEASED";
     case CREATING:
       return "SESSION_CREATING";
     case CREATED:
       return "SESSION_CREATED";
+    case INACTIVE:
+      return "SESSION_INACTIVE";
     default:
       return "INVALID SESSION FSM STATE";
   }
@@ -208,6 +215,24 @@ std::string event_trigger_to_str(EventTrigger event_trigger) {
     default:
       std::ostringstream message;
       message << "UNIMPLEMENTED EVENT TRIGGER: " << event_trigger;
+      return message.str();
+  }
+}
+
+std::string request_origin_type_to_str(
+    RequestOriginType_OriginType request_type) {
+  switch (request_type) {
+    case RequestOriginType_OriginType_GX:
+      return "GX";
+    case RequestOriginType_OriginType_GY:
+      return "GY";
+    case RequestOriginType_OriginType_N4:
+      return "N4";
+    case RequestOriginType_OriginType_WILDCARD:
+      return "WILDCARD";
+    default:
+      std::ostringstream message;
+      message << "Unimplemented RequestOriginType: " << request_type;
       return message.str();
   }
 }

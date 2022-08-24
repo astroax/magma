@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"magma/feg/cloud/go/protos/mconfig"
 	"magma/feg/gateway/services/aaa"
 	"magma/feg/gateway/services/aaa/protos"
@@ -25,8 +27,6 @@ import (
 	"magma/feg/gateway/services/aaa/store"
 	"magma/feg/gateway/services/aaa/test/mock_pipelined"
 	"magma/feg/gateway/services/aaa/test/mock_sessiond"
-
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -100,7 +100,7 @@ func testAccountingTerminate(t *testing.T) {
 }
 
 // TestAccountingCreateWithRecycle to trigger the recycle of the session we need to authenticate
-// a ue and then try to create a session with the same imsi, but idfferent session id.
+// an ue and then try to create a session with the same IMSI, but a different session id.
 func TestAccountingCreateWithRecycle(t *testing.T) {
 	mockPipelined := mock_pipelined.NewRunningPipelined(t)
 	mock_sessiond.NewRunningSessionManager(t)

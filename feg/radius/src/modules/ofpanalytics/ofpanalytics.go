@@ -17,16 +17,18 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
-	"fbc/cwf/radius/modules"
-	"fbc/lib/go/radius"
-	"fbc/lib/go/radius/rfc2865"
+	"errors"
 	"fmt"
-	"github.com/mitchellh/mapstructure"
-	"github.com/pkg/errors"
-	"go.uber.org/zap"
 	"net/http"
 	"strings"
 	"time"
+
+	"fbc/cwf/radius/modules"
+	"fbc/lib/go/radius"
+	"fbc/lib/go/radius/rfc2865"
+
+	"github.com/mitchellh/mapstructure"
+	"go.uber.org/zap"
 )
 
 type (
@@ -113,7 +115,7 @@ func Handle(m modules.Context, rc *modules.RequestContext, r *radius.Request, _ 
 	}
 	encodedMsg, err := json.Marshal(jsonPacket)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to marshal radius packet")
+		return nil, fmt.Errorf("unable to marshal radius packet: %w", err)
 	}
 	req, err := http.NewRequest(http.MethodPost, ctx.URI, bytes.NewReader(encodedMsg))
 	if err != nil {
@@ -124,7 +126,7 @@ func Handle(m modules.Context, rc *modules.RequestContext, r *radius.Request, _ 
 
 	resp, err := ctx.HTTPClient.Do(req)
 	if err != nil {
-		return nil, errors.Wrap(err, "error sending response to endpoint")
+		return nil, fmt.Errorf("error sending response to endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	rc.Logger.Debug("got response", zap.String("status", resp.Status),
@@ -136,11 +138,14 @@ func Handle(m modules.Context, rc *modules.RequestContext, r *radius.Request, _ 
 		zap.String("XWF-C-Version", analyticsVersion))
 
 	if resp.StatusCode != http.StatusOK {
+		rc.Logger.Error("bad status code",
+			zap.Int("status", resp.StatusCode),
+			zap.String("url", resp.Request.URL.String()))
 		return nil, fmt.Errorf("error processing message by endpoint. Response status %d", resp.StatusCode)
 	}
 	var endPointResponse EndpointResponse
 	if err := json.NewDecoder(resp.Body).Decode(&endPointResponse); err != nil {
-		return nil, errors.Wrap(err, "unable to decode endpoint response")
+		return nil, fmt.Errorf("unable to decode endpoint response: %w", err)
 	}
 
 	if len(endPointResponse.Auth) == 0 {

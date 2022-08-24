@@ -74,9 +74,11 @@ class CoreDumps:
 
 
 class AGWHealthSummary:
-    def __init__(self, hss_relay_enabled, nb_enbs_connected,
-                 allocated_ips, subscriber_table, core_dumps,
-                 registration_success_rate):
+    def __init__(
+        self, hss_relay_enabled, nb_enbs_connected,
+        allocated_ips, subscriber_table, core_dumps,
+        registration_success_rate,
+    ):
         self.hss_relay_enabled = hss_relay_enabled
         self.nb_enbs_connected = nb_enbs_connected
         self.allocated_ips = allocated_ips
@@ -90,11 +92,11 @@ class AGWHealthSummary:
         #eNBs connected:    {} \t (run `enodebd_cli.py get_all_status` for more details)
         #IPs allocated:     {} \t (run `mobility_cli.py list_allocated_ips` for more details)
         #UEs connected:     {} \t (run `mobility_cli.py get_subscriber_table` for more details)
-        #Core dumps:        {} \t (run `ls /tmp/` to see core dumps)
+        #Core dumps:        {} \t (run `ls /var/core` to see core dumps)
         Earliest core-dump: {}, Latest core-dump: {}
         Registration success rate: {}
         """).format(
-            'Using Feg' if self.hss_relay_enabled else 'Using subscriberdb',
+            'Using Feg' if self.hss_relay_enabled else 'Using SubscriberDB',
             self.nb_enbs_connected,
             len(self.allocated_ips),
             len(self.subscriber_table),

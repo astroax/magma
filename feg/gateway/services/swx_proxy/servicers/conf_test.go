@@ -16,12 +16,12 @@ package servicers_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"magma/feg/gateway/diameter"
 	"magma/feg/gateway/plmn_filter"
 	"magma/feg/gateway/services/swx_proxy/servicers"
 	"magma/gateway/mconfig"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestSwxProxyMultipleConfigurationMconfig(t *testing.T) {
@@ -33,17 +33,6 @@ func TestSwxProxyMultipleConfigurationMconfig(t *testing.T) {
 	assert.Equal(t, "10.0.0.2:2", confs[1].ServerCfg.DiameterServerConnConfig.Addr)
 	assert.Equal(t, "magma_test1", confs[0].ClientCfg.ProductName)
 	assert.Equal(t, "magma_test2", confs[1].ClientCfg.ProductName)
-}
-
-// TODO: remove  once backwards compatibility is not needed for the field server
-func TestSwxProxyLegacyConfigurationMconfig(t *testing.T) {
-	confs := generateSwxProxyConfigFromString(t, legacyServerMconfigGen)
-	assertHLRClients(t, confs)
-	// server on "server" tag should not appear
-	assert.Equal(t, 1, len(confs))
-	assert.Equal(t, "10.0.0.0:0", confs[0].ServerCfg.DiameterServerConnConfig.Addr)
-	assert.Equal(t, "magma_test0", confs[0].ClientCfg.ProductName)
-
 }
 
 func TestSwxProxyService_ValidateConfig(t *testing.T) {

@@ -16,37 +16,48 @@ package mock_pgw
 import (
 	"context"
 	"fmt"
-	"net"
-
-	"github.com/wmnsk/go-gtp/gtpv1"
-
-	"magma/feg/cloud/go/protos"
-	"magma/feg/gateway/gtp"
+	"sync"
+	"time"
 
 	"github.com/wmnsk/go-gtp/gtpv2"
 	"github.com/wmnsk/go-gtp/gtpv2/ie"
 	"github.com/wmnsk/go-gtp/gtpv2/message"
+
+	"magma/feg/cloud/go/protos"
+	"magma/feg/gateway/gtp"
 )
 
 const (
 	dummyUserPlanePgwIP = "10.0.0.1"
+	gtpTimeout          = 5 * time.Second
 )
 
 // MockPgw is just a wrapper around gtp.Client
 type MockPgw struct {
 	*gtp.Client
 	LastValues
+	CreateSessionOptions CreateSessionOptions
+	randGenMux           sync.Mutex
 }
 
 type LastValues struct {
-	LastTEIDu uint32
-	LastTEIDc uint32
-	LastQos   *protos.QosInformation
+	LastTEIDu          uint32
+	LastTEIDc          uint32
+	LastQos            *protos.QosInformation
+	LastULI            *ie.UserLocationInformationFields
+	LastSequenceNumber uint32
 }
 
-func NewStarted(ctx context.Context, sgwAddrStr, pgwAddrsStr string) (*MockPgw, error) {
+// CreateSessionOptions to control Create Session Response values to produce errors
+type CreateSessionOptions struct {
+	SgwTEIDc uint32
+	PgwTEIDc uint32
+	PgwTEIDu uint32
+}
+
+func NewStarted(ctx context.Context, pgwAddrsStr string) (*MockPgw, error) {
 	mPgw := New()
-	err := mPgw.Start(ctx, sgwAddrStr, pgwAddrsStr)
+	err := mPgw.Start(ctx, pgwAddrsStr)
 	if err != nil {
 		return nil, err
 	}
@@ -54,47 +65,41 @@ func NewStarted(ctx context.Context, sgwAddrStr, pgwAddrsStr string) (*MockPgw, 
 }
 
 func New() *MockPgw {
-	return &MockPgw{}
+	return &MockPgw{CreateSessionOptions: CreateSessionOptions{}}
 }
 
-func (mPgw *MockPgw) Start(ctx context.Context, sgwAddrStr, pgwAddrsStr string) error {
-	pgwAddrs, err := net.ResolveUDPAddr("udp", pgwAddrsStr)
-	if err != nil {
-		return fmt.Errorf("Failed to get mock PGW IP: %s", err)
-	}
-
-	sgwAddrs, err := net.ResolveUDPAddr("udp", sgwAddrStr)
+func (mPgw *MockPgw) Start(ctx context.Context, pgwAddrsStr string) error {
+	var err error
+	mPgw.Client, err = gtp.NewRunningClient(ctx, pgwAddrsStr, gtpv2.IFTypeS5S8PGWGTPC, gtpTimeout)
 	if err != nil {
 		return fmt.Errorf("Failed to get SGW IP: %s", err)
 	}
-
-	// start listening on the specified IP:Port.
-	mPgw.Client, err = gtp.NewRunningClient(ctx, pgwAddrs, sgwAddrs, gtpv2.IFTypeS5S8PGWGTPC)
-	if err != nil {
-		return fmt.Errorf("Failed to get SGW IP: %s", err)
-	}
-
-	//TODO: remove this once we find a way to safely wait for initialization of the service
-	mPgw.Client.WaitUntilClientIsReady(0)
 
 	// register handlers for ALL the message you expect remote endpoint to send.
 	mPgw.AddHandlers(map[uint8]gtpv2.HandlerFunc{
 		message.MsgTypeCreateSessionRequest:       mPgw.getHandleCreateSessionRequest(),
 		message.MsgTypeModifyAccessBearersRequest: mPgw.getHandleModifyBearerRequest(),
 		message.MsgTypeDeleteSessionRequest:       mPgw.getHandleDeleteSessionRequest(),
-		//message.MsgTypeEchoRequest: mPgw.getHandleEchoRequest(),
+		message.MsgTypeCreateBearerResponse:       mPgw.getHandleCreateBearerResponse(),
+		message.MsgTypeDeleteBearerResponse:       mPgw.getHandleDeleteBearerResponse(),
 	})
 	return nil
 }
 
-// ONLY FOR DEBUGGING PURPOSES
-// getHandleEchoResponse is the same method as the one found in Go-GTP gtpv1.handleEchoResponse
-func (mPgw *MockPgw) getHandleEchoRequest() gtpv2.HandlerFunc {
-	return func(c *gtpv2.Conn, sgwAddr net.Addr, msg message.Message) error {
-		if _, ok := msg.(*message.EchoRequest); !ok {
-			return gtpv1.ErrUnexpectedType
-		}
-		// respond with EchoResponse.
-		return c.RespondTo(sgwAddr, msg, message.NewEchoResponse(0, ie.NewRecovery(c.RestartCounter)))
-	}
+func (mPgw *MockPgw) SetCreateSessionWithErrorCause(errorCause uint8) {
+	mPgw.AddHandler(
+		message.MsgTypeCreateSessionRequest,
+		mPgw.getHandleCreateSessionRequestWithErrorCause(errorCause))
+}
+
+func (mPgw *MockPgw) SetCreateSessionResponseWithMissingIE() {
+	mPgw.AddHandler(
+		message.MsgTypeCreateSessionRequest,
+		mPgw.getHandleCreateSessionResponseWithMissingIE())
+}
+
+func (mPgw *MockPgw) SetCreateSessionRequestWithMissingIE(missingIE *ie.IE) {
+	mPgw.AddHandler(
+		message.MsgTypeCreateSessionRequest,
+		mPgw.getHandleCreateSessionRequestWithMissingIE(missingIE))
 }

@@ -20,12 +20,14 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	lib_protos "magma/orc8r/lib/go/protos"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"context"
+
 	"github.com/golang/glog"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
@@ -66,7 +68,7 @@ var (
 // Output: *grpc.ClientConn with connection to cloud service
 //         error if it exists
 func (r *ServiceRegistry) GetCloudConnection(service string) (*grpc.ClientConn, error) {
-	cpc, ok := controlProxyConfig.Load().(*config.ConfigMap)
+	cpc, ok := controlProxyConfig.Load().(*config.Map)
 	if (!ok) || cpc == nil {
 		var err error
 		// moduleName is "" since all feg configs lie in /etc/magma/configs without a module name
@@ -90,7 +92,7 @@ func (r *ServiceRegistry) GetCloudConnection(service string) (*grpc.ClientConn, 
 // Output: *grpc.ClientConn with connection to cloud service
 //         error if it exists
 func (r *ServiceRegistry) GetCloudConnectionFromServiceConfig(
-	controlProxyConfig *config.ConfigMap, service string) (*grpc.ClientConn, error) {
+	controlProxyConfig *config.Map, service string) (*grpc.ClientConn, error) {
 
 	authority, err := getAuthority(controlProxyConfig, service)
 	if err != nil {
@@ -124,7 +126,7 @@ func (r *ServiceRegistry) GetCloudConnectionFromServiceConfig(
 }
 
 func getAuthority(
-	serviceConfig *config.ConfigMap,
+	serviceConfig *config.Map,
 	service string,
 ) (string, error) {
 	cloudAddr, err := serviceConfig.GetString("cloud_address")
@@ -134,12 +136,12 @@ func getAuthority(
 	return fmt.Sprintf("%s-%s", strings.ToLower(service), cloudAddr), nil
 }
 
-func (r *ServiceRegistry) getProxyAddress(serviceConfig *config.ConfigMap) (string, error) {
+func (r *ServiceRegistry) getProxyAddress(serviceConfig *config.Map) (string, error) {
 	localPort, err := serviceConfig.GetInt("local_port")
 	if err != nil {
 		return "", err
 	}
-	localAddress, err := r.GetServiceAddress(ControlProxyServiceName)
+	localAddress, err := r.GetServiceAddress(ControlProxyServiceName, lib_protos.ServiceType_SOUTHBOUND)
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +149,7 @@ func (r *ServiceRegistry) getProxyAddress(serviceConfig *config.ConfigMap) (stri
 	return fmt.Sprintf("%s:%d", addrPieces[0], localPort), nil
 }
 
-func getCloudServiceAddress(controlProxyConfig *config.ConfigMap) (string, error) {
+func getCloudServiceAddress(controlProxyConfig *config.Map) (string, error) {
 	cloudAddr, err := controlProxyConfig.GetString("cloud_address")
 	if err != nil {
 		return "", err
@@ -160,14 +162,14 @@ func getCloudServiceAddress(controlProxyConfig *config.ConfigMap) (string, error
 	return fmt.Sprintf("%s:%d", addrPieces[0], port), nil
 }
 
-func getUseProxyCloudConnection(serviceConfig *config.ConfigMap) bool {
+func getUseProxyCloudConnection(serviceConfig *config.Map) bool {
 	if proxied, err := serviceConfig.GetBool("proxy_cloud_connections"); err == nil {
 		return proxied
 	}
 	return true // Note: default is True -> proxy cloud connection
 }
 
-func getDialOptions(serviceConfig *config.ConfigMap, authority string, useProxy bool) ([]grpc.DialOption, error) {
+func getDialOptions(serviceConfig *config.Map, authority string, useProxy bool) ([]grpc.DialOption, error) {
 	bckoff := backoff.DefaultConfig
 	bckoff.MaxDelay = grpcMaxDelaySec * time.Second
 	var opts = []grpc.DialOption{

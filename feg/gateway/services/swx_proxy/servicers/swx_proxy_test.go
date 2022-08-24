@@ -21,13 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
+
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/diameter"
 	"magma/feg/gateway/services/swx_proxy/servicers"
 	"magma/feg/gateway/services/swx_proxy/servicers/test"
-
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
 
 const TEST_LOOPS = 33
@@ -102,7 +102,7 @@ func TestSwxProxyService_ValidationErrors(t *testing.T) {
 
 	emptyAuthReq := &protos.AuthenticationRequest{}
 	_, err = client.Authenticate(context.Background(), emptyAuthReq)
-	assert.EqualError(t, err, "rpc error: code = InvalidArgument desc = Empty user-name provided in authentication request")
+	assert.EqualError(t, err, "rpc error: code = InvalidArgument desc = empty user-name provided in authentication request")
 
 	badNumVectorsReq := &protos.AuthenticationRequest{
 		UserName:             "10111011000110",
@@ -153,11 +153,11 @@ func swxStandardTest(t *testing.T, client protos.SwxProxyClient, test_loops int)
 		for i := uint32(0); i < servicers.MinRequestedVectors; i++ {
 			authRes, err := client.Authenticate(context.Background(), authReq)
 			if err != nil {
-				t.Fatalf("GRPC MAR Error: %v", err)
+				t.Errorf("GRPC MAR Error: %v", err)
 				complChan <- err
 				return
 			}
-			t.Logf("GRPC MAA: %#+v", *authRes)
+			t.Logf("GRPC MAA: %+v", authRes)
 			assert.Equal(t, userName, authRes.GetUserName())
 			if len(authRes.SipAuthVectors) != 1 {
 				t.Errorf("Unexpected Number of SIPAuthVectors: %d, Expected: %d", len(authRes.SipAuthVectors), 1)
@@ -177,21 +177,21 @@ func swxStandardTest(t *testing.T, client protos.SwxProxyClient, test_loops int)
 		// Only must verify that request was successful (no error) to ensure user
 		// is registered
 		if err != nil {
-			t.Fatalf("GRPC SAR Register Error: %v", err)
+			t.Errorf("GRPC SAR Register Error: %v", err)
 			complChan <- err
 			return
 		}
-		t.Logf("GRPC SAA Register: %#+v", *regRes)
+		t.Logf("GRPC SAA Register: %+v", regRes)
 
 		unregRes, err := client.Deregister(context.Background(), regReq)
 		// Only must verify that request was successful (no error) to ensure user
 		// is de-registered
 		if err != nil {
-			t.Fatalf("GRPC SAR De-register Error: %v", err)
+			t.Errorf("GRPC SAR De-register Error: %v", err)
 			complChan <- err
 			return
 		}
-		t.Logf("GRPC SAA De-register: %#+v", *unregRes)
+		t.Logf("GRPC SAA De-register: %+v", unregRes)
 
 		// Test EAP-SIM (3 vectors) case
 		authReq = &protos.AuthenticationRequest{
@@ -202,7 +202,7 @@ func swxStandardTest(t *testing.T, client protos.SwxProxyClient, test_loops int)
 		}
 		authRes, err := client.Authenticate(context.Background(), authReq)
 		if err != nil {
-			t.Fatalf("GRPC MAR Error: %v", err)
+			t.Errorf("GRPC MAR Error: %v", err)
 			complChan <- err
 			return
 		}
@@ -220,7 +220,7 @@ func swxStandardTest(t *testing.T, client protos.SwxProxyClient, test_loops int)
 		}
 		authRes, err = client.Authenticate(context.Background(), authReq)
 		if err != nil {
-			t.Fatalf("GRPC MAR Error: %v", err)
+			t.Errorf("GRPC MAR Error: %v", err)
 			complChan <- err
 			return
 		}
@@ -237,7 +237,7 @@ func swxStandardTest(t *testing.T, client protos.SwxProxyClient, test_loops int)
 		authReq.SipNumAuthVectors = 2
 		authRes, err = client.Authenticate(context.Background(), authReq)
 		if err != nil {
-			t.Fatalf("GRPC MAR Error: %v", err)
+			t.Errorf("GRPC MAR Error: %v", err)
 			complChan <- err
 			return
 		}
@@ -301,8 +301,8 @@ func initSwxTestSetup(t *testing.T, config *servicers.SwxProxyConfig) string {
 	protos.RegisterSwxProxyServer(grpcServer, service)
 	// start GRPC server
 	go func() {
-		if err := grpcServer.Serve(grpcListener); err != nil {
-			t.Fatalf("failed to serve: %v", err)
+		if err2 := grpcServer.Serve(grpcListener); err2 != nil {
+			t.Errorf("failed to serve: %v", err2)
 		}
 	}()
 	grpcAddress := grpcListener.Addr()

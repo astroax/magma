@@ -12,12 +12,12 @@ limitations under the License.
 */
 syntax = "proto3";
 
-import "magma/orc8r/protos/common.proto";
+import "orc8r/protos/common.proto";
 
-import "magma/orc8r/cloud/go/services/configurator/storage/storage.proto";
+import "orc8r/cloud/go/services/configurator/storage/storage.proto";
 
 package magma.orc8r.configurator;
-option go_package = "protos";
+option go_package = "magma/orc8r/cloud/go/services/configurator/protos";
 
 service NorthboundConfigurator {
     // ListNetworkIDs fetches the list of networkIDs registered
@@ -42,6 +42,8 @@ service NorthboundConfigurator {
     rpc DeleteEntities (DeleteEntitiesRequest) returns (magma.orc8r.Void) {}
     // LoadEntities fetches the set of Entities specified by the request
     rpc LoadEntities (LoadEntitiesRequest) returns (storage.EntityLoadResult) {}
+    // CountEntities counts the number of Entities specified by the request
+    rpc CountEntities (LoadEntitiesRequest) returns (storage.EntityCountResult) {}
 }
 
 message ListNetworkIDsResponse {

@@ -14,29 +14,29 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"net"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
-	"github.com/pkg/errors"
 )
 
-func (m *CwfNetwork) ValidateModel() error {
+func (m *CwfNetwork) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *NetworkCarrierWifiConfigs) ValidateModel() error {
+func (m *NetworkCarrierWifiConfigs) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *GatewayCwfConfigs) ValidateModel() error {
+func (m *GatewayCwfConfigs) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func (m *GatewayCwfConfigs) ValidateModel() error {
 	for _, peer := range m.AllowedGrePeers {
 		for _, key := range set[peer.IP] {
 			if swag.Uint32Value(peer.Key) == key {
-				return errors.New(fmt.Sprintf("Found duplicate peer %s with key %d", peer.IP, key))
+				return fmt.Errorf("Found duplicate peer %s with key %d", peer.IP, key)
 			}
 		}
 		set[peer.IP] = append(set[peer.IP], swag.Uint32Value(peer.Key))
@@ -52,48 +52,48 @@ func (m *GatewayCwfConfigs) ValidateModel() error {
 	return nil
 }
 
-func (m *CwfSubscriberDirectoryRecord) ValidateModel() error {
+func (m *CwfSubscriberDirectoryRecord) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *CarrierWifiHaPairStatus) ValidateModel() error {
+func (m *CarrierWifiHaPairStatus) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *CarrierWifiGatewayHealthStatus) ValidateModel() error {
+func (m *CarrierWifiGatewayHealthStatus) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *CwfHaPair) ValidateModel() error {
+func (m *CwfHaPair) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	if m.GatewayID1 == m.GatewayID2 {
 		return fmt.Errorf("GatewayID1 and GatewayID2 cannot be the same")
 	}
-	return m.Config.ValidateModel()
+	return m.Config.ValidateModel(context.Background())
 }
 
-func (m *MutableCwfHaPair) ValidateModel() error {
+func (m *MutableCwfHaPair) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}
 	if m.GatewayID1 == m.GatewayID2 {
 		return fmt.Errorf("GatewayID1 and GatewayID2 cannot be the same")
 	}
-	return m.Config.ValidateModel()
+	return m.Config.ValidateModel(context.Background())
 }
 
-func (m *CwfHaPairConfigs) ValidateModel() error {
+func (m *CwfHaPairConfigs) ValidateModel(context.Context) error {
 	if err := m.Validate(strfmt.Default); err != nil {
 		return err
 	}

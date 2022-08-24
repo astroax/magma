@@ -13,12 +13,12 @@ limitations under the License.
 import asyncio
 import unittest
 import unittest.mock
-import grpc
 
-from orc8r.protos.common_pb2 import Void
-from orc8r.protos.service303_pb2 import ServiceInfo
+import grpc
 from magma.common.service_registry import ServiceRegistry
 from magma.magmad.service_poller import ServicePoller
+from orc8r.protos.common_pb2 import Void
+from orc8r.protos.service303_pb2 import ServiceInfo
 
 # Allow access to protected variables for unit testing
 # pylint: disable=protected-access
@@ -29,16 +29,17 @@ class ServicePollerTests(unittest.TestCase):
     """
     Tests for the ServicePoller
     """
+
     def setUp(self):
         ServiceRegistry.add_service('test1', '0.0.0.0', 0)
         ServiceRegistry.add_service('test2', '0.0.0.0', 0)
         config = {
             'magma_services': ['test1', 'test2'],
-            'non_service303_services': ['test2']
+            'non_service303_services': ['test2'],
         }
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._service_poller = ServicePoller(self._loop, config, [])
+        self._service_poller = ServicePoller(self._loop, config)
 
     @unittest.mock.patch('%s.Service303Stub' % SP)
     def test_poll(self, service303_mock):
@@ -56,7 +57,8 @@ class ServicePollerTests(unittest.TestCase):
             await self._service_poller._get_service_info()
 
             mock.GetServiceInfo.future.assert_called_once_with(
-                Void(), self._service_poller.GET_STATUS_TIMEOUT)
+                Void(), self._service_poller.GET_STATUS_TIMEOUT,
+            )
         self._loop.run_until_complete(test())
 
     @unittest.mock.patch('%s.Service303Stub' % SP)
@@ -82,7 +84,8 @@ class ServicePollerTests(unittest.TestCase):
             await self._service_poller._get_service_info()
 
             mock.GetServiceInfo.future.assert_called_once_with(
-                Void(), self._service_poller.GET_STATUS_TIMEOUT)
+                Void(), self._service_poller.GET_STATUS_TIMEOUT,
+            )
         self._loop.run_until_complete(test())
 
 

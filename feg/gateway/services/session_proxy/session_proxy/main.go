@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
+
 	"magma/feg/cloud/go/protos"
 	"magma/feg/gateway/diameter"
 	"magma/feg/gateway/policydb"
@@ -35,8 +37,6 @@ import (
 	lteprotos "magma/lte/cloud/go/protos"
 	"magma/orc8r/lib/go/service"
 	"magma/orc8r/lib/go/util"
-
-	"github.com/golang/glog"
 )
 
 func init() {
@@ -53,7 +53,7 @@ func main() {
 	}
 
 	// Create the service
-	srv, err := service.NewServiceWithOptions(registry.ModuleName, registry.SESSION_PROXY)
+	srv, err := service.NewGatewayServiceWithOptions(registry.ModuleName, registry.SESSION_PROXY)
 	if err != nil {
 		glog.Fatalf("Error creating service: %s", err)
 	}
@@ -68,6 +68,9 @@ func main() {
 	// Add servicers to the service
 	sessionManagerAndHealthServer, err := servicers.
 		NewCentralSessionControllerDefaultMultiplexWithHealth(controllerParms, policyDBClient)
+	if err != nil {
+		glog.Fatalf("Could not add Health Server to servicer: %s", err)
+	}
 	lteprotos.RegisterCentralSessionControllerServer(srv.GrpcServer, sessionManagerAndHealthServer)
 	protos.RegisterServiceHealthServer(srv.GrpcServer, sessionManagerAndHealthServer)
 
@@ -97,7 +100,7 @@ func generateClientsConfsAndDiameterConnection() (
 
 	// Each controller will take one entry of PCRF, OCS, and gx/gy clients confs
 	gxCliConfs := gx.GetGxClientConfiguration()
-	gyCLiConfs := gy.GetGyClientConfiguration()
+	gyCliConfs := gy.GetGyClientConfiguration()
 	OCSConfs := gy.GetOCSConfiguration()
 	PCRFConfs := gx.GetPCRFConfiguration()
 
@@ -114,7 +117,7 @@ func generateClientsConfsAndDiameterConnection() (
 	glog.Info("------ Done reading configuration ------")
 
 	// ---- Create diammeter connections and build parameters for CentralSessionControllersn ----
-	glog.Info("------ Create diameter connexions ------")
+	glog.Info("------ Create diameter connections ------")
 	totalLen := len(OCSConfs)
 	controllerParms := make([]*servicers.ControllerParam, 0, totalLen)
 	for i := 0; i < totalLen; i++ {
@@ -123,17 +126,18 @@ func generateClientsConfsAndDiameterConnection() (
 		controlParam.Config = &servicers.SessionControllerConfig{
 			OCSConfig:        OCSConfs[i],
 			PCRFConfig:       PCRFConfs[i],
-			RequestTimeout:   3 * time.Second,
 			UseGyForAuthOnly: util.IsTruthyEnv(gy.UseGyForAuthOnlyEnv),
 			DisableGx:        gxGlobalConf.DisableGx,
+			RequestTimeoutGx: time.Duration(gxCliConfs[i].RequestTimeout) * time.Second,
 			DisableGy:        gyGlobalConf.DisableGy,
+			RequestTimeoutGy: time.Duration(gyCliConfs[i].RequestTimeout) * time.Second,
 		}
 		// Fill in gx and gy config for controller i
 		if OCSConfsCopy[i].DiameterServerConnConfig == PCRFConfsCopy[i].DiameterServerConnConfig &&
 			OCSConfsCopy[i] != PCRFConfsCopy[i] {
 			var clientCfg = *gxCliConfs[i]
-			clientCfg.AuthAppID = gyCLiConfs[i].AppID
-			diamClient := diameter.NewClient(&clientCfg)
+			clientCfg.AuthAppID = gyCliConfs[i].AppID
+			diamClient := diameter.NewClient(&clientCfg, OCSConfs[i].LocalAddr)
 			diamClient.BeginConnection(OCSConfsCopy[i])
 			if gyGlobalConf.DisableGy {
 				glog.Info("Gy Disabled by configuration, not connecting to OCS")
@@ -158,14 +162,13 @@ func generateClientsConfsAndDiameterConnection() (
 					gxGlobalConf)
 			}
 		} else {
-
-			glog.Infof("Using distinct Gy: %+v & Gx: %+v connection",
-				OCSConfsCopy[i].DiameterServerConnConfig, PCRFConfsCopy[i].DiameterServerConnConfig)
+			glog.Infof("Using distinct Gx and Gy")
 			if gyGlobalConf.DisableGy {
 				glog.Info("Gy Disabled by configuration, not connecting to OCS")
 			} else {
+				glog.Infof("Gy client: %+v, Gy server: %+v", gyCliConfs[i], OCSConfsCopy[i])
 				controlParam.CreditClient = gy.NewGyClient(
-					gy.GetGyClientConfiguration()[i],
+					gyCliConfs[i],
 					OCSConfsCopy[i],
 					gy.GetGyReAuthHandler(cloudReg),
 					cloudReg,
@@ -174,8 +177,9 @@ func generateClientsConfsAndDiameterConnection() (
 			if gxGlobalConf.DisableGx {
 				glog.Info("Gx Disabled by configuration, not connecting to PCRF")
 			} else {
+				glog.Infof("Gx client: %+v, Gx server: %+v", gxCliConfs[i], PCRFConfsCopy[i])
 				controlParam.PolicyClient = gx.NewGxClient(
-					gx.GetGxClientConfiguration()[i],
+					gxCliConfs[i],
 					PCRFConfsCopy[i],
 					gx.GetGxReAuthHandler(cloudReg, policyDBClient),
 					cloudReg,
@@ -184,6 +188,6 @@ func generateClientsConfsAndDiameterConnection() (
 		}
 		controllerParms = append(controllerParms, controlParam)
 	}
-	glog.Infof("------ Done creating %d diameter connexions ------", totalLen)
+	glog.Infof("------ Done creating %d diameter connections ------", totalLen)
 	return controllerParms, policyDBClient, nil
 }

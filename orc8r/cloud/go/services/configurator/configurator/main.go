@@ -19,16 +19,21 @@ and meta data for the network and network entity structures.
 package main
 
 import (
+	"github.com/golang/glog"
+
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/service"
 	"magma/orc8r/cloud/go/services/configurator"
 	"magma/orc8r/cloud/go/services/configurator/protos"
-	"magma/orc8r/cloud/go/services/configurator/servicers"
+	servicers "magma/orc8r/cloud/go/services/configurator/servicers"
+	protected_servicers "magma/orc8r/cloud/go/services/configurator/servicers/protected"
 	"magma/orc8r/cloud/go/services/configurator/storage"
 	"magma/orc8r/cloud/go/sqorc"
 	storage2 "magma/orc8r/cloud/go/storage"
+)
 
-	"github.com/golang/glog"
+const (
+	maxEntityLoadSizeConfigKey = "maxEntityLoadSize"
 )
 
 func main() {
@@ -37,22 +42,25 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error creating service: %s", err)
 	}
-	db, err := sqorc.Open(storage2.SQLDriver, storage2.DatabaseSource)
+	db, err := sqorc.Open(storage2.GetSQLDriver(), storage2.GetDatabaseSource())
 	if err != nil {
 		glog.Fatalf("Failed to connect to database: %s", err)
 	}
-
-	factory := storage.NewSQLConfiguratorStorageFactory(db, &storage2.UUIDGenerator{}, sqorc.GetSqlBuilder())
+	maxEntityLoadSize, err := srv.Config.GetInt(maxEntityLoadSizeConfigKey)
+	if err != nil {
+		glog.Fatalf("Failed to load '%s' from config: %s", maxEntityLoadSizeConfigKey, err)
+	}
+	factory := storage.NewSQLConfiguratorStorageFactory(db, &storage2.UUIDGenerator{}, sqorc.GetSqlBuilder(), uint32(maxEntityLoadSize))
 	err = factory.InitializeServiceStorage()
 	if err != nil {
 		glog.Fatalf("Failed to initialize configurator database: %s", err)
 	}
 
-	nbServicer, err := servicers.NewNorthboundConfiguratorServicer(factory)
+	nbServicer, err := protected_servicers.NewNorthboundConfiguratorServicer(factory)
 	if err != nil {
 		glog.Fatalf("Failed to instantiate the user-facing configurator servicer: %v", nbServicer)
 	}
-	protos.RegisterNorthboundConfiguratorServer(srv.GrpcServer, nbServicer)
+	protos.RegisterNorthboundConfiguratorServer(srv.ProtectedGrpcServer, nbServicer)
 
 	sbServicer, err := servicers.NewSouthboundConfiguratorServicer(factory)
 	if err != nil {

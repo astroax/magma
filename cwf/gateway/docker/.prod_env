@@ -10,12 +10,13 @@
 # limitations under the License.
 
 COMPOSE_PROJECT_NAME=cwf
-DOCKER_REGISTRY=cwf_
 DOCKER_USERNAME=
 DOCKER_PASSWORD=
+DOCKER_REGISTRY=docker.artifactory.magmacore.org/
 IMAGE_VERSION=latest
+GIT_HASH=master
 
-BUILD_CONTEXT=https://github.com/facebookincubator/magma.git#master
+BUILD_CONTEXT=https://github.com/magma/magma.git#master
 
 ROOTCA_PATH=/var/opt/magma/certs/rootCA.pem
 CONTROL_PROXY_PATH=/etc/magma/control_proxy.yml

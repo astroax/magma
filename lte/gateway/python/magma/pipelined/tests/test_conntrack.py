@@ -11,23 +11,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import pathlib
 import unittest
 import warnings
 from concurrent.futures import Future
-import pathlib
 
 from lte.protos.mconfig.mconfigs_pb2 import PipelineD
 from magma.pipelined.app.conntrack import ConntrackController
-from magma.pipelined.tests.app.start_pipelined import TestSetup, \
-    PipelinedController
-from magma.pipelined.tests.app.subscriber import SubContextConfig, default_ambr_config
-from magma.pipelined.tests.app.table_isolation import RyuDirectTableIsolator, \
-    RyuForwardFlowArgsBuilder
-from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
 from magma.pipelined.bridge_util import BridgeTools
-from magma.pipelined.tests.pipelined_test_util import start_ryu_app_thread, \
-    stop_ryu_app_thread, create_service_manager, assert_bridge_snapshot_match, \
-    SnapshotVerifier
+from magma.pipelined.tests.app.packet_injector import ScapyPacketInjector
+from magma.pipelined.tests.app.start_pipelined import (
+    PipelinedController,
+    TestSetup,
+)
+from magma.pipelined.tests.app.subscriber import (
+    SubContextConfig,
+    default_ambr_config,
+)
+from magma.pipelined.tests.app.table_isolation import (
+    RyuDirectTableIsolator,
+    RyuForwardFlowArgsBuilder,
+)
+from magma.pipelined.tests.pipelined_test_util import (
+    SnapshotVerifier,
+    create_service_manager,
+    start_ryu_app_thread,
+    stop_ryu_app_thread,
+)
 
 
 class ConntrackTest(unittest.TestCase):
@@ -50,17 +60,22 @@ class ConntrackTest(unittest.TestCase):
         """
         super(ConntrackTest, cls).setUpClass()
         warnings.simplefilter('ignore')
-        cls.service_manager = create_service_manager([],
-            ['ue_mac', 'conntrack'])
+        cls.service_manager = create_service_manager(
+            [],
+            ['ue_mac', 'conntrack'],
+        )
         cls._tbl_num = cls.service_manager.get_table_num(
-            ConntrackController.APP_NAME)
+            ConntrackController.APP_NAME,
+        )
 
         conntrack_controller_reference = Future()
         testing_controller_reference = Future()
         test_setup = TestSetup(
-            apps=[PipelinedController.Conntrack,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.Conntrack,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.Conntrack:
                     conntrack_controller_reference,
@@ -81,8 +96,11 @@ class ConntrackTest(unittest.TestCase):
                 'clean_restart': True,
                 'access_control': {
                     'ip_blocklist': [
-                    ]
-                }
+                    ],
+                },
+                'conntrackd': {
+                    'zone': 897,
+                },
             },
             mconfig=PipelineD(
                 allowed_gre_peers=[],
@@ -110,9 +128,11 @@ class ConntrackTest(unittest.TestCase):
         Test that conntrack rules are properly setup
         Verifies that 3 new connections are detected (2 tcp, 1 udp)
         """
-        sub_ip = '145.254.160.237' # extracted from pcap don't change
-        sub = SubContextConfig('IMSI001010000000013', sub_ip,
-                               default_ambr_config, self._tbl_num)
+        sub_ip = '145.254.160.237'  # extracted from pcap don't change
+        sub = SubContextConfig(
+            'IMSI001010000000013', sub_ip,
+            default_ambr_config, self._tbl_num,
+        )
 
         isolator = RyuDirectTableIsolator(
             RyuForwardFlowArgsBuilder.from_subscriber(sub).build_requests(),
@@ -120,8 +140,11 @@ class ConntrackTest(unittest.TestCase):
         )
         pkt_sender = ScapyPacketInjector(self.BRIDGE)
 
-        snapshot_verifier = SnapshotVerifier(self, self.BRIDGE,
-                                             self.service_manager)
+        snapshot_verifier = SnapshotVerifier(
+            self, self.BRIDGE,
+            self.service_manager,
+            include_stats=False,
+        )
 
         current_path = \
             str(pathlib.Path(__file__).parent.absolute())

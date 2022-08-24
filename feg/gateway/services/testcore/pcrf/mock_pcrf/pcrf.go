@@ -15,16 +15,10 @@ package mock_pcrf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
-
-	"magma/feg/cloud/go/protos"
-	"magma/feg/gateway/diameter"
-	"magma/feg/gateway/services/session_proxy/credit_control/gx"
-	"magma/feg/gateway/services/testcore/mock_driver"
-	lteprotos "magma/lte/cloud/go/protos"
-	orcprotos "magma/orc8r/lib/go/protos"
 
 	"github.com/fiorix/go-diameter/v4/diam"
 	"github.com/fiorix/go-diameter/v4/diam/avp"
@@ -32,7 +26,13 @@ import (
 	"github.com/fiorix/go-diameter/v4/diam/sm"
 	"github.com/fiorix/go-diameter/v4/diam/sm/smpeer"
 	"github.com/golang/glog"
-	"github.com/pkg/errors"
+
+	"magma/feg/cloud/go/protos"
+	"magma/feg/gateway/diameter"
+	"magma/feg/gateway/services/session_proxy/credit_control/gx"
+	"magma/feg/gateway/services/testcore/mock_driver"
+	lteprotos "magma/lte/cloud/go/protos"
+	orcprotos "magma/orc8r/lib/go/protos"
 )
 
 // This is a temporary struct to handle unsupported AVP Charging-Rule-Report in go-diameter
@@ -292,7 +292,7 @@ func (srv *PCRFServer) AbortSession(
 	srv.mux.Handle(diam.ASA, asaHandler)
 	err := sendASR(account.CurrentState, srv.mux.Settings())
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to send Gx ASR")
+		return nil, fmt.Errorf("Failed to send Gx ASR: %w", err)
 	}
 	select {
 	case asa := <-resp:
@@ -393,6 +393,7 @@ func sendRAR(state *SubscriberSessionState, target *protos.PolicyReAuthTarget, c
 				nil)...,
 		)
 	}
+
 	// Construct AVPs for Rules to Remove
 	ruleRemovals := target.GetRulesToRemove()
 	if ruleRemovals != nil {
@@ -403,18 +404,18 @@ func sendRAR(state *SubscriberSessionState, target *protos.PolicyReAuthTarget, c
 			)...,
 		)
 	}
+
 	// Construct AVPs for UsageMonitoring
 	monitorInstalls := target.GetUsageMonitoringInfos()
-	if monitorInstalls != nil {
-		for _, monitor := range monitorInstalls {
-			octets := monitor.GetOctets()
-			if octets == nil {
-				glog.Errorf("Monitor Octets is nil, skipping.")
-				continue
-			}
-			additionalAVPs = append(additionalAVPs, toUsageMonitoringInfoAVP(string(monitor.MonitoringKey), octets, monitor.MonitoringLevel))
+	for _, monitor := range monitorInstalls {
+		octets := monitor.GetOctets()
+		if octets == nil {
+			glog.Errorf("Monitor Octets is nil, skipping.")
+			continue
 		}
+		additionalAVPs = append(additionalAVPs, toUsageMonitoringInfoAVP(string(monitor.MonitoringKey), octets, monitor.MonitoringLevel))
 	}
+
 	for _, avp := range additionalAVPs {
 		m.InsertAVP(avp)
 	}

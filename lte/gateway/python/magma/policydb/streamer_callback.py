@@ -11,21 +11,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import grpc
 import logging
 from typing import Any, List, Set
-from lte.protos.policydb_pb2 import PolicyRule, ChargingRuleNameSet,\
-    RatingGroup, SubscriberPolicySet, ApnPolicySet
-from lte.protos.session_manager_pb2 import StaticRuleInstall, SessionRules,\
-    RulesPerSubscriber, RuleSet, DynamicRuleInstall
+
+import grpc
+from lte.protos.policydb_pb2 import (
+    ApnPolicySet,
+    ChargingRuleNameSet,
+    PolicyRule,
+    RatingGroup,
+    SubscriberPolicySet,
+)
+from lte.protos.session_manager_pb2 import (
+    DynamicRuleInstall,
+    RuleSet,
+    RulesPerSubscriber,
+    SessionRules,
+    StaticRuleInstall,
+)
 from lte.protos.session_manager_pb2_grpc import LocalSessionManagerStub
+from magma.common.rpc_utils import indicates_connection_error
+from magma.common.sentry import EXCLUDE_FROM_ERROR_MONITORING
 from magma.common.streamer import StreamerClient
-from orc8r.protos.streamer_pb2 import DataUpdate
 from magma.policydb.apn_rule_map_store import ApnRuleAssignmentsDict
+from magma.policydb.basename_store import BaseNameDict
 from magma.policydb.default_rules import get_allow_all_policy_rule
 from magma.policydb.rating_group_store import RatingGroupsDict
 from magma.policydb.rule_store import PolicyRuleDict
-from magma.policydb.basename_store import BaseNameDict
+from orc8r.protos.streamer_pb2 import DataUpdate
 
 
 class PolicyDBStreamerCallback(StreamerClient.Callback):
@@ -40,8 +53,10 @@ class PolicyDBStreamerCallback(StreamerClient.Callback):
         return None
 
     def process_update(self, stream_name, updates, resync):
-        logging.info("Processing %d policy updates (resync=%s)",
-                     len(updates), resync)
+        logging.info(
+            "Processing %d policy updates (resync=%s)",
+            len(updates), resync,
+        )
         if resync:
             policy_ids = set()
             for update in updates:
@@ -73,6 +88,7 @@ class BaseNamesStreamerCallback(StreamerClient.Callback):
     Callback for the base names streamer policy which persists the basenames
     and rules associated to the basename
     """
+
     def __init__(
         self,
         basenames_dict: BaseNameDict,
@@ -82,19 +98,23 @@ class BaseNamesStreamerCallback(StreamerClient.Callback):
     def get_request_args(self, stream_name: str) -> Any:
         return None
 
-    def process_update(self, stream_name: str, updates: List[DataUpdate],
-                       resync: bool):
+    def process_update(
+        self, stream_name: str, updates: List[DataUpdate],
+        resync: bool,
+    ):
         logging.info('Processing %d basename -> policy updates', len(updates))
         for update in updates:
             basename = ChargingRuleNameSet()
             basename.ParseFromString(update.value)
             self._basenames[update.key] = basename
 
+
 class ApnRuleMappingsStreamerCallback(StreamerClient.Callback):
     """
     Callback for the apn rule mappings streamer policy which persists
     the mapping of (imsi, subscriber) tuples -> rules
     """
+
     def __init__(
         self,
         session_mgr_stub: LocalSessionManagerStub,
@@ -114,8 +134,11 @@ class ApnRuleMappingsStreamerCallback(StreamerClient.Callback):
         updates: List[DataUpdate],
         resync: bool,
     ):
-        logging.info('Processing %d SID -> apn -> policy updates', len(updates))
-        all_subscriber_rules = [] # type: List[RulesPerSubscriber]
+        logging.info(
+            'Processing %d SID -> apn -> policy updates',
+            len(updates),
+        )
+        all_subscriber_rules = []  # type: List[RulesPerSubscriber]
         found_update = False
         for update in updates:
             imsi = update.key
@@ -125,19 +148,32 @@ class ApnRuleMappingsStreamerCallback(StreamerClient.Callback):
             if is_updated:
                 found_update = True
                 all_subscriber_rules.append(
-                    self._build_sub_rule_set(imsi, subApnPolicies))
+                    self._build_sub_rule_set(imsi, subApnPolicies),
+                )
                 self._apn_rules_by_sid[imsi] = subApnPolicies
         if not found_update:
-            logging.debug("No IMSIs with APN->Policy assignments found. "
-                          "Not sending an update to SessionD")
+            logging.debug(
+                "No IMSIs with APN->Policy assignments found. "
+                "Not sending an update to SessionD",
+            )
             return
-        logging.info('Updating %d IMSIs with new APN->policy assignments',
-                     len(all_subscriber_rules))
+        logging.info(
+            'Updating %d IMSIs with new APN->policy assignments',
+            len(all_subscriber_rules),
+        )
         update = SessionRules(rules_per_subscriber=all_subscriber_rules)
         try:
             self._session_mgr_stub.SetSessionRules(update, timeout=5)
         except grpc.RpcError as e:
-            logging.error('Unable to apply apn->policy updates %s', str(e))
+            error_extra = (
+                EXCLUDE_FROM_ERROR_MONITORING if indicates_connection_error(e)
+                else None
+            )
+            logging.error(
+                "Unable to apply apn->policy updates %s",
+                str(e),
+                extra=error_extra,
+            )
 
     def _are_sub_policies_updated(
         self,
@@ -156,13 +192,13 @@ class ApnRuleMappingsStreamerCallback(StreamerClient.Callback):
         subscriber_id: str,
         sub_apn_policies: SubscriberPolicySet,
     ) -> RulesPerSubscriber:
-        apn_rule_sets = [] # type: List[RuleSet]
+        apn_rule_sets = []  # type: List[RuleSet]
         global_rules = self._get_global_static_rules(sub_apn_policies)
 
         for apn_policy_set in sub_apn_policies.rules_per_apn:
             # Static rule installs
             static_rule_ids = self._get_desired_static_rules(apn_policy_set)
-            static_rules = [] # type: List[StaticRuleInstall]
+            static_rules = []  # type: List[StaticRuleInstall]
             for rule_id in static_rule_ids:
                 static_rules.append(StaticRuleInstall(rule_id=rule_id))
             # Add global rules
@@ -170,21 +206,25 @@ class ApnRuleMappingsStreamerCallback(StreamerClient.Callback):
                 static_rules.append(StaticRuleInstall(rule_id=rule_id))
 
             # Dynamic rule installs
-            dynamic_rules = [] # type: List[DynamicRuleInstall]
+            dynamic_rules = []  # type: List[DynamicRuleInstall]
             # Build the rule id to be globally unique
             rule = DynamicRuleInstall(
-                policy_rule=get_allow_all_policy_rule(subscriber_id,
-                                                      apn_policy_set.apn)
+                policy_rule=get_allow_all_policy_rule(
+                    subscriber_id,
+                    apn_policy_set.apn,
+                ),
             )
             dynamic_rules.append(rule)
 
             # Build the APN rule set
-            apn_rule_sets.append(RuleSet(
-                apply_subscriber_wide=False,
-                apn=apn_policy_set.apn,
-                static_rules=static_rules,
-                dynamic_rules=dynamic_rules,
-            ))
+            apn_rule_sets.append(
+                RuleSet(
+                    apply_subscriber_wide=False,
+                    apn=apn_policy_set.apn,
+                    static_rules=static_rules,
+                    dynamic_rules=dynamic_rules,
+                ),
+            )
 
         return RulesPerSubscriber(
             imsi=subscriber_id,
@@ -201,7 +241,8 @@ class ApnRuleMappingsStreamerCallback(StreamerClient.Callback):
                 # Eventually, basename definition will be streamed from orc8r
                 continue
             global_rules.update(
-                self._rules_by_basename[basename].RuleNames)
+                self._rules_by_basename[basename].RuleNames,
+            )
         return global_rules
 
     def _get_desired_static_rules(
@@ -221,6 +262,7 @@ class RatingGroupsStreamerCallback(StreamerClient.Callback):
     """
     Callback for the rating groups streamer which persists the rating groups
     """
+
     def __init__(
             self,
             rating_groups_dict: RatingGroupsDict,
@@ -230,8 +272,10 @@ class RatingGroupsStreamerCallback(StreamerClient.Callback):
     def get_request_args(self, stream_name: str) -> Any:
         return None
 
-    def process_update(self, stream_name: str, updates: List[DataUpdate],
-                       resync: bool):
+    def process_update(
+        self, stream_name: str, updates: List[DataUpdate],
+        resync: bool,
+    ):
         logging.info('Processing %d rating group updates', len(updates))
         for update in updates:
             rg = RatingGroup()

@@ -51,7 +51,7 @@ import "orc8r/protos/common.proto";
 import "orc8r/protos/identity.proto";
 
 package magma.orc8r.accessd;
-option go_package = "protos";
+option go_package = "magma/orc8r/cloud/go/services/accessd/protos";
 
 // Access Control Data Structures & Definitions
 message AccessControl {
@@ -115,7 +115,6 @@ message AccessControl {
 // itself would only exist within a single network and will be invisible to
 // anyone outside this network. ACLs of scoped operators  will only be allowed to
 // hold Identities of similarly scoped entities.
-//
 service AccessControlManager {
     // Overwrites Permissions for operator Identity to manage others
     // Request includes ACL to set for the Operator

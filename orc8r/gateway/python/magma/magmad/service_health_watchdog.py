@@ -12,14 +12,14 @@ limitations under the License.
 """
 # pylint: disable=broad-except
 
+import asyncio
 import logging
 from typing import Any
-import asyncio
 
 from magma.common.job import Job
-
-from magma.magmad.service_poller import ServicePoller
 from magma.magmad.service_manager import ServiceManager
+from magma.magmad.service_poller import ServicePoller
+
 
 class ServiceHealthWatchdog(Job):
     """
@@ -32,13 +32,15 @@ class ServiceHealthWatchdog(Job):
     # Default number of continuous timeouts before doing a service restart
     DEFAULT_RESTART_TIMEOUT_THRESHOLD = 15
 
-    def __init__(self, config: Any,
-                 loop: asyncio.AbstractEventLoop,
-                 service_poller: ServicePoller,
-                 service_manager: ServiceManager):
+    def __init__(
+        self, config: Any,
+        loop: asyncio.AbstractEventLoop,
+        service_poller: ServicePoller,
+        service_manager: ServiceManager,
+    ):
         super().__init__(
             interval=self.CHECK_STATUS_INTERVAL,
-            loop=loop
+            loop=loop,
         )
         self._loop = loop
         self._config = config
@@ -71,5 +73,5 @@ class ServiceHealthWatchdog(Job):
                 self._service_poller.reset_timeout_counter(service)
         if services_to_restart:
             await asyncio.gather(
-                self._service_manager.restart_services(services_to_restart)
+                self._service_manager.restart_services(services_to_restart),
             )

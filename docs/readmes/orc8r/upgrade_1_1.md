@@ -21,7 +21,7 @@ including developer tooling, a Helm chart repository, and a container registry.
 ## Create a New Root Module
 
 First, create a new directory somewhere to store your new root Terraform module
-for the 1.1.x deployment. We have an example root module at https://github.com/facebookincubator/magma/tree/v1.1/orc8r/cloud/deploy/terraform/orc8r-helm-aws/examples/online-upgrade
+for the 1.1.x deployment. We have an example root module at <https://github.com/facebookincubator/magma/tree/v1.1/orc8r/cloud/deploy/terraform/orc8r-helm-aws/examples/online-upgrade>
 that we recommend you use for the upgrade. Copy all the files to your new
 directory and change the `source` attribute of both modules in `main.tf` to
 `github.com/facebookincubator/magma//orc8r/cloud/deploy/terraform/orc8r-aws` and
@@ -157,8 +157,8 @@ and will not affect the v1.0 deployment.
 
 ```bash
 # Replace orc8r with your v1.1 k8s namespace if you changed the name
-$ export CNTLR_POD=$(kubectl -n orc8r get pod -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
-$ kubectl exec -it ${CNTLR_POD} bash
+$ export CNTLR_POD=$(kubectl --namespace orc8r get pod -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
+$ kubectl --namespace orc8r exec -it ${CNTLR_POD} bash
 
 (pod)$ cd /var/opt/magma/bin
 (pod)$ ./m005_certifier_to_blobstore -verify
@@ -193,8 +193,8 @@ create a new admin user in the `master` organization to set up access for
 other tenants:
 
 ```bash
-kubectl exec -it -n magma \
-    $(kubectl -n magma get pod -l app.kubernetes.io/component=magmalte -o jsonpath='{.items[0].metadata.name}') -- \
+kubectl --namespace orc8r exec -it \
+    $(kubectl --namespace orc8r get pod -l app.kubernetes.io/component=magmalte -o jsonpath='{.items[0].metadata.name}') -- \
     yarn setAdminPassword master ADMIN_USER_EMAIL ADMIN_USER_PASSWORD
 ```
 

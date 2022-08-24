@@ -14,8 +14,10 @@ limitations under the License.
 from lte.protos.policydb_pb2 import ChargingRuleNameSet
 from magma.common.redis.client import get_default_client
 from magma.common.redis.containers import RedisHashDict
-from magma.common.redis.serializers import get_proto_deserializer, \
-    get_proto_serializer
+from magma.common.redis.serializers import (
+    get_proto_deserializer,
+    get_proto_serializer,
+)
 
 
 class BaseNameDict(RedisHashDict):
@@ -33,12 +35,13 @@ class BaseNameDict(RedisHashDict):
             client,
             self._DICT_HASH,
             get_proto_serializer(),
-            get_proto_deserializer(ChargingRuleNameSet))
+            get_proto_deserializer(ChargingRuleNameSet),
+        )
 
     def send_update_notification(self):
         """
-        Use Redis pub/sub channels to send notifications. Subscribers can listen
-        to this channel to know when an update is done
+        Use Redis pub/sub channels to send notifications. Subscribers can
+        listen to this channel to know when an update is done
         """
         self.redis.publish(self._NOTIFY_CHANNEL, "Stream Update")
 

@@ -11,6 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from enum import IntEnum
+
 from magma.pipelined.imsi import encode_imsi
 
 # Register names
@@ -23,12 +24,15 @@ TEST_PACKET_REG = 'reg5'
 PASSTHROUGH_REG = 'reg6'
 VLAN_TAG_REG = 'reg7'
 TUN_PORT_REG = 'reg8'
-PROXY_TAG_REG = 'reg9'
+INGRESS_TUN_ID_REG = 'reg9'
+PROXY_TAG_REG = 'reg12'
 
 # Local scratch registers (These registers are reset when submitting to
 # another app):
 SCRATCH_REGS = ['reg0', 'reg3']
 RULE_VERSION_REG = 'reg4'
+
+NG_SESSION_ID_REG = 'reg11'
 
 # Register values
 REG_ZERO_VAL = 0x0
@@ -89,7 +93,7 @@ def set_proxy_tag(parser, value=PROXY_TAG_TO_PROXY):
     return parser.NXActionRegLoad2(dst=PROXY_TAG_REG, value=value)
 
 
-def set_tun_id(parser, tun_id:str):
+def set_tun_id(parser, tun_id: str):
     """
     Wrapper for setting proxy flow tag.
     """

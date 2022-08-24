@@ -11,12 +11,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Any, Dict
+import json
+import os
+import subprocess
+import sys
+import time
+from typing import Any, Dict, Optional
 
 import jsonpickle
 import requests
-from fabric.api import hide, run
-
+from fabric.api import hide, lcd, local, run, settings
+from fabric.context_managers import cd
+from fabric.operations import sudo
 from tools.fab import types, vagrant
 
 
@@ -39,12 +45,12 @@ def register_generic_gateway(
     if not does_network_exist(network_id, admin_cert=admin_cert):
         network_payload = types.GenericNetwork(
             id=network_id, name='Test Network', description='Test Network',
-            dns=types.NetworkDNSConfig(enable_caching=True, local_ttl=60)
+            dns=types.NetworkDNSConfig(enable_caching=True, local_ttl=60),
         )
         cloud_post('networks', network_payload, admin_cert=admin_cert)
 
     create_tier_if_not_exists(network_id, 'default')
-    hw_id = get_hardware_id_from_vagrant(vm_name=vm_name)
+    hw_id = get_gateway_hardware_id_from_vagrant(vm_name=vm_name)
     already_registered, registered_as = is_hw_id_registered(network_id, hw_id)
     if already_registered:
         print(f'VM is already registered as {registered_as}')
@@ -57,8 +63,10 @@ def register_generic_gateway(
     print(f'Gateway {gw_id} successfully provisioned')
 
 
-def construct_magmad_gateway_payload(gateway_id: str,
-                                     hardware_id: str) -> types.Gateway:
+def construct_magmad_gateway_payload(
+    gateway_id: str,
+    hardware_id: str,
+) -> types.Gateway:
     """
     Returns a default development magmad gateway entity given a desired gateway
     ID and a hardware ID pulled from the hardware secrets.
@@ -86,6 +94,7 @@ def construct_magmad_gateway_payload(gateway_id: str,
             autoupgrade_poll_interval=60,
             checkin_interval=60,
             checkin_timeout=30,
+            dynamic_services=[],
         ),
     )
 
@@ -95,10 +104,8 @@ PORTAL_URL = 'https://127.0.0.1:9443/magma/v1/'
 
 def get_next_available_gateway_id(
         network_id: str,
-        admin_cert: types.ClientCert = types.ClientCert(
-            cert='./../../.cache/test_certs/admin_operator.pem',
-            key='./../../.cache/test_certs/admin_operator.key.pem',
-        ),
+        url: Optional[str] = None,
+        admin_cert: Optional[types.ClientCert] = None,
 ) -> str:
     """
     Returns the next available gateway ID in the sequence gwN for the given
@@ -106,14 +113,17 @@ def get_next_available_gateway_id(
 
     Args:
         network_id: Network to check for available gateways
+        url: API base URL
         admin_cert: Client cert to use with the API
 
     Returns:
         Next available gateway ID in the form gwN
     """
-    # gateways is a dict mapping gw ID to full resource
-    gateways = cloud_get(f'networks/{network_id}/gateways',
-                         admin_cert=admin_cert)
+    # res is a dict mapping gw ID to full resource
+    res = cloud_get(f'networks/{network_id}/gateways', url, admin_cert)
+
+    # res could also return paginated gateways, so need to unwrap the mapping
+    gateways = res.get('gateways', res)
 
     n = len(gateways) + 1
     candidate = f'gw{n}'
@@ -125,30 +135,28 @@ def get_next_available_gateway_id(
 
 def does_network_exist(
         network_id: str,
-        admin_cert: types.ClientCert = types.ClientCert(
-            cert='./../../.cache/test_certs/admin_operator.pem',
-            key='./../../.cache/test_certs/admin_operator.key.pem',
-        ),
+        url: Optional[str] = None,
+        admin_cert: Optional[types.ClientCert] = None,
 ) -> bool:
     """
     Check for the existence of a network ID
     Args:
         network_id: Network to check
+        url: API base URL
         admin_cert: Cert for API access
 
     Returns:
         True if the network exists, False otherwise
     """
-    networks = cloud_get('/networks', admin_cert)
+    networks = cloud_get('/networks', url, admin_cert)
     return network_id in networks
 
 
 def create_tier_if_not_exists(
-        network_id: str, tier_id: str,
-        admin_cert: types.ClientCert = types.ClientCert(
-            cert='./../../.cache/test_certs/admin_operator.pem',
-            key='./../../.cache/test_certs/admin_operator.key.pem',
-        ),
+        network_id: str,
+        tier_id: str,
+        url: Optional[str] = None,
+        admin_cert: Optional[types.ClientCert] = None,
 ) -> None:
     """
     Create a placeholder tier on Orchestrator if the specified one doesn't
@@ -157,21 +165,27 @@ def create_tier_if_not_exists(
     Args:
         network_id: Network the tier belongs to
         tier_id: ID for the tier
+        url: API base URL
         admin_cert: Cert for API access
     """
-    tiers = cloud_get(f'networks/{network_id}/tiers', admin_cert=admin_cert)
+    tiers = cloud_get(f'networks/{network_id}/tiers', url, admin_cert)
+
     if tier_id in tiers:
         return
 
-    tier_payload = types.Tier(id=tier_id, version='0.0.0-0', images=[],
-                              gateways=[])
-    cloud_post(f'networks/{network_id}/tiers', tier_payload,
-               admin_cert=admin_cert)
+    tier_payload = types.Tier(
+        id=tier_id, version='0.0.0-0', images=[],
+        gateways=[],
+    )
+    cloud_post(
+        f'networks/{network_id}/tiers', tier_payload,
+        admin_cert=admin_cert,
+    )
 
 
-def get_hardware_id_from_vagrant(vm_name: str) -> str:
+def get_gateway_hardware_id_from_vagrant(vm_name: str) -> str:
     """
-    Get the magmad hardware ID from vagrant
+    Get the hardware ID of a gateway running on Vagrant VM
 
     Args:
         vm_name: Name of the vagrant machine to use
@@ -185,12 +199,72 @@ def get_hardware_id_from_vagrant(vm_name: str) -> str:
     return str(hardware_id)
 
 
+def get_gateway_hardware_id_from_docker(location_docker_compose: str) -> str:
+    """
+    Get the hardware ID of a gateway running on Docker
+
+    Args:
+        location_docker_compose: location of docker compose used to run FEG
+        by default feg/gateway/docker
+    Returns:
+        Hardware snowflake from the VM
+    """
+    with lcd('docker'), hide('output', 'running', 'warnings'), \
+            cd(location_docker_compose):
+        hardware_id = local(
+            'docker-compose exec magmad bash -c "cat /etc/snowflake"',
+            capture=True,
+        )
+    return str(hardware_id)
+
+
+def delete_gateway_certs_from_vagrant(vm_name: str):
+    """
+    Delete certificates and gw_challenge of a gateway running on Vagrant VM
+
+    Args:
+        vm_name: Name of the vagrant machine to use
+    """
+    with settings(warn_only=True), hide('output', 'running', 'warnings'), \
+            cd('/var/opt/magma/certs'):
+        vagrant.setup_env_vagrant(vm_name)
+        sudo('rm gateway.*')
+        sudo('rm gw_challenge.key')
+
+
+def delete_gateway_certs_from_docker(location_docker_compose: str):
+    """
+        Delete certificates and gw_challenge of a gateway running on Docker
+
+    Args:
+        location_docker_compose: location of docker compose used to run FEG
+    """
+    print("delete_feg_certs is running on directory %s" % os.getcwd())
+
+    subprocess.check_call(
+        [
+            'docker-compose exec magmad bash -c '
+            '"rm -f /var/opt/magma/certs/gateway.*"',
+        ],
+        shell=True,
+        cwd=location_docker_compose,
+    )
+
+    subprocess.check_call(
+        [
+            'docker-compose exec magmad bash -c '
+            '"rm -f /var/opt/magma/certs/gw_challenge.key    "',
+        ],
+        shell=True,
+        cwd=location_docker_compose,
+    )
+
+
 def is_hw_id_registered(
-        network_id: str, hw_id: str,
-        admin_cert: types.ClientCert = types.ClientCert(
-            cert='./../../.cache/test_certs/admin_operator.pem',
-            key='./../../.cache/test_certs/admin_operator.key.pem',
-        ),
+        network_id: str,
+        hw_id: str,
+        url: Optional[str] = None,
+        admin_cert: Optional[types.ClientCert] = None,
 ) -> (bool, str):
     """
     Check if a hardware ID is already registered for a given network. Note that
@@ -200,14 +274,20 @@ def is_hw_id_registered(
     Args:
         network_id: Network to check
         hw_id: HW ID to check
+        url: API base URL
         admin_cert: Cert for API access
 
     Returns:
         (True, gw_id) if the HWID is already registered, (False, '') otherwise
     """
     # gateways is a dict mapping gw ID to full resource
-    gateways = cloud_get(f'networks/{network_id}/gateways',
-                         admin_cert=admin_cert)
+    paginated_gateways = cloud_get(
+        f'networks/{network_id}/gateways',
+        url,
+        admin_cert,
+    )
+    # Handle paginated or flat response
+    gateways = paginated_gateways.get('gateways', paginated_gateways)
     for gw in gateways.values():
         if gw['device']['hardware_id'] == hw_id:
             return True, gw['id']
@@ -216,7 +296,7 @@ def is_hw_id_registered(
 
 def connect_gateway_to_cloud(control_proxy_setting_path, cert_path):
     """
-    Setup the gateway VM to connect to the cloud
+    Setup the gateway Vagrant VM to connect to the cloud
     Path to control_proxy.yml and rootCA.pem could be specified to use
     non-default control proxy setting and certificates
     """
@@ -224,8 +304,10 @@ def connect_gateway_to_cloud(control_proxy_setting_path, cert_path):
     run("sudo rm -rf /var/opt/magma/configs")
     run("sudo mkdir /var/opt/magma/configs")
     if control_proxy_setting_path is not None:
-        run("sudo cp " + control_proxy_setting_path
-            + " /var/opt/magma/configs/control_proxy.yml")
+        run(
+            "sudo cp " + control_proxy_setting_path
+            + " /var/opt/magma/configs/control_proxy.yml",
+        )
 
     # Copy certs which will be used by the bootstrapper
     run("sudo rm -rf /var/opt/magma/certs")
@@ -239,26 +321,33 @@ def connect_gateway_to_cloud(control_proxy_setting_path, cert_path):
 
 def cloud_get(
         resource: str,
-        admin_cert: types.ClientCert = types.ClientCert(
-            cert='./../../.cache/test_certs/admin_operator.pem',
-            key='./../../.cache/test_certs/admin_operator.key.pem',
-        ),
+        url: Optional[str] = None,
+        admin_cert: Optional[types.ClientCert] = None,
 ) -> Any:
     """
     Send a GET request to an API URI
     Args:
         resource: URI to request
+        url: API base URL
         admin_cert: API client certificate
 
     Returns:
         JSON-encoded response content
     """
+    url = url or PORTAL_URL
+    admin_cert = admin_cert or types.ClientCert(
+        cert='./../../.cache/test_certs/admin_operator.pem',
+        key='./../../.cache/test_certs/admin_operator.key.pem',
+    )
+
     if resource.startswith("/"):
         resource = resource[1:]
-    resp = requests.get(PORTAL_URL + resource, verify=False, cert=admin_cert)
+    resp = requests.get(url + resource, verify=False, cert=admin_cert)
     if resp.status_code != 200:
-        raise Exception('Received a %d response: %s' %
-                        (resp.status_code, resp.text))
+        raise Exception(
+            'Received a %d response: %s' %
+            (resp.status_code, resp.text),
+        )
     return resp.json()
 
 
@@ -266,10 +355,8 @@ def cloud_post(
         resource: str,
         data: Any,
         params: Dict[str, str] = None,
-        admin_cert: types.ClientCert = types.ClientCert(
-            cert='./../../.cache/test_certs/admin_operator.pem',
-            key='./../../.cache/test_certs/admin_operator.key.pem',
-        ),
+        url: Optional[str] = None,
+        admin_cert: Optional[types.ClientCert] = None,
 ):
     """
     Send a POST request to an API URI
@@ -278,14 +365,96 @@ def cloud_post(
         resource: URI to request
         data: JSON-serializable payload
         params: Params to include with the request
+        url: API base URL
         admin_cert: API client certificate
     """
-    resp = requests.post(PORTAL_URL + resource,
-                         data=jsonpickle.pickler.encode(data),
-                         params=params,
-                         headers={'content-type': 'application/json'},
-                         verify=False,
-                         cert=admin_cert)
+    url = url or PORTAL_URL
+    admin_cert = admin_cert or types.ClientCert(
+        cert='./../../.cache/test_certs/admin_operator.pem',
+        key='./../../.cache/test_certs/admin_operator.key.pem',
+    )
+    resp = requests.post(
+        url + resource,
+        data=jsonpickle.pickler.encode(data),
+        params=params,
+        headers={'content-type': 'application/json'},
+        verify=False,
+        cert=admin_cert,
+    )
     if resp.status_code not in [200, 201, 204]:
-        raise Exception('Received a %d response: %s' %
-                        (resp.status_code, resp.text))
+        parsed = json.loads(jsonpickle.pickler.encode(data))
+        raise Exception(
+            'Post Request failed: \n%s\n%s \nReceived a %d response: %s\nFAILED!' %
+            (resp.url, json.dumps(parsed, indent=4, sort_keys=False), resp.status_code, resp.text),
+        )
+
+
+def cloud_delete(
+        resource: str,
+        url: Optional[str] = None,
+        admin_cert: Optional[types.ClientCert] = None,
+) -> Any:
+    """
+    Send a delete request to an API URI
+
+    Args:
+        resource: URI to request
+        url: API base URL
+        admin_cert: API client certificate
+
+    Returns:
+        JSON-encoded response content
+    """
+    url = url or PORTAL_URL
+    admin_cert = admin_cert or types.ClientCert(
+        cert='./../../.cache/test_certs/admin_operator.pem',
+        key='./../../.cache/test_certs/admin_operator.key.pem',
+    )
+
+    if resource.startswith("/"):
+        resource = resource[1:]
+    resp = requests.delete(url + resource, verify=False, cert=admin_cert)
+    if resp.status_code not in [200, 201, 204]:
+        raise Exception(
+            'Delete Request failed: \n%s \nReceived a %d response: %s\nFAILED!' %
+            (resp.url, resp.status_code, resp.text),
+        )
+
+
+def local_command_with_repetition(command, timeout=5):
+    """
+    Run command on local machine using fabric.api.local. Repeats on error
+    Args:
+        command: command to issue
+        timeout: time to execute the command while it fails
+    """
+    _command_with_repetition(local, command, timeout)
+
+
+def run_remote_command_with_repetition(command, timeout=5):
+    """
+    Run command on remote machine using fabric.api.run. Repeats on error
+    Args:
+        command: command to run
+        timeout: time to execute the command while it fails
+    """
+    _command_with_repetition(run, command, timeout)
+
+
+def _command_with_repetition(func, command, timeout=5):
+    timeout = int(timeout)  # in seconds
+    start_time = time.time()
+    with settings(warn_only=True), hide('warnings', 'stdout'):
+        while time.time() - start_time <= timeout:
+            # func will be either
+            result = func(command)
+            if result.return_code == 0:
+                # GOOD execution
+                print(result)
+                return
+            print(
+                " ┗ command failed. Trying again",
+            )
+            time.sleep(1)
+    print(f"\nERROR on {command}\nError message:\n{result}")
+    sys.exit(1)

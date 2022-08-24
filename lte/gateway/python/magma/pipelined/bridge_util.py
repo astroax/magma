@@ -11,11 +11,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import binascii
-from collections import defaultdict
-import re
 import logging
+import re
 import subprocess
-from typing import Optional, Dict, List, TYPE_CHECKING
+from collections import defaultdict
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 # Prevent circular import
 if TYPE_CHECKING:
@@ -46,17 +46,37 @@ class BridgeTools:
         needed when 2 bridges are setup, gtp_br0(main bridge) and testing_br)
         """
         try:
-            output = subprocess.check_output(["ovs-vsctl", "get", "bridge",
-                                              bridge_name, "datapath_id"])
+            output = subprocess.check_output([
+                "ovs-vsctl", "get", "bridge",
+                bridge_name, "datapath_id",
+            ])
             output_str = str(output, 'utf-8').strip()[1:-1]
             output_hex = int(output_str, 16)
         except subprocess.CalledProcessError as e:
             raise DatapathLookupError(
                 'Error: ovs-vsctl bridge({}) datapath id lookup: {}'.format(
-                    bridge_name, e
-                )
+                    bridge_name, e,
+                ),
             )
         return output_hex
+
+    @staticmethod
+    def port_is_in_bridge(bridge, interface_name) -> bool:
+        """
+        check if port is part of the switch using ofctl cmd.
+        """
+        if not interface_name or interface_name == "":
+            return False
+        dump1 = subprocess.Popen(
+            ["ovs-ofctl", "show", bridge],
+            stdout=subprocess.PIPE,
+        )
+        if dump1.stdout is not None:
+            for line1 in dump1.stdout.readlines():
+                if interface_name not in str(line1):
+                    continue
+                return True
+        return False
 
     @staticmethod
     def get_ofport(interface_name):
@@ -64,15 +84,33 @@ class BridgeTools:
         Gets the ofport name ofport number of a interface
         """
         try:
-            port_num = subprocess.check_output(["ovs-vsctl", "get", "interface",
-                                                interface_name, "ofport"])
+            port_num = subprocess.check_output([
+                "ovs-vsctl", "get", "interface",
+                interface_name, "ofport",
+            ])
         except subprocess.CalledProcessError as e:
             raise DatapathLookupError(
                 'Error: ovs-vsctl interface({}) of port lookup: {}'.format(
-                    interface_name, e
-                )
+                    interface_name, e,
+                ),
             )
         return int(port_num)
+
+    @staticmethod
+    def get_mac_address(interface_name):
+        """
+        Gets L2 mac address of interface
+        """
+        try:
+            fl = "/sys/class/net/%s/address" % interface_name
+            mac = subprocess.check_output(["cat", fl])
+        except subprocess.CalledProcessError as e:
+            raise DatapathLookupError(
+                'Error: reading mac address of interface({}) : {}'.format(
+                    interface_name, e,
+                ),
+            )
+        return mac.strip()
 
     @staticmethod
     def create_internal_iface(bridge_name, iface_name, ip):
@@ -80,33 +118,45 @@ class BridgeTools:
         Creates a simple bridge, sets up an interface.
         Used when running unit tests
         """
-        subprocess.Popen(["ovs-vsctl", "add-port", bridge_name, iface_name,
-                          "--", "set", "Interface", iface_name,
-                          "type=internal"]).wait()
+        subprocess.Popen([
+            "ovs-vsctl", "add-port", bridge_name, iface_name,
+            "--", "set", "Interface", iface_name,
+            "type=internal",
+        ]).wait()
         if ip is not None:
             subprocess.Popen(["ifconfig", iface_name, ip]).wait()
+
+        subprocess.Popen(["ifconfig", iface_name, "up"]).wait()
 
     @staticmethod
     def add_ovs_port(bridge_name: str, iface_name: str, ofp_port: str):
         """
             Add interface to ovs bridge
         """
+        if ofp_port:
+            set_port_no = "ofport_request=" + ofp_port
+        else:
+            set_port_no = ""
         try:
-            add_port_cmd = ["ovs-vsctl", "--may-exist",
-                            "add-port",
-                            bridge_name,
-                            iface_name,
-                            "--", "set", "interface",
-                            iface_name,
-                            "ofport_request=" + ofp_port]
+            add_port_cmd = [
+                "ovs-vsctl", "--may-exist",
+                "add-port",
+                bridge_name,
+                iface_name,
+                "--", "set", "interface",
+                iface_name,
+                set_port_no,
+            ]
             subprocess.check_call(add_port_cmd)
             logging.debug("add_port_cmd %s", add_port_cmd)
         except subprocess.CalledProcessError as e:
             logging.warning("Error while adding ports: %s", e)
 
         try:
-            if_up_cmd = ["ip", "link", "set", "dev",
-                         iface_name, "up"]
+            if_up_cmd = [
+                "ip", "link", "set", "dev",
+                iface_name, "up",
+            ]
             subprocess.check_call(if_up_cmd)
             logging.debug("if_up_cmd %s", if_up_cmd)
         except subprocess.CalledProcessError as e:
@@ -114,15 +164,88 @@ class BridgeTools:
 
     @staticmethod
     def create_veth_pair(port1: str, port2: str):
+        BridgeTools.delete_veth(port1)
         try:
-            create_veth = ["ip", "link", "add",
-                           port1,
-                           "type", "veth",
-                           "peer", "name", port2]
+            create_veth = [
+                "ip", "link", "add",
+                port1,
+                "type", "veth",
+                "peer", "name", port2,
+            ]
             subprocess.check_call(create_veth)
-            logging.debug("if_up_cmd %s", create_veth)
+            logging.debug("ip veth create %s", create_veth)
         except subprocess.CalledProcessError as e:
             logging.debug("Error while creating veth pair: %s", e)
+
+    @staticmethod
+    def ifup_netdev(port1: str, ip_addr=None):
+        try:
+            ifup_cmd = [
+                "ifconfig",
+                port1,
+                "up",
+            ]
+            if ip_addr:
+                ifup_cmd.append(ip_addr)
+            subprocess.check_call(ifup_cmd)
+            logging.debug("if_up_cmd %s", ifup_cmd)
+        except subprocess.CalledProcessError as e:
+            logging.debug("Error while creating veth pair: %s", e)
+
+    @staticmethod
+    def create_ns_and_move_veth(ns: str, port1: str, ip_addr):
+        try:
+            ns_cmd = [
+                "ip", "netns", "add", ns,
+            ]
+            subprocess.check_call(ns_cmd)
+            logging.debug("ns create %s", ns_cmd)
+
+        except subprocess.CalledProcessError as e:
+            logging.debug("Error while creating ns: %s", e)
+        try:
+            move_cmd = [
+                "ip", "link", "set", "dev", port1, "netns", ns,
+            ]
+            subprocess.check_call(move_cmd)
+            logging.debug("dev move %s", move_cmd)
+
+        except subprocess.CalledProcessError as e:
+            logging.debug("Error while move dev: %s", e)
+
+        try:
+            up_cmd = [
+                "ip", "netns", "exec", ns, "ifconfig", port1, ip_addr, "up",
+            ]
+            subprocess.check_call(up_cmd)
+            logging.debug("dev move %s", up_cmd)
+
+        except subprocess.CalledProcessError as e:
+            logging.debug("Error while dev up: %s", e)
+
+    @staticmethod
+    def delete_veth(port: str):
+        try:
+            del_cmd = [
+                "ip", "link", "del", port,
+            ]
+            subprocess.check_call(del_cmd)
+            logging.debug("dev move %s", del_cmd)
+
+        except subprocess.CalledProcessError as e:
+            logging.debug("Error while del dev: %s", e)
+
+    @staticmethod
+    def delete_ns_all():
+        try:
+            del_cmd = [
+                "ip", "-all", "netns", "delete",
+            ]
+            subprocess.check_call(del_cmd)
+            logging.debug("del ns %s", del_cmd)
+
+        except subprocess.CalledProcessError as e:
+            logging.debug("Error while del all ns: %s", e)
 
     @staticmethod
     def create_bridge(bridge_name, iface_name):
@@ -130,14 +253,25 @@ class BridgeTools:
         Creates a simple bridge, sets up an interface.
         Used when running unit tests
         """
-        subprocess.Popen(["ovs-vsctl", "--if-exists", "del-br",
-                          bridge_name]).wait()
+        subprocess.Popen([
+            "ovs-vsctl", "--all", "destroy",
+            "Flow_Sample_Collector_Set",
+        ]).wait()
+        subprocess.Popen([
+            "ovs-vsctl", "--if-exists", "del-br",
+            bridge_name,
+        ]).wait()
         subprocess.Popen(["ovs-vsctl", "add-br", bridge_name]).wait()
-        subprocess.Popen(["ovs-vsctl", "set", "bridge", bridge_name,
-                          "protocols=OpenFlow10,OpenFlow13,OpenFlow14",
-                          "other-config:disable-in-band=true"]).wait()
-        subprocess.Popen(["ovs-vsctl", "set-controller", bridge_name,
-                          "tcp:127.0.0.1:6633", "tcp:127.0.0.1:6654"]).wait()
+        subprocess.Popen([
+            "ovs-vsctl", "set", "bridge", bridge_name,
+            "protocols=OpenFlow10,OpenFlow13,OpenFlow14",
+            "other-config:disable-in-band=true",
+        ]).wait()
+        subprocess.Popen([
+            "ovs-vsctl", "set-controller", bridge_name,
+            "tcp:127.0.0.1:6633", "tcp:127.0.0.1:6654",
+        ]).wait()
+        subprocess.Popen(["ovs-vsctl", "set-manager", "ptcp:6640"]).wait()
         subprocess.Popen(["ifconfig", iface_name, "192.168.1.1/24"]).wait()
 
     @staticmethod
@@ -198,39 +332,51 @@ class BridgeTools:
             set_cmd.append("table=%s" % table_num)
 
         flows = \
-            subprocess.check_output(set_cmd).decode('utf-8').split('\n')
-        flows = list(filter(lambda x: (x is not None and
-                                       x != '' and
-                                       x.find("NXST_FLOW") == -1),
-                            flows))
+            subprocess.check_output(set_cmd).decode('ascii', 'ignore').split('\n')
+        flows = list(
+            filter(
+                lambda x: (
+                    x is not None and
+                    x != '' and
+                    x.find("NXST_FLOW") == -1
+                ),
+                flows,
+            ),
+        )
         return flows
 
     @staticmethod
     def _get_annotated_name_by_table_num(
-            table_assignments: 'Dict[str, Tables]') -> Dict[int, str]:
+            table_assignments: 'Dict[str, Tables]',
+    ) -> Dict[int, str]:
         annotated_tables = {}
         # A main table may be used by multiple apps
         apps_by_main_table_num = defaultdict(list)
         for name in table_assignments:
             apps_by_main_table_num[table_assignments[name].main_table].append(
-                name)
+                name,
+            )
             # Scratch tables are used for only one app
             for ind, scratch_num in enumerate(
-                    table_assignments[name].scratch_tables):
+                    table_assignments[name].scratch_tables,
+            ):
                 annotated_tables[scratch_num] = '{}(scratch_table_{})'.format(
                     name,
-                    ind)
+                    ind,
+                )
         for table, apps in apps_by_main_table_num.items():
             annotated_tables[table] = '{}(main_table)'.format(
-                '/'.join(sorted(apps)))
+                '/'.join(sorted(apps)),
+            )
         return annotated_tables
 
     @classmethod
-    def get_annotated_flows_for_bridge(cls, bridge_name: str,
-                                       table_assignments: 'Dict[str, Tables]',
-                                       apps: Optional[List[str]] = None,
-                                       include_stats: bool = True
-                                       ) -> List[str]:
+    def get_annotated_flows_for_bridge(
+        cls, bridge_name: str,
+        table_assignments: 'Dict[str, Tables]',
+        apps: Optional[List[str]] = None,
+        include_stats: bool = True,
+    ) -> List[str]:
         """
         Returns an annotated flow dump of the given bridge from ovs-ofctl.
         table_assignments is used to annotate table number with its
@@ -239,7 +385,8 @@ class BridgeTools:
         returned.
         """
         annotated_tables = cls._get_annotated_name_by_table_num(
-            table_assignments)
+            table_assignments,
+        )
 
         def annotated_table_num(num):
             if int(num) in annotated_tables:
@@ -259,23 +406,37 @@ class BridgeTools:
                 in_port, table = resubmit_tokens[0], resubmit_tokens[1]
                 if ret:
                     ret += ','
-                ret += 'resubmit({},{})'.format(in_port,
-                                                annotated_table_num(table))
+                ret += 'resubmit({},{})'.format(
+                    in_port,
+                    annotated_table_num(table),
+                )
             return ret
 
         def parse_flow(flow):
             sub_rules = [
                 # Annotate table number with app name
-                (cls.TABLE_NUM_REGEX,
-                 lambda match: 'table={}'.format(annotated_table_num(
-                     match.group(1)))),
+                (
+                    cls.TABLE_NUM_REGEX,
+                    lambda match: 'table={}'.format(
+                        annotated_table_num(
+                            match.group(1),
+                        ),
+                    ),
+                ),
                 (r'resubmit\((.*)\)', parse_resubmit_action),
                 # Decode the note
-                (r'note:([\d\.a-fA-F]*)',
-                 lambda match: 'note:{}'.format(
-                               str(binascii.unhexlify(match.group(1)
-                                                      .replace('00', '')
-                                                      .replace('.', ''))))),
+                (
+                    r'note:([\d\.a-fA-F]*)',
+                    lambda match: 'note:{}'.format(
+                                  str(
+                                      binascii.unhexlify(
+                                          match.group(1)
+                                          .replace('00', '')
+                                          .replace('.', ''),
+                                      ),
+                                  ),
+                    ),
+                ),
             ]
             for rule in sub_rules:
                 flow = re.sub(rule[0], rule[1], flow)
@@ -296,6 +457,12 @@ class BridgeTools:
                 if table_num in selected_tables or not selected_tables:
                     yield flow
 
-        return [parse_flow(flow) for flow in
-                filter_apps(cls.get_flows_for_bridge(bridge_name,
-                    include_stats=include_stats))]
+        return [
+            parse_flow(flow) for flow in
+            filter_apps(
+                cls.get_flows_for_bridge(
+                    bridge_name,
+                    include_stats=include_stats,
+                ),
+            )
+        ]

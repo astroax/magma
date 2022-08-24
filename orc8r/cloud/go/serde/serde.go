@@ -14,10 +14,10 @@
 package serde
 
 import (
+	"context"
 	"encoding"
+	"fmt"
 	"reflect"
-
-	"github.com/pkg/errors"
 )
 
 // Serde (SERializer-DEserializer) implements logic to serialize/deserialize
@@ -43,7 +43,7 @@ type Serde interface {
 // ValidatableModel implements a ValidateModel() function that returns whether
 // the instance is valid.
 type ValidatableModel interface {
-	ValidateModel() error
+	ValidateModel(ctx context.Context) error
 }
 
 // ValidateableBinaryConvertible wraps both BinaryConvertible, for generic
@@ -83,7 +83,7 @@ func (s *binarySerde) GetType() string {
 func (s *binarySerde) Serialize(in interface{}) ([]byte, error) {
 	bm, ok := in.(BinaryConvertible)
 	if !ok {
-		return nil, errors.Errorf("type %T structure does not implement BinaryConvertible", in)
+		return nil, fmt.Errorf("type %T structure does not implement BinaryConvertible", in)
 	}
 	return bm.MarshalBinary()
 }

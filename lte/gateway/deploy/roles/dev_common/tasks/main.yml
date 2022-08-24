@@ -18,15 +18,41 @@
   when: preburn
 
 - name: Install ansible for Ubuntu systems
-  when: preburn and ansible_distribution == "Ubuntu"
+  when: preburn
   apt:
     state: present
     pkg:
       - ansible
   retries: 5
 
+- name: Copy over the timesyncd config
+  become: yes
+  copy:
+    src: timesyncd.conf
+    dest: /etc/systemd/timesyncd.conf
+
+- name: Make sure timesyncd is started
+  systemd:
+    name: systemd-timesyncd.service
+    state: started
+
+- name: Copy ssh keepAlive configs
+  copy: src={{ item.src }} dest={{ item.dest }}
+  become: yes
+  with_items:
+    - {src: 'sshd_config', dest: '/etc/ssh/sshd_config'}
+
+- name: Restart service ssh
+  become: yes
+  service:
+    name: ssh
+    state: restarted
+
 - name: Install ansible community collection
-  shell: su - {{ ansible_user }} -c 'ansible-galaxy collection install community.general'
+  become: yes
+  become_method: su
+  become_user: "{{ ansible_user }}"
+  command: ansible-galaxy collection install community.general
   ignore_errors: yes
 
 - name: Set build environment variables
@@ -44,6 +70,7 @@
     -  XDG_CACHE_HOME="{{magma_root}}/.cache"
     -  SWAGGER_CODEGEN_JAR={{ swagger_codegen_jar }}
     -  CODEGEN_ROOT={{ codegen_root }}
+    -  ASAN_OPTIONS=abort_on_error=1:disable_coredump=0:unmap_shadow_on_exit=1
   when: full_provision
 
 - name: "Go export"
@@ -125,6 +152,7 @@
       - python3-setuptools
       - python-setuptools
       - libssl-dev
+      - apt-transport-https
   retries: 5
   when: preburn
 
@@ -143,7 +171,6 @@
       - autoconf
       - build-essential
       - ccache
-      - clang-format-7
       - ninja-build
       - git
       - libtool
@@ -158,19 +185,10 @@
   retries: 5
   when: preburn
 
-- name: Install build requirements for Debian systems
-  when: preburn and ansible_distribution == "Debian"
-  apt:
-    state: present
-    pkg:
-      - clang-3.8
-      - python3-aioeventlet
-  retries: 5
-
 - name: Install build requirements for Ubuntu systems
   # python3-aioeventlet manually built with fpm and uploaded to jfrog focal-dev repo
   # due to upstream versioning bug
-  when: preburn and ansible_distribution == "Ubuntu"
+  when: preburn
   apt:
     state: present
     pkg:
@@ -198,6 +216,26 @@
   when: full_provision
 
 ########################################
+# Install Bazel
+########################################
+- name: Install bazelisk
+  # yamllint disable rule:truthy
+  become: yes
+  get_url:
+    url: "https://github.com/bazelbuild/bazelisk/releases/download/v1.10.0/bazelisk-linux-amd64"
+    dest: /usr/sbin/bazelisk-linux-amd64
+    mode: ugo+x
+
+- name: Create a symlink for /usr/sbin/bazel
+  # yamllint disable rule:truthy
+  become: yes
+  file:
+    src: /usr/sbin/bazelisk-linux-amd64
+    path: /usr/sbin/bazel
+    state: link
+    force: yes
+
+########################################
 # Install common Magma dev dependencies
 ########################################
 
@@ -216,6 +254,7 @@
       - protobuf-compiler
       # install ethtool for disabling TCP checksumming
       - ethtool
+      - ifupdown
       - libffi-dev
       - iperf3
       - libsystemd-dev
@@ -223,24 +262,13 @@
       - libpcap-dev
       - libtins-dev
       - libmnl-dev
+      - libcurl4-openssl-dev
   retries: 5
   when: preburn
 
-- name: Install Debian Magma gateway dev dependencies
-  retries: 5
-  when: preburn and ansible_distribution == "Debian"
-  apt:
-    state: present
-    update_cache: no
-    pkg:
-      - libprotobuf10
-      - libprotobuf-lite10
-      - libprotoc10
-      - libssl1.0-dev
-
 - name: Install Ubuntu Magma gateway dev dependencies
   retries: 5
-  when: preburn and ansible_distribution == "Ubuntu"
+  when: preburn
   apt:
     state: present
     update_cache: no
@@ -251,17 +279,72 @@
       - libssl-dev
 
 ###############################################
-# Download and build swagger-codegen
+# Download and build libprotobuf-mutator
 ###############################################
 
-- name: Clone swagger-codegen repo
+- name: Clone libprotobuf-mutator repo
   become: yes
   git:
-    repo: 'https://github.com/swagger-api/swagger-codegen'
-    dest: "{{ codegen_root }}"
-    version: v2.2.3
+    repo: 'https://github.com/google/libprotobuf-mutator'
+    dest: "{{ tmp_libprotobuf_mutator_dir }}"
+    version: v1.0
     force: yes
   when: preburn
+
+- name: Create a build directory for libprotobuf-mutator
+  file:
+    path: "{{ tmp_libprotobuf_mutator_dir }}/build"
+    state: directory
+  when: preburn
+
+# Fails build unless we add -DLIB_PROTO_MUTATOR_DOWNLOAD_PROTOBUF=ON
+#  to download and build updated proto lib.
+- name: Build libprotobuf-mutator
+  become: yes
+  shell: |
+    cd {{ tmp_libprotobuf_mutator_dir }}/build && \
+    cmake .. -GNinja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DLIB_PROTO_MUTATOR_DOWNLOAD_PROTOBUF=ON && \
+    ninja && \
+    ninja install
+  when: preburn
+
+###############################################
+# Download and build sentry-native
+###############################################
+
+- name: Install Sentry Native SDK
+  vars:
+    sentry_native_version: "0.4.12"
+  get_url:
+    url: "https://github.com/getsentry/sentry-native/releases/download/{{ sentry_native_version }}/sentry-native.zip"
+    dest: "{{ tmp_directory }}/sentry-native.zip"
+  when: preburn
+
+- name: Create a directory for Sentry Native
+  file:
+    path: "{{ tmp_directory }}/sentry-native"
+    state: directory
+  when: preburn
+
+- name: Unpack Sentry Native SDK
+  unarchive:
+    src: "{{ tmp_directory }}/sentry-native.zip"
+    dest: "{{ tmp_directory }}/sentry-native"
+    remote_src: yes
+  when: preburn
+
+- name: Build and Install Sentry Native SDK
+  shell: |
+    cd {{ tmp_directory }}/sentry-native && \
+    cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo && \
+    cmake --build build --parallel && \
+    cmake --install build --prefix install --config RelWithDebInfo && \
+    cd build && make install
+  when: preburn
+
+###############################################
+# Download swagger-codegen
+###############################################
 
 - name: Setup build requirements for python sdk
   become: yes
@@ -272,39 +355,90 @@
   retries: 5
   when: preburn
 
-- name: Download maven
+- name: Make sure swagger download destination dir exists
+  file:
+    path: "{{ swagger_codegen_jar | dirname }}"
+    state: directory
+  when: preburn
+
+- name: Download swagger code-gen
   get_url:
-    url: "http://mirrors.ibiblio.org/apache/maven/maven-3/{{ mvn_version }}/binaries/apache-maven-{{ mvn_version }}-bin.tar.gz"
-    dest: "{{ mvn_dir }}-bin.tar.gz"
-    checksum: "sha1:{{ mvn_sha1 }}"
+    url: "https://repo1.maven.org/maven2/io/swagger/swagger-codegen-cli/2.2.3/swagger-codegen-cli-2.2.3.jar"
+    dest: "{{ swagger_codegen_jar }}"
+    checksum: "sha1:{{ swagger_sha1 }}"
   when: preburn
 
-- name: Unarchive maven
-  unarchive:
-    src: "{{ mvn_dir }}-bin.tar.gz"
-    dest: /var/tmp
-    remote_src: yes
-  when: preburn
-
-- name: Upload script to build swagger-codegen
-  become: yes
-  copy:
-    src: build_swagger_codegen.sh
-    dest: /var/tmp/build_swagger_codegen.sh
+- name: Download gHZ binary from artifactory
+  get_url:
+    url: https://artifactory.magmacore.org:443/artifactory/blob-prod/ghz
+    dest: /usr/local/bin/ghz
     mode: 0755
+  when: full_provision
+
+- name: Fix kernel commandline for interface naming.
+  shell: |
+    sed -i 's/enp0s3/eth0/g' /etc/netplan/50-cloud-init.yaml
+    sed -i 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/g' /etc/default/grub
+    grub-mkconfig -o /boot/grub/grub.cfg
   when: preburn
 
-- name: Build swagger code-gen
+- file:
+    path: /var/tmp/test_results
+    state: directory
+    mode: 0777
+
+- name: Patch multipath conf
+  when: preburn
+  patch:
+    src: patches/multipath-conf.patch
+    dest: /etc/multipath.conf
   become: yes
-  command: "/var/tmp/build_swagger_codegen.sh"
-  args:
-    creates: "{{ swagger_codegen_jar }}"
-  environment:
-    M2_HOME: "{{ mvn_dir }}"
-    CODEGEN_ROOT: "{{ codegen_root }}"
+  ignore_errors: true
+
+- name: Copy Interface file.
+  copy:
+    src: magma_interfaces
+    dest: /etc/network/interfaces
   when: preburn
 
-- name: Create links for clang-format
-  become: yes
-  command: "update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-7 1000"
+- name: Remove netplan and enable networking.
+  shell: |
+    systemctl unmask networking
+    systemctl enable networking
+    apt-get --assume-yes purge nplan netplan.i
+  when: preburn
+  ignore_errors: true
+
+- name: Copy Resolve file.
+  copy:
+    src: magma_resolv.conf
+    dest: /etc/systemd/resolved.conf
+
+- name: Wait for APT Lock
+  shell: |
+    while sudo fuser /var/lib/dpkg/lock >/dev/null 2>&1 ; do
+      sleep 1
+    done
+    while sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1 ; do
+      sleep 1
+    done
+    if [ -f /var/log/unattended-upgrades/unattended-upgrades.log ]; then
+      while sudo fuser /var/log/unattended-upgrades/unattended-upgrades.log >/dev/null 2>&1 ; do
+        sleep 1
+      done
+    fi
+
+- name: Remove unattended upgrades
+  apt:
+    state: absent
+    purge: yes
+    pkg:
+      - unattended-upgrades
+
+- name: Install LLDB debugger
+  apt:
+    pkg: lldb
+    state: present
+    update_cache: no
+  retries: 5
   when: preburn

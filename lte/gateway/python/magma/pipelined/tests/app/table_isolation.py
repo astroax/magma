@@ -16,16 +16,15 @@ import copy
 
 from lte.protos.mobilityd_pb2 import IPAddress
 from magma.pipelined.imsi import encode_imsi
-from magma.pipelined.policy_converters import convert_ip_str_to_ip_proto
 from magma.pipelined.openflow.magma_match import MagmaMatch
-from magma.pipelined.openflow.registers import DIRECTION_REG, Direction, \
-    IMSI_REG
-from integ_tests.s1aptests.ovs import LOCALHOST
-from integ_tests.s1aptests.ovs.rest_api import get_datapath,\
-    delete_flowentry, add_flowentry
-
-from ryu.lib.packet import ether_types
+from magma.pipelined.openflow.registers import (
+    DIRECTION_REG,
+    IMSI_REG,
+    Direction,
+)
+from magma.pipelined.policy_converters import convert_ip_str_to_ip_proto
 from ryu.lib import hub
+from ryu.lib.packet import ether_types
 
 
 class TableIsolator(abc.ABC):
@@ -101,7 +100,7 @@ class RyuForwardFlowArgsBuilder():
             Self
         """
         self._reg_sets.append(
-            {"type": "SET_FIELD", "field": reg_name, "value": value}
+            {"type": "SET_FIELD", "field": reg_name, "value": value},
         )
         return self
 
@@ -138,11 +137,15 @@ class RyuForwardFlowArgsBuilder():
             Self
         """
         self._ip = ip
-        self._ulink_action = {"type": "SET_FIELD", "field": DIRECTION_REG,
-                              "value": Direction.OUT}
+        self._ulink_action = {
+            "type": "SET_FIELD", "field": DIRECTION_REG,
+            "value": Direction.OUT,
+        }
 
-        self._dlink_action = {"type": "SET_FIELD", "field": DIRECTION_REG,
-                              "value": Direction.IN}
+        self._dlink_action = {
+            "type": "SET_FIELD", "field": DIRECTION_REG,
+            "value": Direction.IN,
+        }
         return self
 
     def set_eth_match(self, eth_src, eth_dst):
@@ -165,24 +168,28 @@ class RyuForwardFlowArgsBuilder():
 
         uplink["instructions"].append({
             "type": "APPLY_ACTIONS",
-            "actions": self._reg_sets + [self._ulink_action]
+            "actions": self._reg_sets + [self._ulink_action],
         })
         downlink["instructions"].append({
             "type": "APPLY_ACTIONS",
-            "actions": self._reg_sets + [self._dlink_action]
+            "actions": self._reg_sets + [self._dlink_action],
         })
 
         ip_addr = convert_ip_str_to_ip_proto(self._ip)
         if ip_addr.version == IPAddress.IPV4:
             uplink["match"].update(
-                {"ipv4_src": self._ip})
+                {"ipv4_src": self._ip},
+            )
             downlink["match"].update(
-                {"ipv4_dst": self._ip})
+                {"ipv4_dst": self._ip},
+            )
         else:
             uplink["match"].update(
-                {"ipv6_src": self._ip})
+                {"ipv6_src": self._ip},
+            )
             downlink["match"].update(
-                {"ipv6_dst": self._ip})
+                {"ipv6_dst": self._ip},
+            )
         return [uplink, downlink]
 
     def set_eth_type_arp(self):
@@ -210,38 +217,13 @@ class RyuForwardFlowArgsBuilder():
         else:
             if self._reg_sets:
                 self._request["instructions"].append(
-                    {"type": "APPLY_ACTIONS", "actions": self._reg_sets}
+                    {"type": "APPLY_ACTIONS", "actions": self._reg_sets},
                 )
             return [self._request]
 
     @classmethod
     def from_subscriber(cls, sub_info):
         return cls(sub_info.table_id)._set_subscriber_match(sub_info)
-
-
-# REST API is deprecated transition to RyuDirectTableIsolator
-class RyuRestTableIsolator(TableIsolator):
-    """
-    RyuRestTableIsolator uses ryu REST api to isolate tables, sends the
-    generated RyuForwardFlow requests as REST requests.
-    """
-
-    def __init__(self, requests, ovs_ip=LOCALHOST):
-        self._requests = requests
-        self._ovs_ip = ovs_ip
-        self._datapath = get_datapath(ovs_ip)
-
-    def _activate_flow_rules(self):
-        """ Adds the flows to ovs, REST needs a dpid argument """
-        for req in self._requests:
-            req["dpid"] = self._datapath
-            add_flowentry(req, self._ovs_ip)
-
-    def _deactivate_flow_rules(self):
-        """ Removes flows from ovs, REST needs a dpid argument """
-        for req in self._requests:
-            req["dpid"] = self._datapath
-            delete_flowentry(req, self._ovs_ip)
 
 
 class RyuDirectTableIsolator(TableIsolator):

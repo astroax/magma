@@ -14,14 +14,13 @@
 package servicers
 
 import (
+	"context"
 	"fmt"
 
-	"magma/feg/cloud/go/protos"
+	"github.com/hashicorp/go-multierror"
+
 	fegprotos "magma/feg/cloud/go/protos"
 	"magma/feg/gateway/multiplex"
-	"magma/orc8r/lib/go/errors"
-
-	"golang.org/x/net/context"
 	orcprotos "magma/orc8r/lib/go/protos"
 )
 
@@ -38,7 +37,7 @@ import (
 // SwxProxiesWithHealth is an interface just to group SwxProxies and ServiceHealthServer.
 // This is used to be able to return either SwxProxies or SwxProxy (without S)
 type SwxProxiesWithHealth interface {
-	protos.SwxProxyServer
+	fegprotos.SwxProxyServer
 	fegprotos.ServiceHealthServer
 }
 
@@ -89,7 +88,7 @@ func NewSwxProxiesWithHealthAndDefaultMultiplexor(
 }
 
 // Calls Authenticate on the chosen swx proxy based on IMSI of the incoming request
-func (s *SwxProxies) Authenticate(ctx context.Context, req *protos.AuthenticationRequest) (*protos.AuthenticationAnswer, error) {
+func (s *SwxProxies) Authenticate(ctx context.Context, req *fegprotos.AuthenticationRequest) (*fegprotos.AuthenticationAnswer, error) {
 	imsi := req.GetUserName()
 	proxy, err := getProxyPerKey(imsi, s.proxies, s.multiplexor)
 	if err != nil {
@@ -99,7 +98,7 @@ func (s *SwxProxies) Authenticate(ctx context.Context, req *protos.Authenticatio
 }
 
 // Calls Register on the chosen swx proxy based on IMSI of the incoming request
-func (s *SwxProxies) Register(ctx context.Context, req *protos.RegistrationRequest) (*protos.RegistrationAnswer, error) {
+func (s *SwxProxies) Register(ctx context.Context, req *fegprotos.RegistrationRequest) (*fegprotos.RegistrationAnswer, error) {
 	imsi := req.GetUserName()
 	proxy, err := getProxyPerKey(imsi, s.proxies, s.multiplexor)
 	if err != nil {
@@ -109,7 +108,7 @@ func (s *SwxProxies) Register(ctx context.Context, req *protos.RegistrationReque
 }
 
 // Calls Deregister on the chosen swx proxy based on IMSI of the incoming request
-func (s *SwxProxies) Deregister(ctx context.Context, req *protos.RegistrationRequest) (*protos.RegistrationAnswer, error) {
+func (s *SwxProxies) Deregister(ctx context.Context, req *fegprotos.RegistrationRequest) (*fegprotos.RegistrationAnswer, error) {
 	imsi := req.GetUserName()
 	proxy, err := getProxyPerKey(imsi, s.proxies, s.multiplexor)
 	if err != nil {
@@ -119,7 +118,7 @@ func (s *SwxProxies) Deregister(ctx context.Context, req *protos.RegistrationReq
 }
 
 // Calls Disable on each swx proxy
-func (s *SwxProxies) Disable(ctx context.Context, req *protos.DisableMessage) (*orcprotos.Void, error) {
+func (s *SwxProxies) Disable(ctx context.Context, req *fegprotos.DisableMessage) (*orcprotos.Void, error) {
 	if req == nil {
 		return nil, fmt.Errorf("Nil Disable Request")
 	}
@@ -131,25 +130,27 @@ func (s *SwxProxies) Disable(ctx context.Context, req *protos.DisableMessage) (*
 
 // Calls Enable on each swx proxy
 func (s *SwxProxies) Enable(ctx context.Context, req *orcprotos.Void) (*orcprotos.Void, error) {
-	multiError := errors.NewMulti()
+	errs := &multierror.Error{}
 	for i, proxy := range s.proxies {
 		proxy.connMan.Enable()
 		_, err := proxy.connMan.GetConnection(proxy.smClient, proxy.config.ServerCfg)
-		multiError = multiError.AddFmt(err, "error(%d):", i+1)
+		if err != nil {
+			errs = multierror.Append(errs, fmt.Errorf("error(%d): %v", i+1, err))
+		}
 	}
-	return &orcprotos.Void{}, multiError.AsError()
+	return &orcprotos.Void{}, errs.ErrorOrNil()
 }
 
 // Calls GetHealthStatus on each Swx Proxy
-func (s *SwxProxies) GetHealthStatus(ctx context.Context, req *orcprotos.Void) (*protos.HealthStatus, error) {
+func (s *SwxProxies) GetHealthStatus(ctx context.Context, req *orcprotos.Void) (*fegprotos.HealthStatus, error) {
 	for _, proxy := range s.proxies {
 		healthMessage, err := proxy.GetHealthStatus(ctx, req)
-		if err != nil || healthMessage.Health == protos.HealthStatus_UNHEALTHY {
+		if err != nil || healthMessage.Health == fegprotos.HealthStatus_UNHEALTHY {
 			return healthMessage, err
 		}
 	}
-	return &protos.HealthStatus{
-		Health:        protos.HealthStatus_HEALTHY,
+	return &fegprotos.HealthStatus{
+		Health:        fegprotos.HealthStatus_HEALTHY,
 		HealthMessage: "All metrics appear healthy",
 	}, nil
 }
@@ -161,7 +162,7 @@ func getProxyPerKey(imsi string, proxies []*swxProxy, mux multiplex.Multiplexor)
 		return nil, err
 	}
 	if index >= len(proxies) {
-		return nil, fmt.Errorf("Index %d is bigger than the ammount of proxies %d", index, len(proxies))
+		return nil, fmt.Errorf("index %d is bigger than the amount of proxies %d", index, len(proxies))
 	}
 	return proxies[index], nil
 }

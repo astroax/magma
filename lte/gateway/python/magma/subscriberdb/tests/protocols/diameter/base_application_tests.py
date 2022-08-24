@@ -12,12 +12,15 @@ limitations under the License.
 """
 
 import unittest
-
 from unittest.mock import Mock
 
-from magma.subscriberdb.protocols.diameter import avp, server, message
-from magma.subscriberdb.protocols.diameter.application import base, s6a, s6a_relay
-from .common import MockTransport
+from magma.subscriberdb.protocols.diameter import avp, message, server
+from magma.subscriberdb.protocols.diameter.application import (
+    base,
+    s6a,
+    s6a_relay,
+)
+from magma.subscriberdb.tests.protocols.diameter.common import MockTransport
 
 
 class BaseApplicationTests(unittest.TestCase):
@@ -29,7 +32,9 @@ class BaseApplicationTests(unittest.TestCase):
     HOST_ADDR = "127.0.0.1"
 
     def setUp(self):
-        base_manager = base.BaseApplication(self.REALM, self.HOST, self.HOST_ADDR)
+        base_manager = base.BaseApplication(
+            self.REALM, self.HOST, self.HOST_ADDR,
+        )
         s6a_manager = s6a_relay.S6AApplication(
             Mock(),
             self.REALM,
@@ -125,10 +130,14 @@ class BaseApplicationTests(unittest.TestCase):
         msg.append_avp(avp.AVP('Host-IP-Address', self.HOST_ADDR))
         msg.append_avp(avp.AVP('Vendor-Id', 0))
         msg.append_avp(avp.AVP('Supported-Vendor-Id', avp.VendorId.TGPP))
-        msg.append_avp(avp.AVP('Vendor-Specific-Application-Id', [
-            avp.AVP('Auth-Application-Id', s6a.S6AApplication.APP_ID),
-            avp.AVP('Vendor-Id', avp.VendorId.TGPP)
-        ]))
+        msg.append_avp(
+            avp.AVP(
+                'Vendor-Specific-Application-Id', [
+                    avp.AVP('Auth-Application-Id', s6a.S6AApplication.APP_ID),
+                    avp.AVP('Vendor-Id', avp.VendorId.TGPP),
+                ],
+            ),
+        )
         msg.append_avp(avp.AVP('Product-Name', 'magma'))
         # Encode response message into buffer
         resp_buf = bytearray(msg.length)

@@ -15,19 +15,18 @@ import unittest
 import warnings
 from concurrent.futures import Future
 
-from ryu.lib import hub
-
-from magma.pipelined.tests.app.start_pipelined import (
-    TestSetup,
-    PipelinedController,
-)
 from magma.pipelined.bridge_util import BridgeTools
+from magma.pipelined.tests.app.start_pipelined import (
+    PipelinedController,
+    TestSetup,
+)
 from magma.pipelined.tests.pipelined_test_util import (
+    assert_bridge_snapshot_match,
+    create_service_manager,
     start_ryu_app_thread,
     stop_ryu_app_thread,
-    create_service_manager,
-    assert_bridge_snapshot_match,
 )
+from ryu.lib import hub
 
 
 class VlanLearnTest(unittest.TestCase):
@@ -47,15 +46,19 @@ class VlanLearnTest(unittest.TestCase):
         """
         super(VlanLearnTest, cls).setUpClass()
         warnings.simplefilter('ignore')
-        cls.service_manager = create_service_manager([],
-            ['ue_mac', 'vlan_learn'])
+        cls.service_manager = create_service_manager(
+            [],
+            ['ue_mac', 'vlan_learn'],
+        )
 
         vlan_learn_controller_reference = Future()
         testing_controller_reference = Future()
         test_setup = TestSetup(
-            apps=[PipelinedController.VlanLearn,
-                  PipelinedController.Testing,
-                  PipelinedController.StartupFlows],
+            apps=[
+                PipelinedController.VlanLearn,
+                PipelinedController.Testing,
+                PipelinedController.StartupFlows,
+            ],
             references={
                 PipelinedController.VlanLearn:
                     vlan_learn_controller_reference,

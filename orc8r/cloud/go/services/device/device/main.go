@@ -14,16 +14,16 @@ limitations under the License.
 package main
 
 import (
+	"github.com/golang/glog"
+
 	"magma/orc8r/cloud/go/blobstore"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/service"
 	"magma/orc8r/cloud/go/services/device"
 	"magma/orc8r/cloud/go/services/device/protos"
-	"magma/orc8r/cloud/go/services/device/servicers"
+	servicers "magma/orc8r/cloud/go/services/device/servicers/protected"
 	"magma/orc8r/cloud/go/sqorc"
 	storage2 "magma/orc8r/cloud/go/storage"
-
-	"github.com/golang/glog"
 )
 
 func main() {
@@ -31,11 +31,11 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error creating device service %s", err)
 	}
-	db, err := sqorc.Open(storage2.SQLDriver, storage2.DatabaseSource)
+	db, err := sqorc.Open(storage2.GetSQLDriver(), storage2.GetDatabaseSource())
 	if err != nil {
 		glog.Fatalf("Failed to connect to database: %s", err)
 	}
-	store := blobstore.NewEntStorage(device.DBTableName, db, sqorc.GetSqlBuilder())
+	store := blobstore.NewSQLStoreFactory(device.DBTableName, db, sqorc.GetSqlBuilder())
 	err = store.InitializeFactory()
 	if err != nil {
 		glog.Fatalf("Failed to initialize device database: %s", err)
@@ -45,7 +45,7 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Failed to instantiate the device servicer: %v", deviceServicer)
 	}
-	protos.RegisterDeviceServer(srv.GrpcServer, deviceServicer)
+	protos.RegisterDeviceServer(srv.ProtectedGrpcServer, deviceServicer)
 
 	err = srv.Run()
 	if err != nil {

@@ -14,8 +14,7 @@ import asyncio
 import unittest
 from unittest import mock
 
-from magma.magmad.generic_command.command_executor import \
-    CommandExecutor
+from magma.magmad.generic_command.command_executor import CommandExecutor
 
 
 class FakeCommandExecutor(CommandExecutor):
@@ -24,7 +23,7 @@ class FakeCommandExecutor(CommandExecutor):
 
         async def test_func_1(_):
             return {
-                "success": True
+                "success": True,
             }
 
         async def test_func_2(params):
@@ -47,7 +46,7 @@ class CommandExecutorTest(unittest.TestCase):
 
     def test_execute_command(self):
         result = asyncio.get_event_loop().run_until_complete(
-            self.command_executor.execute_command("test_1", {})
+            self.command_executor.execute_command("test_1", {}),
         )
         self.assertEqual(result["success"], True)
 
@@ -57,6 +56,6 @@ class CommandExecutorTest(unittest.TestCase):
             "b": "c",
         }
         result = asyncio.get_event_loop().run_until_complete(
-            self.command_executor.execute_command("test_2", params)
+            self.command_executor.execute_command("test_2", params),
         )
         self.assertEqual(result, params)

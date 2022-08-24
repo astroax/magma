@@ -10,16 +10,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-import grpc
 import logging
+from typing import List, Optional
 
-from ryu.lib import hub
-
+import grpc
 from magma.common.service_registry import ServiceRegistry
 from orc8r.protos.common_pb2 import Void
-from orc8r.protos.directoryd_pb2 import UpdateRecordRequest, \
-    GetDirectoryFieldRequest
+from orc8r.protos.directoryd_pb2 import (
+    GetDirectoryFieldRequest,
+    UpdateRecordRequest,
+)
 from orc8r.protos.directoryd_pb2_grpc import GatewayDirectoryServiceStub
+from ryu.lib import hub
 
 DIRECTORYD_SERVICE_NAME = "directoryd"
 DEFAULT_GRPC_TIMEOUT = 10
@@ -31,8 +33,10 @@ def update_record(imsi: str, ip_addr: str) -> None:
     Make RPC call to 'UpdateRecord' method of local directoryD service
     """
     try:
-        chan = ServiceRegistry.get_rpc_channel(DIRECTORYD_SERVICE_NAME,
-                                               ServiceRegistry.LOCAL)
+        chan = ServiceRegistry.get_rpc_channel(
+            DIRECTORYD_SERVICE_NAME,
+            ServiceRegistry.LOCAL,
+        )
     except ValueError:
         logging.error('Cant get RPC channel to %s', DIRECTORYD_SERVICE_NAME)
         return
@@ -50,19 +54,22 @@ def update_record(imsi: str, ip_addr: str) -> None:
             imsi,
             ip_addr,
             err.code(),
-            err.details())
+            err.details(),
+        )
 
 
-def get_record(imsi: str, field: str) -> str:
+def get_record(imsi: str, field: str) -> Optional[str]:
     """
     Make RPC call to 'GetDirectoryField' method of local directoryD service
     """
     try:
-        chan = ServiceRegistry.get_rpc_channel(DIRECTORYD_SERVICE_NAME,
-                                               ServiceRegistry.LOCAL)
+        chan = ServiceRegistry.get_rpc_channel(
+            DIRECTORYD_SERVICE_NAME,
+            ServiceRegistry.LOCAL,
+        )
     except ValueError:
         logging.error('Cant get RPC channel to %s', DIRECTORYD_SERVICE_NAME)
-        return
+        return None
     client = GatewayDirectoryServiceStub(chan)
     if not imsi.startswith("IMSI"):
         imsi = "IMSI" + imsi
@@ -77,20 +84,23 @@ def get_record(imsi: str, field: str) -> str:
             "GetDirectoryFieldRequest error for id: %s! [%s] %s",
             imsi,
             err.code(),
-            err.details())
+            err.details(),
+        )
     return None
 
 
-def get_all_records(retries: int = 3, sleep_time: float = 0.1) -> [dict]:
+def get_all_records(retries: int = 3, sleep_time: float = 0.1) -> Optional[List[dict]]:
     """
     Make RPC call to 'GetAllDirectoryRecords' method of local directoryD service
     """
     try:
-        chan = ServiceRegistry.get_rpc_channel(DIRECTORYD_SERVICE_NAME,
-                                               ServiceRegistry.LOCAL)
+        chan = ServiceRegistry.get_rpc_channel(
+            DIRECTORYD_SERVICE_NAME,
+            ServiceRegistry.LOCAL,
+        )
     except ValueError:
         logging.error('Cant get RPC channel to %s', DIRECTORYD_SERVICE_NAME)
-        return
+        return None
     client = GatewayDirectoryServiceStub(chan)
     for _ in range(0, retries):
         try:
@@ -102,5 +112,6 @@ def get_all_records(retries: int = 3, sleep_time: float = 0.1) -> [dict]:
             logging.error(
                 "GetAllDirectoryRecords error! [%s] %s",
                 err.code(),
-                err.details())
+                err.details(),
+            )
     return []

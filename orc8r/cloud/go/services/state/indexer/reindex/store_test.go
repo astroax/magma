@@ -16,13 +16,13 @@ package reindex_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"magma/orc8r/cloud/go/blobstore"
 	"magma/orc8r/cloud/go/blobstore/mocks"
 	"magma/orc8r/cloud/go/services/state/indexer/reindex"
 	state_types "magma/orc8r/cloud/go/services/state/types"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func TestIndexerServicer_GetAllIDs(t *testing.T) {
@@ -35,13 +35,13 @@ func TestIndexerServicer_GetAllIDs(t *testing.T) {
 		"nid1": {{Type: "typeB", DeviceID: "keyB"}},
 	}
 
-	store := &mocks.TransactionalBlobStorage{}
+	store := &mocks.Store{}
 	store.On("Search",
 		blobstore.CreateSearchFilter(nil, nil, nil, nil),
 		blobstore.LoadCriteria{LoadValue: false},
 	).Return(blobs, nil)
 	store.On("Commit").Return(nil)
-	fact := &mocks.BlobStorageFactory{}
+	fact := &mocks.StoreFactory{}
 	fact.On("StartTransaction", mock.Anything).Return(store, nil)
 
 	st := reindex.NewStore(fact)

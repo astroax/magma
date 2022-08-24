@@ -17,12 +17,18 @@ import argparse
 import ipaddress
 import sys
 
+from lte.protos.mobilityd_pb2 import (
+    AllocateIPRequest,
+    GWInfo,
+    IPAddress,
+    IPBlock,
+    ReleaseIPRequest,
+    RemoveIPBlockRequest,
+)
+from lte.protos.mobilityd_pb2_grpc import MobilityServiceStub
 from magma.common.rpc_utils import grpc_wrapper
 from magma.subscriberdb.sid import SIDUtils
 from orc8r.protos.common_pb2 import Void
-from lte.protos.mobilityd_pb2 import AllocateIPRequest, \
-    IPAddress, IPBlock, ReleaseIPRequest, RemoveIPBlockRequest, GWInfo
-from lte.protos.mobilityd_pb2_grpc import MobilityServiceStub
 
 
 @grpc_wrapper
@@ -49,6 +55,16 @@ def add_ip_block_handler(client, args):
 def list_ipv4_blocks_handler(client, args):
     resp = client.ListAddedIPv4Blocks(Void())
     print("IPv4 Blocks Assigned:")
+    for block_msg in resp.ip_block_list:
+        ip = ipaddress.ip_address(block_msg.net_address)
+        block = ipaddress.ip_network("%s/%d" % (ip, block_msg.prefix_len))
+        print("\t%s" % block)
+
+
+@grpc_wrapper
+def list_ipv6_blocks_handler(client, args):
+    resp = client.ListAddedIPv6Blocks(Void())
+    print("IPv6 Blocks Assigned:")
     for block_msg in resp.ip_block_list:
         ip = ipaddress.ip_address(block_msg.net_address)
         block = ipaddress.ip_network("%s/%d" % (ip, block_msg.prefix_len))
@@ -135,7 +151,8 @@ def remove_ip_block_handler(client, args):
             ipblock_msg.version = IPBlock.IPV6
         else:
             print(
-                "Error: IP version %d is not supported yet" % ipblock.version)
+                "Error: IP version %d is not supported yet" % ipblock.version,
+            )
             return
         ipblock_msg.net_address = ipblock.network_address.packed
         ipblock_msg.prefix_len = ipblock.prefixlen
@@ -215,26 +232,38 @@ def set_gw_ip_addressk_handler(client, args):
 def main():
     parser = argparse.ArgumentParser(
         description='Management CLI for MobilityService',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
     # Add subcommands
     subparsers = parser.add_subparsers(title='subcommands', dest='cmd')
 
     # add_ip_block
     subparser = subparsers.add_parser(
-        'add_ip_block', help='Add an IP block')
-    subparser.add_argument('ipblock', help='Range of IP addresses,'
-                           ' e.g.  "10.0.0.0/24"')
+        'add_ip_block', help='Add an IP block',
+    )
+    subparser.add_argument(
+        'ipblock', help='Range of IP addresses,'
+        ' e.g.  "10.0.0.0/24"',
+    )
     subparser.set_defaults(func=add_ip_block_handler)
 
     # list_ipv4_blocks
     subparser = subparsers.add_parser(
-        'list_ipv4_blocks', help='List assigned IPv4 blocks')
+        'list_ipv4_blocks', help='List assigned IPv4 blocks',
+    )
     subparser.set_defaults(func=list_ipv4_blocks_handler)
+
+    # list_ipv6_blocks
+    subparser = subparsers.add_parser(
+        'list_ipv6_blocks', help='List assigned IPv6 blocks',
+    )
+    subparser.set_defaults(func=list_ipv6_blocks_handler)
 
     # allocate_ip
     subparser = subparsers.add_parser(
-        'allocate_ip', help='Allocate an IP address')
+        'allocate_ip', help='Allocate an IP address',
+    )
     subparser.add_argument('sid', help='Subscriber ID, e.g. "IMSI12345"')
     subparser.add_argument('apn', help='Access Point Name, e.g. "internet"')
     subparser.add_argument('version', help='Version, e.g. 4')
@@ -242,53 +271,71 @@ def main():
 
     # release_ip
     subparser = subparsers.add_parser(
-        'release_ip', help='Release an IP address')
+        'release_ip', help='Release an IP address',
+    )
     subparser.add_argument('sid', help='Subscriber ID, e.g. "IMSI12345"')
     subparser.add_argument('apn', help='Access Point Name, e.g. "internet"')
-    subparser.add_argument('ip',
-                           help='IP address to release, e.g. "192.168.1.1"')
+    subparser.add_argument(
+        'ip',
+        help='IP address to release, e.g. "192.168.1.1"',
+    )
     subparser.set_defaults(func=release_ip_handler)
 
     # remove_ip_blocks
     subparser = subparsers.add_parser(
-        'remove_ip_blocks', help='Remove specified IP blocks')
-    subparser.add_argument('-f', '--force',
-                           action='store_true',
-                           default=False,
-                           help='If set, forcibly remove all IP blocks')
-    subparser.add_argument('ipblocks',
-                           action='store',
-                           default=(),
-                           nargs=argparse.REMAINDER,
-                           type=ipaddress.ip_network,
-                           help='The IP address block(s) to remove')
+        'remove_ip_blocks', help='Remove specified IP blocks',
+    )
+    subparser.add_argument(
+        '-f', '--force',
+        action='store_true',
+        default=False,
+        help='If set, forcibly remove all IP blocks',
+    )
+    subparser.add_argument(
+        'ipblocks',
+        action='store',
+        default=(),
+        nargs=argparse.REMAINDER,
+        type=ipaddress.ip_network,
+        help='The IP address block(s) to remove',
+    )
     subparser.set_defaults(func=remove_ip_block_handler)
 
     # list_allocated_ips
     subparser = subparsers.add_parser(
-        'list_allocated_ips', help='List allocated IP addresses')
+        'list_allocated_ips', help='List allocated IP addresses',
+    )
     subparser.set_defaults(func=list_allocated_ips_handler)
 
     # get_subscriber_table
     subparser = subparsers.add_parser(
-        'get_subscriber_table', help='Get SubscriberID, IP table')
+        'get_subscriber_table', help='Get SubscriberID, IP table',
+    )
     subparser.set_defaults(func=get_subscriber_ip_table_handler)
 
     # GW info CLI
     # GetGatewayIPInfo
     subparser = subparsers.add_parser(
-        'get_def_gw', help='Get gw info')
+        'get_def_gw', help='Get gw info',
+    )
     subparser.set_defaults(func=get_gw_info_handler)
 
     # SetGatewayIpAddress
     subparser = subparsers.add_parser(
-        'set_def_gw', help='set default gw IP address')
-    subparser.add_argument('gwip', help='GW IP address,'
-                           ' e.g.  "10.0.0.1"')
-    subparser.add_argument('gw_mac', help='GW MAC address,'
-                                        ' e.g.  "11:22:33:44:55:66"')
-    subparser.add_argument('gw_vlan', help='SGi vlan for the GW,'
-                                          ' e.g.  "1"')
+        'set_def_gw', help='set default gw IP address',
+    )
+    subparser.add_argument(
+        'gwip', help='GW IP address,'
+        ' e.g.  "10.0.0.1"',
+    )
+    subparser.add_argument(
+        'gw_mac', help='GW MAC address,'
+        ' e.g.  "11:22:33:44:55:66"',
+    )
+    subparser.add_argument(
+        'gw_vlan', help='SGi vlan for the GW,'
+        ' e.g.  "1"',
+    )
 
     subparser.set_defaults(func=set_gw_ip_addressk_handler)
 

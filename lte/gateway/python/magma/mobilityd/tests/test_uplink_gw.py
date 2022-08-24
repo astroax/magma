@@ -12,12 +12,13 @@ limitations under the License.
 """
 import ipaddress
 import logging
+import subprocess
 import unittest
 from collections import defaultdict
-import subprocess
 
-from magma.mobilityd.uplink_gw import UplinkGatewayInfo, NO_VLAN
 from lte.protos.mobilityd_pb2 import GWInfo, IPAddress
+from magma.mobilityd import uplink_gw
+from magma.mobilityd.uplink_gw import NO_VLAN, UplinkGatewayInfo
 
 LOG = logging.getLogger('mobilityd.def_gw.test')
 LOG.isEnabledFor(logging.DEBUG)
@@ -25,8 +26,10 @@ LOG.isEnabledFor(logging.DEBUG)
 
 def _get_gw_info(ip, mac="", vlan=NO_VLAN):
     ip_addr = ipaddress.ip_address(ip)
-    gw_ip = IPAddress(version=IPAddress.IPV4,
-                      address=ip_addr.packed)
+    gw_ip = IPAddress(
+        version=IPAddress.IPV4,
+        address=ip_addr.packed,
+    )
     return GWInfo(ip=gw_ip, mac=mac, vlan=vlan)
 
 
@@ -57,9 +60,11 @@ class DefGwTest(unittest.TestCase):
         self.dhcp_gw_info.read_default_gw()
 
         def_gw_cmd = "ip route show |grep default| awk '{print $3}'"
-        p = subprocess.Popen([def_gw_cmd],
-                             stdout=subprocess.PIPE,
-                             shell=True)
+        p = subprocess.Popen(
+            [def_gw_cmd],
+            stdout=subprocess.PIPE,
+            shell=True,
+        )
         def_ip = p.stdout.read().decode("utf-8").strip()
 
         self.assertEqual(self.dhcp_gw_info.get_gw_ip(), str(def_ip))
@@ -152,7 +157,111 @@ class DefGwTest(unittest.TestCase):
         gw4 = _get_gw_info(ip4, mac4, vlan4)
         self.dhcp_gw_info.update_mac(ip4, mac4, vlan4)
 
+        ip5 = "2020::1"
+        vlan5 = "4"
+        mac5 = "11:22:33:44:55:66"
+        gw5 = _get_gw_info(ip5, mac5, vlan5)
+        self.dhcp_gw_info.update_mac(ip5, mac5, vlan5, IPAddress.IPV6)
+
         gw_list = self.dhcp_gw_info.get_all_router_ips()
 
-        expeected = gw_list_to_set([gw1, gw2, gw3, gw4])
-        self.assertEqual(gw_list_to_set(gw_list), expeected)
+        expected = gw_list_to_set([gw1, gw2, gw3, gw4, gw5])
+        self.assertEqual(gw_list_to_set(gw_list), expected)
+
+
+class MockedNetInterface:
+    AF_INET = 2
+    AF_INET6 = 10
+
+    def __init__(self):
+        pass
+
+    def gateways(self):
+        return {
+            'default': {
+                self.AF_INET: ('10.0.2.3', 'eth0'),
+                self.AF_INET6: ('2002::1', 'eth0'),
+            },
+
+            2: [('10.0.2.2', 'eth0', True)],
+        }
+
+
+class DefGwTestIpv6(unittest.TestCase):
+    """
+    Validate v6 router setting.
+    """
+
+    @classmethod
+    def setUpClass(cls, *_):
+        """
+        Starts the thread which launches ryu apps
+
+        Create a testing bridge, add a port, setup the port interfaces. Then
+        launch the ryu apps for testing pipelined. Gets the references
+        to apps launched by using futures.
+        """
+        super(DefGwTestIpv6, cls).setUpClass()
+        uplink_gw.netifaces = MockedNetInterface()
+
+    def setUp(self):
+        self.gw_store = defaultdict(str)
+        self.dhcp_gw_info = UplinkGatewayInfo(self.gw_store)
+
+    def test_gw_ip_for_DHCP(self):
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(), None)
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(), None)
+
+    def test_gw_ip_for_Ip_pool(self):
+        self.dhcp_gw_info.read_default_gw()
+        def_ip = '10.0.2.3'
+
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(), str(def_ip))
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(), '')
+        mac1 = "11:22:33:44:55:66"
+        self.dhcp_gw_info.update_mac(def_ip, mac1)
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(), str(def_ip))
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(), mac1)
+
+        # updating IP with same address shld keep mac
+        self.dhcp_gw_info.update_ip(def_ip)
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(), str(def_ip))
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(), mac1)
+
+        ip1 = "1.2.3.4"
+        self.dhcp_gw_info.update_ip(ip1)
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(), '')
+
+    def test_gw_ip_for_Ip_pool_v6(self):
+        self.dhcp_gw_info.read_default_gw_v6()
+        def_ip_v6 = '2002::1'
+
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(version=IPAddress.IPV6), str(def_ip_v6))
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(version=IPAddress.IPV6), '')
+        mac6 = "11:22:33:44:55:66"
+        self.dhcp_gw_info.update_mac(def_ip_v6, mac6, version=IPAddress.IPV6)
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(version=IPAddress.IPV6), str(def_ip_v6))
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(version=IPAddress.IPV6), mac6)
+
+        self.dhcp_gw_info.read_default_gw()
+        def_ip = '10.0.2.3'
+
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(), str(def_ip))
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(), '')
+        mac4 = "11:22:33:44:55:44"
+        self.dhcp_gw_info.update_mac(def_ip, mac4)
+        self.assertEqual(self.dhcp_gw_info.get_gw_ip(), str(def_ip))
+        self.assertEqual(self.dhcp_gw_info.get_gw_mac(), mac4)
+
+        ip4 = def_ip
+        mac4 = mac4
+        gw4 = _get_gw_info(ip4, mac4)
+
+        ip6 = def_ip_v6
+        mac6 = mac6
+        gw6 = _get_gw_info(ip6, mac6)
+
+        gw_list = self.dhcp_gw_info.get_all_router_ips()
+
+        expected = gw_list_to_set([gw4, gw6])
+        self.assertEqual(gw_list_to_set(gw_list), expected)

@@ -22,13 +22,13 @@ from s1ap_utils import MagmadUtil
 class TestAttachDetachWithSctpdRestart(unittest.TestCase):
     def setUp(self):
         self._s1ap_wrapper = s1ap_wrapper.TestWrapper(
-            stateless_mode=MagmadUtil.stateless_cmds.ENABLE
+            stateless_mode=MagmadUtil.stateless_cmds.ENABLE,
         )
 
     def tearDown(self):
         self._s1ap_wrapper.cleanup()
 
-    def test_attach_detach(self):
+    def test_attach_detach_with_sctpd_restart(self):
         """
         Attach/detach test with two UEs and Sctpd restarting after each attach.
         A new attach has to happen after Sctpd restarts before UE can detach.
@@ -92,7 +92,7 @@ class TestAttachDetachWithSctpdRestart(unittest.TestCase):
                 req.ue_id,
             )
             self._s1ap_wrapper.s1_util.detach(
-                req.ue_id, detach_type[i], wait_for_s1[i]
+                req.ue_id, detach_type[i], wait_for_s1[i],
             )
 
             if i == 0:

@@ -16,21 +16,28 @@ limitations under the License.
 # Standard Python and PyPi modules
 import argparse
 import ipaddress
-import iperf3
 import logging
 import logging.handlers
 import multiprocessing
 import os
-import pyroute2
 import socketserver
 import subprocess
 import sys
 import threading
+import time
 import traceback
 
+import iperf3
+import pyroute2
 # Custom modules
-from util.traffic_messages import TrafficServerInstance, TrafficRequest, \
-    TrafficRequestType, TrafficResponse, TrafficResponseType, TrafficMessage
+from util.traffic_messages import (
+    TrafficMessage,
+    TrafficRequest,
+    TrafficRequestType,
+    TrafficResponse,
+    TrafficResponseType,
+    TrafficServerInstance,
+)
 
 '''
 Overview of the system
@@ -99,6 +106,7 @@ class TrafficTestServerDispatcher(socketserver.TCPServer):
     create with the iperf3 module must run on the main thread, else it will run
     into a seg fault in the iperf3 binary.
     '''
+
     def __init__(self, daemon, host, port, loglevel):
         ''' Initialize the TrafficTestServerDispatcher
 
@@ -120,7 +128,8 @@ class TrafficTestServerDispatcher(socketserver.TCPServer):
                 sys.exit()
 
         super(TrafficTestServerDispatcher, self).__init__(
-            (host.exploded, port), TrafficTestServer)
+            (host.exploded, port), TrafficTestServer,
+        )
 
         pid = os.getpid()
 
@@ -132,8 +141,11 @@ class TrafficTestServerDispatcher(socketserver.TCPServer):
         # Set up log handling
         log_handler = logging.handlers.SysLogHandler(address='/dev/log') \
             if daemon else logging.StreamHandler()
-        log_handler.setFormatter(logging.Formatter(
-            log_format, log_time_format))
+        log_handler.setFormatter(
+            logging.Formatter(
+                log_format, log_time_format,
+            ),
+        )
 
         # Set up logging, use a different logger for each dispatcher process
         self._base_logger = logging.getLogger(__name__ + '(%d)' % pid)
@@ -144,7 +156,8 @@ class TrafficTestServerDispatcher(socketserver.TCPServer):
         # Now initialize dispatcher
         self.log.debug('Initializing dispatcher...')
         self.log.log(
-            getattr(logging, loglevel), 'Setting log level to: %s', loglevel)
+            getattr(logging, loglevel), 'Setting log level to: %s', loglevel,
+        )
         self._procs = {}  # Process: (Connection, Thread)
         self._procs_lock = threading.RLock()  # Serverside lock for procs map
 
@@ -161,7 +174,8 @@ class TrafficTestServerDispatcher(socketserver.TCPServer):
         # Broadcast
         self.log.info(
             'Dispatcher running on %s:%d (%sdaemon mode)',
-            host.exploded, port, '' if daemon else 'non-')
+            host.exploded, port, '' if daemon else 'non-',
+        )
 
     def _handle_server_messaging(self, conn, proc):
         ''' Handle the connection with each forked server on a dedicated
@@ -237,17 +251,20 @@ class TrafficTestServerDispatcher(socketserver.TCPServer):
         # General-purpose log, to indicate the server and connection
         log = logging.LoggerAdapter(
             self._base_logger,
-            {'remote': '--%s:%s' % (remote_ip, remote_port)})
+            {'remote': '--%s:%s' % (remote_ip, remote_port)},
+        )
 
         # Logging inbound messages
         login = logging.LoggerAdapter(
             self._base_logger,
-            {'remote': '<=%s:%s' % (remote_ip, remote_port)})
+            {'remote': '<=%s:%s' % (remote_ip, remote_port)},
+        )
 
         # Logging outbound messages
         logout = logging.LoggerAdapter(
             self._base_logger,
-            {'remote': '=>%s:%s' % (remote_ip, remote_port)})
+            {'remote': '=>%s:%s' % (remote_ip, remote_port)},
+        )
 
         return log, login, logout
 
@@ -260,9 +277,11 @@ class TrafficTestServerDispatcher(socketserver.TCPServer):
         ''' Fork off a server to serve the request '''
         dconn, sconn = multiprocessing.Pipe()
         proc = multiprocessing.Process(
-            target=self.finish_request, args=(sconn, request, client_address))
+            target=self.finish_request, args=(sconn, request, client_address),
+        )
         thread = threading.Thread(
-            target=self._handle_server_messaging, args=(dconn, proc))
+            target=self._handle_server_messaging, args=(dconn, proc),
+        )
 
         proc_tuple = (dconn, thread)
         with self._procs_lock:
@@ -315,6 +334,7 @@ class TrafficTestServer(socketserver.StreamRequestHandler):
     allowing for message passing between the dispatcher and each server for
     events like shutdown.
     '''
+
     def __init__(self, connection, *args):
         ''' Create a server with some additional arguments
 
@@ -358,7 +378,8 @@ class TrafficTestServer(socketserver.StreamRequestHandler):
                         ' client must have the same IP as the server to' \
                         ' initiate SHUTDOWN procedure'
                     self.send_resp(
-                        TrafficRequestType.INFO, payload=payload)
+                        TrafficRequestType.INFO, payload=payload,
+                    )
 
             elif msg is TrafficRequestType.START:
                 self.log.debug('Waiting to store START message')
@@ -372,13 +393,19 @@ class TrafficTestServer(socketserver.StreamRequestHandler):
                     driver = TrafficTestDriver(self, payload)
                     threading.Thread(target=driver.run).start()
                 except Exception as e:
-                    self.log.error(''.join(traceback.format_exception(
-                        type(e), e, sys.exc_info()[2])))
+                    self.log.error(
+                        ''.join(
+                            traceback.format_exception(
+                                type(e), e, sys.exc_info()[2],
+                            ),
+                        ),
+                    )
 
             else:
                 self.log.warning(
                     'Message of type %s received but not recognized.'
-                    ' Perhaps the system needs a reboot?', msg.name)
+                    ' Perhaps the system needs a reboot?', msg.name,
+                )
 
         # Ending due to rfile abruptly closing
         self.log.warning('Ending handling due to abruptly closed connection')
@@ -490,14 +517,22 @@ class TrafficTestDriver(object):
         self._server = server
         self._instances = instances
         self._results = None
+        self._trfserver_ipv6 = '3001::2'
+        self._trfserver_ipv4 = '192.168.129.42'
+        self._agw_ipv6 = '3001::10'
+        self._agw_ip_sub = 64
 
         self._setup_iperf3()
 
-    def _get_macs(self):
+    def _get_macs(self, version=4):
         ''' Retrieves the MAC addresses of the associated test servers, based
         on the information of the instances '''
         ip = pyroute2.IPRoute()
-        mac = ip.link('get', index=ip.link_lookup(ifname='eth2')[0])[0] \
+        if version == 4:
+            intf = 'eth2'
+        else:
+            intf = 'eth3'
+        mac = ip.link('get', index=ip.link_lookup(ifname=intf)[0])[0] \
             .get_attr('IFLA_ADDRESS')
 
         return (mac,) * len(self._instances)
@@ -533,9 +568,15 @@ class TrafficTestDriver(object):
         '''
         # Constructing the subprocess call
         params = ('-B', iperf.bind_address, '-p', str(iperf.port), '-J')
+        if ipaddress.ip_address(iperf.bind_address).version == 6:
+            params += ('-6',)
         if 'c' == iperf.role:
             params = ('-c', iperf.server_hostname) + params
             params += ('-b', str(iperf.bandwidth), '-t', str(iperf.duration))
+            # For ipv6 there is delay in configuring ipv6 address on eth3
+            # interface of test vm, so sleep for 5 secs
+            if ipaddress.ip_address(iperf.bind_address).version == 6:
+                time.sleep(5)
             if 'udp' == iperf.protocol:
                 params += ('-u',)
         else:
@@ -557,12 +598,26 @@ class TrafficTestDriver(object):
         for instance in self._instances:
             if instance.is_uplink:
                 iperf = iperf3.Server()
-                iperf.bind_address = '192.168.129.42'
+                ip_str = ipaddress.ip_address(instance.ip)
+                if ip_str.version == 4:
+                    print("Running ipv4")
+                    iperf.bind_address = self._trfserver_ipv4
+                else:
+                    print("Running ipv6")
+                    iperf.bind_address = self._trfserver_ipv6
+                    os.system('sudo /sbin/ip -6 route add %s/%d dev eth3' % (self._agw_ipv6, self._agw_ip_sub))
+                    os.system('sudo /sbin/ip -6 route add %s via %s dev eth3' % (instance.ip.exploded, self._agw_ipv6))
                 iperf.port = TrafficTestDriver._get_port()
             else:
                 iperf = iperf3.Client()
                 iperf.bandwidth = 10 ** 7  # 10 Mbps
-                iperf.bind_address = '192.168.129.42'
+                ip_str = ipaddress.ip_address(instance.ip)
+                if ip_str.version == 4:
+                    iperf.bind_address = self._trfserver_ipv4
+                else:
+                    iperf.bind_address = self._trfserver_ipv6
+                    os.system('sudo /sbin/ip -6 route add %s/%d dev eth3' % (self._agw_ipv6, self._agw_ip_sub))
+                    os.system('sudo /sbin/ip -6 route add %s via %s dev eth3' % (instance.ip.exploded, self._agw_ipv6))
                 iperf.duration = instance.duration
                 iperf.port = instance.port
                 iperf.protocol = 'udp' if instance.is_udp else 'tcp'
@@ -581,10 +636,19 @@ class TrafficTestDriver(object):
         self._barrier.reset()
 
         ips = (
-            ipaddress.ip_address(iperf.bind_address) for iperf in self._iperfs)
+            ipaddress.ip_address(iperf.bind_address) for iperf in self._iperfs
+        )
         ports = (
-            iperf.port if 's' == iperf.role else 0 for iperf in self._iperfs)
-        macs = self._get_macs()
+            iperf.port if 's' == iperf.role else 0 for iperf in self._iperfs
+        )
+        # For now multiple UEs with mixed ip addresses is not supported
+        # so check the version of the first ip address
+        # TODO: Add support for handling multiple UE with mixed ipv4 and ipv6
+        # addresses
+        for iperf in self._iperfs:
+            ip_version = ipaddress.ip_address(iperf.bind_address).version
+            break
+        macs = self._get_macs(ip_version)
 
         # Reshape into argument tuples
         tuples = zip(ips, ports, macs)
@@ -592,47 +656,59 @@ class TrafficTestDriver(object):
         # Create the TrafficResponse, Server type message
         server_instances = [
             TrafficServerInstance(*args)
-            for args in tuples]
-        self._server.send_resp(TrafficResponseType.SERVER, id=id(self),
-                               payload=server_instances)
+            for args in tuples
+        ]
+        self._server.send_resp(
+            TrafficResponseType.SERVER, id=id(self),
+            payload=server_instances,
+        )
 
         # Now wait for START message
         self._server.wait_for_start_msg(self)
 
         self._server.log.debug(
-            'Ready to start iperf3 servers for driver %d', id(self))
+            'Ready to start iperf3 servers for driver %d', id(self),
+        )
         results = ()
         threads = ()
         for iperf in self._iperfs:
             buf = []
             thread = threading.Thread(
-                target=self._run_iperf3, args=(buf, iperf))
+                target=self._run_iperf3, args=(buf, iperf),
+            )
             results += (buf,)
             threads += (thread,)
             thread.start()
-        self._server.log.debug('Driver %d has started %d iperf3 servers',
-                                id(self), len(self._iperfs))
+        self._server.log.debug(
+            'Driver %d has started %d iperf3 servers',
+            id(self), len(self._iperfs),
+        )
 
         # Send STARTED message to let client know that we've spun everything up
         self._server.send_resp(
-            TrafficResponseType.STARTED, id=id(self))
+            TrafficResponseType.STARTED, id=id(self),
+        )
 
         # Now wait for the threads to hit the barrier and join
         self._barrier.wait()
         for thread in threads:
             thread.join()
         self._server.log.debug(
-            'Driver %d has joined its iperf3 servers', id(self))
+            'Driver %d has joined its iperf3 servers', id(self),
+        )
 
         # Convert from mutable list to an immutable tuple for storing results
         self._results = tuple(sum(results, []))
 
         # Create and send the RESULTS message
-        self._server.send_resp(TrafficResponseType.RESULTS, id=id(self),
-                               payload=self._results)
+        self._server.send_resp(
+            TrafficResponseType.RESULTS, id=id(self),
+            payload=self._results,
+        )
 
         self._server.log.debug(
-            'Driver %d has cached and transmitted results', id(self))
+            'Driver %d has cached and transmitted results', id(self),
+        )
 
         # Driver thread joins here, resources should be freed after this
 
@@ -641,30 +717,40 @@ def main():
     parser = argparse.ArgumentParser()
 
     # Whether to daemonize
-    parser.add_argument('-d', '--daemon', action='store_true', default=False,
-                        help='Specify to run server as daemon. Default: False')
+    parser.add_argument(
+        '-d', '--daemon', action='store_true', default=False,
+        help='Specify to run server as daemon. Default: False',
+    )
 
     # The IP address to bind to
-    parser.add_argument('host', default=ipaddress.ip_address('127.0.0.1'),
-                        nargs='?', type=ipaddress.ip_address,
-                        help='Specify IPv4/6 bind address. Default: 127.0.0.1')
+    parser.add_argument(
+        'host', default=ipaddress.ip_address('127.0.0.1'),
+        nargs='?', type=ipaddress.ip_address,
+        help='Specify IPv4/6 bind address. Default: 127.0.0.1',
+    )
 
     # The level of logging
     log_level_choices = (
-        'NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
-    parser.add_argument('-L', '--log-level', choices=log_level_choices,
-                        default='DEBUG',
-                        help='Specify a log level for the system')
+        'NOTSET', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL',
+    )
+    parser.add_argument(
+        '-L', '--log-level', choices=log_level_choices,
+        default='DEBUG',
+        help='Specify a log level for the system',
+    )
 
     # 62462 is 'MAGMA' in telephone keypad format
-    parser.add_argument('port', default=62462, nargs='?', type=int,
-                        help='Specify alternative port. Default: 62462')
+    parser.add_argument(
+        'port', default=62462, nargs='?', type=int,
+        help='Specify alternative port. Default: 62462',
+    )
 
     args = parser.parse_args()
 
     # Start up dispatcher and run it
     dispatcher = TrafficTestServerDispatcher(
-        args.daemon, args.host, args.port, args.log_level)
+        args.daemon, args.host, args.port, args.log_level,
+    )
     dispatcher.serve_forever()
 
 

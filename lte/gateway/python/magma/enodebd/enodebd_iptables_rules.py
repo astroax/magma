@@ -15,17 +15,18 @@ limitations under the License.
 
 
 import asyncio
-from magma.enodebd.logger import EnodebdLogger as logger
+import re
 import shlex
 import subprocess
-import re
 from typing import List
+
 from magma.common.misc_utils import (
     IpPreference,
+    get_if_ip_with_netmask,
     get_ip_from_if,
-    get_if_ip_with_netmask
 )
 from magma.configuration.service_configs import load_service_config
+from magma.enodebd.logger import EnodebdLogger as logger
 
 IPTABLES_RULE_FMT = """sudo iptables -t nat
     -{add} PREROUTING
@@ -52,16 +53,17 @@ def does_iface_config_match_expected(ip: str, netmask: str) -> bool:
 
 
 def _get_prerouting_rules(output: str) -> List[str]:
-    prerouting_rules = output.split('\n\n')[0]
-    prerouting_rules = prerouting_rules.split('\n')
+    prerouting_rules = output.split('\n\n')[0].split('\n')
     # Skipping the first two lines since it contains only column names
     prerouting_rules = prerouting_rules[2:]
     return prerouting_rules
 
 
-async def check_and_apply_iptables_rules(port: str,
-                                         enodebd_public_ip: str,
-                                         enodebd_ip: str) -> None:
+async def check_and_apply_iptables_rules(
+    port: str,
+    enodebd_public_ip: str,
+    enodebd_ip: str,
+) -> None:
     command = 'sudo iptables -t nat -L'
     output = subprocess.run(command, shell=True, stdout=subprocess.PIPE, check=True)
     command_output = output.stdout.decode('utf-8').strip()
@@ -74,31 +76,47 @@ async def check_and_apply_iptables_rules(port: str,
                 enodebd_public_ip,
                 enodebd_ip,
                 add=True,
-            )
+            ),
         )
     else:
         # Checks each rule in PREROUTING Chain
-        check_rules(prerouting_rules, port, enodebd_public_ip, enodebd_ip)
+        expected_rules_present = check_rules(prerouting_rules, port, enodebd_public_ip, enodebd_ip)
+        if not expected_rules_present:
+            logger.info('Configuring Iptables rule')
+            await run(
+                get_iptables_rule(
+                    port,
+                    enodebd_public_ip,
+                    enodebd_ip,
+                    add=True,
+                ),
+            )
 
 
-def check_rules(prerouting_rules: List[str],
-                port: str,
-                enodebd_public_ip: str,
-                private_ip: str) -> None:
+def check_rules(
+    prerouting_rules: List[str],
+    port: str,
+    enodebd_public_ip: str,
+    private_ip: str,
+) -> bool:
     unexpected_rules = []
+    expected_rules_present = False
     pattern = r'DNAT\s+tcp\s+--\s+anywhere\s+{pub_ip}\s+tcp\s+dpt:{dport} to:{ip}'.format(
-                pub_ip=enodebd_public_ip,
-                dport=port,
-                ip=private_ip,
+        pub_ip=enodebd_public_ip,
+        dport=port,
+        ip=private_ip,
     )
     for rule in prerouting_rules:
         match = re.search(pattern, rule)
         if not match:
             unexpected_rules.append(rule)
+        else:
+            expected_rules_present = True
     if unexpected_rules:
         logger.warning('The following Prerouting rule(s) are unexpected')
         for rule in unexpected_rules:
             logger.warning(rule)
+    return expected_rules_present
 
 
 async def run(cmd):
@@ -108,8 +126,10 @@ async def run(cmd):
     await proc.communicate()
     if proc.returncode != 0:
         # This can happen because the NAT prerouting rule didn't exist
-        logger.error('Possible error running async subprocess: %s exited with '
-                     'return code [%d].', cmd, proc.returncode)
+        logger.error(
+            'Possible error running async subprocess: %s exited with '
+            'return code [%d].', cmd, proc.returncode,
+        )
     return proc.returncode
 
 
@@ -138,7 +158,7 @@ async def set_enodebd_iptables_rule():
         logger.warning(
             'The IP address of the %s interface is %s. The '
             'expected IP addresses are %s',
-            interface, enodebd_ip, str(EXPECTED_IP4)
+            interface, enodebd_ip, str(EXPECTED_IP4),
         )
     await check_and_apply_iptables_rules(
         port,

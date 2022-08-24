@@ -14,26 +14,26 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+
+	"github.com/labstack/echo/v4"
+	"github.com/thoas/go-funk"
 
 	"magma/lte/cloud/go/lte"
 	"magma/lte/cloud/go/serdes"
 	lte_models "magma/lte/cloud/go/services/lte/obsidian/models"
 	policydb_models "magma/lte/cloud/go/services/policydb/obsidian/models"
 	"magma/orc8r/cloud/go/models"
-	"magma/orc8r/cloud/go/obsidian"
 	"magma/orc8r/cloud/go/orc8r"
 	"magma/orc8r/cloud/go/services/configurator"
+	"magma/orc8r/cloud/go/services/obsidian"
 	"magma/orc8r/cloud/go/services/orchestrator/obsidian/handlers"
 	orc8r_models "magma/orc8r/cloud/go/services/orchestrator/obsidian/models"
 	"magma/orc8r/cloud/go/services/state"
 	"magma/orc8r/cloud/go/storage"
-	merrors "magma/orc8r/lib/go/errors"
-
-	"github.com/labstack/echo"
-	"github.com/pkg/errors"
-	"github.com/thoas/go-funk"
+	"magma/orc8r/lib/go/merrors"
 )
 
 const (
@@ -48,6 +48,7 @@ const (
 	ManageNetworkDNSRecordByDomainPath  = ManageNetworkDNSRecordsPath + obsidian.UrlSep + ":domain"
 	ManageNetworkCellularPath           = ManageNetworkPath + obsidian.UrlSep + "cellular"
 	ManageNetworkCellularEpcPath        = ManageNetworkCellularPath + obsidian.UrlSep + "epc"
+	ManageNetworkCellularNgcPath        = ManageNetworkCellularPath + obsidian.UrlSep + "ngc"
 	ManageNetworkCellularRanPath        = ManageNetworkCellularPath + obsidian.UrlSep + "ran"
 	ManageNetworkCellularFegNetworkID   = ManageNetworkCellularPath + obsidian.UrlSep + "feg_network_id"
 	ManageNetworkSubscriberPath         = ManageNetworkPath + obsidian.UrlSep + "subscriber_config"
@@ -74,6 +75,7 @@ const (
 	ManageGatewayCellularPath         = ManageGatewayPath + obsidian.UrlSep + "cellular"
 	ManageGatewayCellularEpcPath      = ManageGatewayCellularPath + obsidian.UrlSep + "epc"
 	ManageGatewayCellularRanPath      = ManageGatewayCellularPath + obsidian.UrlSep + "ran"
+	ManageGatewayCellularNgcPath      = ManageGatewayCellularPath + obsidian.UrlSep + "ngc"
 	ManageGatewayCellularNonEpsPath   = ManageGatewayCellularPath + obsidian.UrlSep + "non_eps"
 	ManageGatewayCellularDNSPath      = ManageGatewayCellularPath + obsidian.UrlSep + "dns"
 	ManageGatewayDNSRecordsPath       = ManageGatewayCellularDNSPath + obsidian.UrlSep + "records"
@@ -114,6 +116,7 @@ func GetHandlers() []obsidian.Handler {
 		{Path: ListGatewayPoolsPath, Methods: obsidian.GET, HandlerFunc: listGatewayPoolsHandler},
 		{Path: ListGatewayPoolsPath, Methods: obsidian.POST, HandlerFunc: createGatewayPoolHandler},
 		{Path: ManageGatewayPoolsPath, Methods: obsidian.GET, HandlerFunc: getGatewayPoolHandler},
+		{Path: ManageGatewayPoolsPath, Methods: obsidian.PUT, HandlerFunc: updateGatewayPoolHandler},
 		{Path: ManageGatewayPoolsPath, Methods: obsidian.DELETE, HandlerFunc: deleteGatewayPoolHandler},
 
 		{Path: ManageNetworkApnPath, Methods: obsidian.GET, HandlerFunc: listApns},
@@ -136,6 +139,7 @@ func GetHandlers() []obsidian.Handler {
 	ret = append(ret, handlers.GetPartialNetworkHandlers(ManageNetworkDNSRecordsPath, new(orc8r_models.NetworkDNSRecords), "", serdes.Network)...)
 	ret = append(ret, handlers.GetPartialNetworkHandlers(ManageNetworkCellularPath, &lte_models.NetworkCellularConfigs{}, lte.CellularNetworkConfigType, serdes.Network)...)
 	ret = append(ret, handlers.GetPartialNetworkHandlers(ManageNetworkCellularEpcPath, &lte_models.NetworkEpcConfigs{}, "", serdes.Network)...)
+	ret = append(ret, handlers.GetPartialNetworkHandlers(ManageNetworkCellularNgcPath, &lte_models.NetworkNgcConfigs{}, "", serdes.Network)...)
 	ret = append(ret, handlers.GetPartialNetworkHandlers(ManageNetworkCellularRanPath, &lte_models.NetworkRanConfigs{}, "", serdes.Network)...)
 	ret = append(ret, handlers.GetPartialNetworkHandlers(ManageNetworkCellularFegNetworkID, new(lte_models.FegNetworkID), "", serdes.Network)...)
 	ret = append(ret, handlers.GetPartialNetworkHandlers(ManageNetworkSubscriberPath, &policydb_models.NetworkSubscriberConfig{}, "", serdes.Network)...)
@@ -149,6 +153,7 @@ func GetHandlers() []obsidian.Handler {
 	ret = append(ret, handlers.GetPartialGatewayHandlers(ManageGatewayCellularPath, &lte_models.GatewayCellularConfigs{}, serdes.Entity)...)
 	ret = append(ret, handlers.GetPartialGatewayHandlers(ManageGatewayCellularEpcPath, &lte_models.GatewayEpcConfigs{}, serdes.Entity)...)
 	ret = append(ret, handlers.GetPartialGatewayHandlers(ManageGatewayCellularRanPath, &lte_models.GatewayRanConfigs{}, serdes.Entity)...)
+	ret = append(ret, handlers.GetPartialGatewayHandlers(ManageGatewayCellularNgcPath, &lte_models.GatewayNgcConfigs{}, serdes.Entity)...)
 	ret = append(ret, handlers.GetPartialGatewayHandlers(ManageGatewayCellularNonEpsPath, &lte_models.GatewayNonEpsConfigs{}, serdes.Entity)...)
 	ret = append(ret, handlers.GetPartialGatewayHandlers(ManageGatewayCellularDNSPath, &lte_models.GatewayDNSConfigs{}, serdes.Entity)...)
 	ret = append(ret, handlers.GetPartialGatewayHandlers(ManageGatewayDNSRecordsPath, &lte_models.GatewayDNSRecords{}, serdes.Entity)...)
@@ -173,29 +178,34 @@ func getGateway(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
-	magmadModel, nerr := handlers.LoadMagmadGateway(nid, gid)
+	magmadModel, nerr := handlers.LoadMagmadGateway(reqCtx, nid, gid)
 	if nerr != nil {
 		return nerr
 	}
 
 	ent, err := configurator.LoadEntity(
+		reqCtx,
 		nid, lte.CellularGatewayEntityType, gid,
 		configurator.EntityLoadCriteria{LoadConfig: true, LoadAssocsFromThis: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "failed to load cellular gateway"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to load cellular gateway: %w", err))
 	}
 
+	checkedInRecently := lte_models.GatewayCheckedInRecently(orc8r_models.LastGatewayCheckInWasRecent(magmadModel.Status, magmadModel.Magmad))
 	ret := &lte_models.LteGateway{
 		ID:                     magmadModel.ID,
 		Name:                   magmadModel.Name,
 		Description:            magmadModel.Description,
 		Device:                 magmadModel.Device,
+		RegistrationInfo:       magmadModel.RegistrationInfo,
 		Status:                 magmadModel.Status,
 		Tier:                   magmadModel.Tier,
 		Magmad:                 magmadModel.Magmad,
+		CheckedInRecently:      &checkedInRecently,
 		ConnectedEnodebSerials: lte_models.EnodebSerials{},
 		ApnResources:           lte_models.ApnResources{},
 	}
@@ -208,9 +218,9 @@ func getGateway(c echo.Context) error {
 		case lte.CellularEnodebEntityType:
 			ret.ConnectedEnodebSerials = append(ret.ConnectedEnodebSerials, tk.Key)
 		case lte.APNResourceEntityType:
-			e, err := configurator.LoadEntity(nid, tk.Type, tk.Key, configurator.EntityLoadCriteria{LoadConfig: true}, serdes.Entity)
+			e, err := configurator.LoadEntity(reqCtx, nid, tk.Type, tk.Key, configurator.EntityLoadCriteria{LoadConfig: true}, serdes.Entity)
 			if err != nil {
-				return errors.Wrap(err, "error loading apn resource entity")
+				return fmt.Errorf("error loading apn resource entity: %w", err)
 			}
 			apnResource := (&lte_models.ApnResource{}).FromEntity(e)
 			ret.ApnResources[string(apnResource.ApnName)] = *apnResource
@@ -238,19 +248,21 @@ func deleteGateway(c echo.Context) error {
 	}
 
 	var deletes storage.TKs
-	deletes = append(deletes, storage.TypeAndKey{Type: lte.CellularGatewayEntityType, Key: gid})
+	deletes = append(deletes, storage.TK{Type: lte.CellularGatewayEntityType, Key: gid})
 
+	reqCtx := c.Request().Context()
 	gw, err := configurator.LoadEntity(
+		reqCtx,
 		nid, lte.CellularGatewayEntityType, gid,
 		configurator.EntityLoadCriteria{LoadAssocsFromThis: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "error loading existing cellular gateway"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("error loading existing cellular gateway: %w", err))
 	}
 	deletes = append(deletes, gw.Associations.Filter(lte.APNResourceEntityType)...)
 
-	err = handlers.DeleteMagmadGateway(nid, gid, deletes)
+	err = handlers.DeleteMagmadGateway(reqCtx, nid, gid, deletes)
 	if err != nil {
 		return makeErr(err)
 	}
@@ -298,21 +310,43 @@ func listEnodebs(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	pageSize, pageToken, err := obsidian.GetPaginationParams(c)
+	if err != nil {
+		return err
+	}
 
-	ents, err := configurator.LoadAllEntitiesOfType(
-		nid, lte.CellularEnodebEntityType,
-		configurator.EntityLoadCriteria{LoadMetadata: true, LoadConfig: true, LoadAssocsToThis: true},
+	ents, nextPageToken, err := configurator.LoadAllEntitiesOfType(
+		c.Request().Context(),
+		nid,
+		lte.CellularEnodebEntityType,
+		configurator.EntityLoadCriteria{
+			LoadMetadata:     true,
+			LoadConfig:       true,
+			LoadAssocsToThis: true,
+			PageSize:         uint32(pageSize),
+			PageToken:        pageToken,
+		},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
-	ret := make(map[string]*lte_models.Enodeb, len(ents))
-	for _, ent := range ents {
-		ret[ent.Key] = (&lte_models.Enodeb{}).FromBackendModels(ent)
+	count, err := configurator.CountEntitiesOfType(c.Request().Context(), nid, lte.CellularEnodebEntityType)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
-	return c.JSON(http.StatusOK, ret)
+	enodebs := make(map[string]*lte_models.Enodeb, len(ents))
+	for _, ent := range ents {
+		enodebs[ent.Key] = (&lte_models.Enodeb{}).FromBackendModels(ent)
+	}
+	token := lte_models.PageToken(nextPageToken)
+	paginatedEnodebs := &lte_models.PaginatedEnodebs{
+		Enodebs:    enodebs,
+		PageToken:  &token,
+		TotalCount: count,
+	}
+	return c.JSON(http.StatusOK, paginatedEnodebs)
 }
 
 func createEnodeb(c echo.Context) error {
@@ -320,19 +354,21 @@ func createEnodeb(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	payload := &lte_models.Enodeb{}
 	if err := c.Bind(payload); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := payload.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := payload.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 	if payload.AttachedGatewayID != "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "attached_gateway_id is a read-only property")
 	}
 
 	_, err := configurator.CreateEntity(
+		reqCtx,
 		nid,
 		configurator.NetworkEntity{
 			Type:        lte.CellularEnodebEntityType,
@@ -345,7 +381,7 @@ func createEnodeb(c echo.Context) error {
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.NoContent(http.StatusCreated)
@@ -358,6 +394,7 @@ func getEnodeb(c echo.Context) error {
 	}
 
 	ent, err := configurator.LoadEntity(
+		c.Request().Context(),
 		nid, lte.CellularEnodebEntityType, eid,
 		configurator.EntityLoadCriteria{LoadMetadata: true, LoadConfig: true, LoadAssocsToThis: true},
 		serdes.Entity,
@@ -366,7 +403,7 @@ func getEnodeb(c echo.Context) error {
 	case err == merrors.ErrNotFound:
 		return echo.ErrNotFound
 	case err != nil:
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	ret := (&lte_models.Enodeb{}).FromBackendModels(ent)
@@ -378,13 +415,14 @@ func updateEnodeb(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	payload := &lte_models.Enodeb{}
 	if err := c.Bind(payload); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := payload.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := payload.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 	if payload.AttachedGatewayID != "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "attached_gateway_id is a read-only property")
@@ -393,9 +431,9 @@ func updateEnodeb(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "serial in body must match serial in path")
 	}
 
-	_, err := configurator.UpdateEntity(nid, payload.ToEntityUpdateCriteria(), serdes.Entity)
+	_, err := configurator.UpdateEntity(reqCtx, nid, payload.ToEntityUpdateCriteria(), serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -406,9 +444,9 @@ func deleteEnodeb(c echo.Context) error {
 		return nerr
 	}
 
-	err := configurator.DeleteEntity(nid, lte.CellularEnodebEntityType, eid)
+	err := configurator.DeleteEntity(c.Request().Context(), nid, lte.CellularEnodebEntityType, eid)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -418,15 +456,17 @@ func getEnodebState(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	st, err := state.GetState(nid, lte.EnodebStateType, eid, serdes.State)
+
+	reqCtx := c.Request().Context()
+	st, err := state.GetState(reqCtx, nid, lte.EnodebStateType, eid, serdes.State)
 	if err == merrors.ErrNotFound {
-		return obsidian.HttpError(err, http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, err)
 	} else if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	enodebState := st.ReportedState.(*lte_models.EnodebState)
 	enodebState.TimeReported = st.TimeMs
-	ent, err := configurator.LoadEntityForPhysicalID(st.ReporterID, configurator.EntityLoadCriteria{}, serdes.Entity)
+	ent, err := configurator.LoadEntityForPhysicalID(reqCtx, st.ReporterID, configurator.EntityLoadCriteria{}, serdes.Entity)
 	if err == nil {
 		enodebState.ReportingGatewayID = ent.Key
 	}
@@ -449,16 +489,17 @@ func deleteConnectedEnodeb(c echo.Context) error {
 
 	var enodebSerial string
 	if err := c.Bind(&enodebSerial); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
 	_, err := configurator.UpdateEntity(
+		c.Request().Context(),
 		networkID,
 		(&lte_models.EnodebSerials{}).ToDeleteUpdateCriteria(networkID, gatewayID, enodebSerial),
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -471,16 +512,17 @@ func addConnectedEnodeb(c echo.Context) error {
 
 	var enodebSerial string
 	if err := c.Bind(&enodebSerial); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
 	_, err := configurator.UpdateEntity(
+		c.Request().Context(),
 		networkID,
 		(&lte_models.EnodebSerials{}).ToCreateUpdateCriteria(networkID, gatewayID, enodebSerial),
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -491,13 +533,14 @@ func listApns(c echo.Context) error {
 		return nerr
 	}
 
-	ents, err := configurator.LoadAllEntitiesOfType(
+	ents, _, err := configurator.LoadAllEntitiesOfType(
+		c.Request().Context(),
 		networkID, lte.APNEntityType,
 		configurator.EntityLoadCriteria{LoadConfig: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	ret := make(map[string]*lte_models.Apn, len(ents))
@@ -512,16 +555,18 @@ func createApn(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	payload := &lte_models.Apn{}
 	if err := c.Bind(payload); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := payload.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := payload.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
 	_, err := configurator.CreateEntity(
+		reqCtx,
 		networkID,
 		configurator.NetworkEntity{
 			Type:   lte.APNEntityType,
@@ -531,7 +576,7 @@ func createApn(c echo.Context) error {
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.NoContent(http.StatusCreated)
@@ -543,12 +588,12 @@ func getApnConfiguration(c echo.Context) error {
 		return nerr
 	}
 
-	ent, err := configurator.LoadEntity(networkID, lte.APNEntityType, apnName, configurator.EntityLoadCriteria{LoadConfig: true}, serdes.Entity)
+	ent, err := configurator.LoadEntity(c.Request().Context(), networkID, lte.APNEntityType, apnName, configurator.EntityLoadCriteria{LoadConfig: true}, serdes.Entity)
 	switch {
 	case err == merrors.ErrNotFound:
 		return echo.ErrNotFound
 	case err != nil:
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	ret := (&lte_models.Apn{}).FromBackendModels(ent)
@@ -560,26 +605,27 @@ func updateApnConfiguration(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	payload := &lte_models.Apn{}
 	if err := c.Bind(payload); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := payload.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := payload.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
 
-	_, err := configurator.LoadEntity(networkID, lte.APNEntityType, apnName, configurator.EntityLoadCriteria{}, serdes.Entity)
+	_, err := configurator.LoadEntity(reqCtx, networkID, lte.APNEntityType, apnName, configurator.EntityLoadCriteria{}, serdes.Entity)
 	switch {
 	case err == merrors.ErrNotFound:
 		return echo.ErrNotFound
 	case err != nil:
-		return obsidian.HttpError(errors.Wrap(err, "failed to load existing APN"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("failed to load existing APN: %w", err))
 	}
 
-	err = configurator.CreateOrUpdateEntityConfig(networkID, lte.APNEntityType, apnName, payload.ApnConfiguration, serdes.Entity)
+	err = configurator.CreateOrUpdateEntityConfig(reqCtx, networkID, lte.APNEntityType, apnName, payload.ApnConfiguration, serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -589,24 +635,26 @@ func deleteApnConfiguration(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
 
 	ent, err := configurator.LoadEntity(
+		reqCtx,
 		networkID, lte.APNEntityType, apnName,
 		configurator.EntityLoadCriteria{LoadAssocsToThis: true},
 		serdes.Entity,
 	)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	// Cascade deletes to all associated apn_resource and apn_policy_profile
-	var deletes []storage.TypeAndKey
+	var deletes storage.TKs
 	deletes = append(deletes, ent.ParentAssociations.MultiFilter(lte.APNResourceEntityType, lte.APNPolicyProfileEntityType)...)
-	deletes = append(deletes, ent.GetTypeAndKey())
+	deletes = append(deletes, ent.GetTK())
 
-	err = configurator.DeleteEntities(networkID, deletes)
+	err = configurator.DeleteEntities(reqCtx, networkID, deletes)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -621,9 +669,9 @@ func AddNetworkWideSubscriberRuleName(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	err := addToNetworkSubscriberConfig(networkID, params[0], "")
+	err := addToNetworkSubscriberConfig(c.Request().Context(), networkID, params[0], "")
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "Failed to update config"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Failed to update config: %w", err))
 	}
 	return c.NoContent(http.StatusCreated)
 }
@@ -637,9 +685,9 @@ func AddNetworkWideSubscriberBaseName(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	err := addToNetworkSubscriberConfig(networkID, "", params[0])
+	err := addToNetworkSubscriberConfig(c.Request().Context(), networkID, "", params[0])
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "Failed to update config"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Failed to update config: %w", err))
 	}
 	return c.NoContent(http.StatusCreated)
 }
@@ -653,9 +701,9 @@ func RemoveNetworkWideSubscriberRuleName(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	err := removeFromNetworkSubscriberConfig(networkID, params[0], "")
+	err := removeFromNetworkSubscriberConfig(c.Request().Context(), networkID, params[0], "")
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "Failed to update config"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Failed to update config: %w", err))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -669,15 +717,15 @@ func RemoveNetworkWideSubscriberBaseName(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	err := removeFromNetworkSubscriberConfig(networkID, "", params[0])
+	err := removeFromNetworkSubscriberConfig(c.Request().Context(), networkID, "", params[0])
 	if err != nil {
-		return obsidian.HttpError(errors.Wrap(err, "Failed to update config"), http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Failed to update config: %w", err))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func addToNetworkSubscriberConfig(networkID, ruleName, baseName string) error {
-	network, err := configurator.LoadNetwork(networkID, false, true, serdes.Network)
+func addToNetworkSubscriberConfig(ctx context.Context, networkID, ruleName, baseName string) error {
+	network, err := configurator.LoadNetwork(ctx, networkID, false, true, serdes.Network)
 	if err != nil {
 		return err
 	}
@@ -713,11 +761,11 @@ func addToNetworkSubscriberConfig(networkID, ruleName, baseName string) error {
 			subscriberConfig.NetworkWideBaseNames = append(subscriberConfig.NetworkWideBaseNames, policydb_models.BaseName(baseName))
 		}
 	}
-	return configurator.UpdateNetworkConfig(networkID, lte.NetworkSubscriberConfigType, subscriberConfig, serdes.Network)
+	return configurator.UpdateNetworkConfig(ctx, networkID, lte.NetworkSubscriberConfigType, subscriberConfig, serdes.Network)
 }
 
-func removeFromNetworkSubscriberConfig(networkID, ruleName, baseName string) error {
-	network, err := configurator.LoadNetwork(networkID, false, true, serdes.Network)
+func removeFromNetworkSubscriberConfig(ctx context.Context, networkID, ruleName, baseName string) error {
+	network, err := configurator.LoadNetwork(ctx, networkID, false, true, serdes.Network)
 	if err != nil {
 		return err
 	}
@@ -737,7 +785,7 @@ func removeFromNetworkSubscriberConfig(networkID, ruleName, baseName string) err
 		subscriberConfig.NetworkWideBaseNames = funk.Filter(subscriberConfig.NetworkWideBaseNames,
 			func(b policydb_models.BaseName) bool { return string(b) != baseName }).([]policydb_models.BaseName)
 	}
-	return configurator.UpdateNetworkConfig(networkID, lte.NetworkSubscriberConfigType, subscriberConfig, serdes.Network)
+	return configurator.UpdateNetworkConfig(ctx, networkID, lte.NetworkSubscriberConfigType, subscriberConfig, serdes.Network)
 }
 
 func getNetworkAndApnName(c echo.Context) (string, string, *echo.HTTPError) {
@@ -753,16 +801,16 @@ func listGatewayPoolsHandler(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	gatewayPoolEnts, err := configurator.LoadAllEntitiesOfType(nid, lte.CellularGatewayPoolEntityType, configurator.FullEntityLoadCriteria(), serdes.Entity)
+	gatewayPoolEnts, _, err := configurator.LoadAllEntitiesOfType(c.Request().Context(), nid, lte.CellularGatewayPoolEntityType, configurator.FullEntityLoadCriteria(), serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	ret := make(map[string]*lte_models.CellularGatewayPool, len(gatewayPoolEnts))
 	for _, poolEnt := range gatewayPoolEnts {
 		gatewayPool := &lte_models.CellularGatewayPool{}
 		err := gatewayPool.FromBackendModels(poolEnt)
 		if err != nil {
-			return obsidian.HttpError(err, http.StatusInternalServerError)
+			return echo.NewHTTPError(http.StatusInternalServerError, err)
 		}
 		ret[poolEnt.Key] = gatewayPool
 	}
@@ -774,16 +822,18 @@ func createGatewayPoolHandler(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
+	reqCtx := c.Request().Context()
+
 	gatewayPool := new(lte_models.MutableCellularGatewayPool)
 	if err := c.Bind(gatewayPool); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	if err := gatewayPool.ValidateModel(); err != nil {
-		return obsidian.HttpError(err, http.StatusBadRequest)
+	if err := gatewayPool.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	_, err := configurator.CreateEntity(networkID, gatewayPool.ToEntity(), serdes.Entity)
+	_, err := configurator.CreateEntity(reqCtx, networkID, gatewayPool.ToEntity(), serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.JSON(http.StatusCreated, gatewayPool.GatewayPoolID)
 }
@@ -794,22 +844,56 @@ func getGatewayPoolHandler(c echo.Context) error {
 		return nerr
 	}
 	ent, err := configurator.LoadEntity(
+		c.Request().Context(),
 		networkID, lte.CellularGatewayPoolEntityType, gatewayPoolID,
 		configurator.EntityLoadCriteria{LoadMetadata: true, LoadConfig: true, LoadAssocsFromThis: true},
 		serdes.Entity,
 	)
 	if err == merrors.ErrNotFound {
-		return obsidian.HttpError(err, http.StatusNotFound)
+		return echo.NewHTTPError(http.StatusNotFound, err)
 	}
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	gatewayPool := &lte_models.CellularGatewayPool{}
 	err = gatewayPool.FromBackendModels(ent)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.JSON(http.StatusOK, gatewayPool)
+}
+
+func updateGatewayPoolHandler(c echo.Context) error {
+	networkID, gatewayPoolID, nerr := getNetworkIDAndGatewayPoolID(c)
+	if nerr != nil {
+		return nerr
+	}
+	reqCtx := c.Request().Context()
+
+	gatewayPool := &lte_models.MutableCellularGatewayPool{}
+	if err := c.Bind(gatewayPool); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
+	}
+	if err := gatewayPool.ValidateModel(reqCtx); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err)
+	}
+	if string(gatewayPool.GatewayPoolID) != gatewayPoolID {
+		err := fmt.Errorf("gateway pool ID from parameters (%s) and payload (%s) must match", gatewayPoolID, gatewayPool.GatewayPoolID)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
+	}
+	// 404 if pool doesn't exist
+	exists, err := configurator.DoesEntityExist(reqCtx, networkID, lte.CellularGatewayPoolEntityType, gatewayPoolID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Errorf("Error while checking if gateway pool exists: %w", err))
+	}
+	if !exists {
+		return echo.ErrNotFound
+	}
+	_, err = configurator.UpdateEntity(reqCtx, networkID, gatewayPool.ToEntityUpdateCriteria(), serdes.Entity)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
+	}
+	return c.JSON(http.StatusCreated, gatewayPool.GatewayPoolID)
 }
 
 func deleteGatewayPoolHandler(c echo.Context) error {
@@ -817,14 +901,15 @@ func deleteGatewayPoolHandler(c echo.Context) error {
 	if nerr != nil {
 		return nerr
 	}
-	poolEnt, err := configurator.LoadEntity(networkID, lte.CellularGatewayPoolEntityType, poolID, configurator.FullEntityLoadCriteria(), serdes.Entity)
+	reqCtx := c.Request().Context()
+	poolEnt, err := configurator.LoadEntity(reqCtx, networkID, lte.CellularGatewayPoolEntityType, poolID, configurator.FullEntityLoadCriteria(), serdes.Entity)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	gatewayPool := &lte_models.CellularGatewayPool{}
 	err = gatewayPool.FromBackendModels(poolEnt)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	// Since deletion of the pool shouldn't necessitate deletion of the
 	// gateway, we force the pool to be empty before allowing deletion, rather
@@ -835,11 +920,11 @@ func deleteGatewayPoolHandler(c echo.Context) error {
 			gatewayPool.GatewayIds,
 			poolID,
 		)
-		return obsidian.HttpError(err, http.StatusBadRequest)
+		return echo.NewHTTPError(http.StatusBadRequest, err)
 	}
-	err = configurator.DeleteEntity(networkID, lte.CellularGatewayPoolEntityType, poolID)
+	err = configurator.DeleteEntity(reqCtx, networkID, lte.CellularGatewayPoolEntityType, poolID)
 	if err != nil {
-		return obsidian.HttpError(err, http.StatusInternalServerError)
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -856,5 +941,5 @@ func makeErr(err error) *echo.HTTPError {
 	if err == merrors.ErrNotFound {
 		return echo.ErrNotFound
 	}
-	return obsidian.HttpError(err, http.StatusInternalServerError)
+	return echo.NewHTTPError(http.StatusInternalServerError, err)
 }
