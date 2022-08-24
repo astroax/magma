@@ -54,7 +54,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.3.0
 	github.com/stretchr/testify v1.7.0
-	github.com/thoas/go-funk v0.7.0
+	github.com/thoas/go-funk v0.9.2
 	github.com/vektra/mockery/v2 v2.10.4
 	github.com/wadey/gocovmerge v0.0.0-20160331181800-b5bfa59ec0ad
 	golang.org/x/crypto v0.0.0-20220112180741-5e0467b6c7ce
