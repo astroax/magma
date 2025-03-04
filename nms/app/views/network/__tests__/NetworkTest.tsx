@@ -232,6 +232,7 @@ describe('<NetworkDashboard />', () => {
           preemption_vulnerability: false,
           priority_level: 15,
         },
+        is_default: false,
       },
       apn_name: 'internet',
     },
@@ -247,6 +248,7 @@ describe('<NetworkDashboard />', () => {
           preemption_vulnerability: false,
           priority_level: 15,
         },
+        is_default: false,
       },
       apn_name: 'oai.ipv4',
     },
@@ -529,6 +531,7 @@ describe('<NetworkDashboard />', () => {
         config: {
           cloud_subscriberdb_enabled: false,
           default_rule_id: 'default_rule_1',
+          enable5g_features: false,
           lte_auth_amf: 'gAA=',
           lte_auth_op: 'EREREREREREREREREREREQ==',
           mcc: '003',

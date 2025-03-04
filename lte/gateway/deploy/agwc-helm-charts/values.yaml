@@ -20,9 +20,12 @@ image:
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: "latest"
+  # Arch is blank for x86 and _arm for ARM64
+  arch:
 
 config:
   domainName: iot.magmacore.click
+  gwChallenge: 
 
 persistent:
   name: agwc-claim
