@@ -51,7 +51,7 @@
   UL_BIT_SHIFT(UL_BIT_MASK(lENGTH), (oFFSET))
 #define UL_FIELD_INSERT(vALUE, fIELD, oFFSET, lENGTH) \
   (((vALUE) & (~UL_FIELD_MASK(oFFSET, lENGTH))) |     \
-   UL_BIT_SHIFT(((fIELD)&UL_BIT_MASK(lENGTH)), oFFSET))
+   UL_BIT_SHIFT(((fIELD) & UL_BIT_MASK(lENGTH)), oFFSET))
 #define UL_FIELD_EXTRACT(vALUE, oFFSET, lENGTH) \
   (UL_BIT_UNSHIFT((vALUE), (oFFSET)) & UL_BIT_MASK(lENGTH))
 
@@ -66,8 +66,6 @@
 #define TASK_GET_THREAD_ID(tASKiD) (itti_desc.tasks_info[tASKiD].thread)
 /* Extract the instance from a message */
 #define ITTI_MESSAGE_GET_INSTANCE(mESSAGE) ((mESSAGE)->ittiMsgHeader.instance)
-
-#include "lte/gateway/c/core/oai/include/messages_types.h"
 
 /* This enum defines messages ids. Each one is unique. */
 typedef enum {

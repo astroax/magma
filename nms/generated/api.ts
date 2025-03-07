@@ -341,6 +341,12 @@ export interface ApnConfiguration {
      */
     'ambr': AggregatedMaximumBitrate;
     /**
+     * Is this the default APN?
+     * @type {boolean}
+     * @memberof ApnConfiguration
+     */
+    'is_default'?: boolean;
+    /**
      * Value identifier for PDN type (0=IPv4 1=IPv6 2=IPv4v6 3=IPv4orv6)
      * @type {number}
      * @memberof ApnConfiguration
@@ -15484,6 +15490,48 @@ export const CbsdsApiAxiosParamCreator = function (configuration?: Configuration
         },
         /**
          * 
+         * @summary Force relinquish all grants in SAS of given CBSD
+         * @param {string} networkId Network ID
+         * @param {number} cbsdId CBSD ID
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        dpNetworkIdCbsdsCbsdIdRelinquishPost: async (networkId: string, cbsdId: number, options: AxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'networkId' is not null or undefined
+            assertParamExists('dpNetworkIdCbsdsCbsdIdRelinquishPost', 'networkId', networkId)
+            // verify required parameter 'cbsdId' is not null or undefined
+            assertParamExists('dpNetworkIdCbsdsCbsdIdRelinquishPost', 'cbsdId', cbsdId)
+            const localVarPath = `/dp/{network_id}/cbsds/{cbsd_id}/relinquish`
+                .replace(`{${"network_id"}}`, encodeURIComponent(String(networkId)))
+                .replace(`{${"cbsd_id"}}`, encodeURIComponent(String(cbsdId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication tokenAuth required
+            // http basic authentication required
+            setBasicAuthToObject(localVarRequestOptions, configuration)
+
+
+    
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary List all CBSDs in LTE network
          * @param {string} networkId Network ID
          * @param {number} [offset] Start index for pagination
@@ -15640,6 +15688,18 @@ export const CbsdsApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Force relinquish all grants in SAS of given CBSD
+         * @param {string} networkId Network ID
+         * @param {number} cbsdId CBSD ID
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async dpNetworkIdCbsdsCbsdIdRelinquishPost(networkId: string, cbsdId: number, options?: AxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.dpNetworkIdCbsdsCbsdIdRelinquishPost(networkId, cbsdId, options);
+            return createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration);
+        },
+        /**
+         * 
          * @summary List all CBSDs in LTE network
          * @param {string} networkId Network ID
          * @param {number} [offset] Start index for pagination
@@ -15718,6 +15778,17 @@ export const CbsdsApiFactory = function (configuration?: Configuration, basePath
          */
         dpNetworkIdCbsdsCbsdIdPut(networkId: string, cbsdId: number, cbsd: MutableCbsd, options?: any): AxiosPromise<void> {
             return localVarFp.dpNetworkIdCbsdsCbsdIdPut(networkId, cbsdId, cbsd, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Force relinquish all grants in SAS of given CBSD
+         * @param {string} networkId Network ID
+         * @param {number} cbsdId CBSD ID
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        dpNetworkIdCbsdsCbsdIdRelinquishPost(networkId: string, cbsdId: number, options?: any): AxiosPromise<void> {
+            return localVarFp.dpNetworkIdCbsdsCbsdIdRelinquishPost(networkId, cbsdId, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -15838,6 +15909,27 @@ export interface CbsdsApiDpNetworkIdCbsdsCbsdIdPutRequest {
 }
 
 /**
+ * Request parameters for dpNetworkIdCbsdsCbsdIdRelinquishPost operation in CbsdsApi.
+ * @export
+ * @interface CbsdsApiDpNetworkIdCbsdsCbsdIdRelinquishPostRequest
+ */
+export interface CbsdsApiDpNetworkIdCbsdsCbsdIdRelinquishPostRequest {
+    /**
+     * Network ID
+     * @type {string}
+     * @memberof CbsdsApiDpNetworkIdCbsdsCbsdIdRelinquishPost
+     */
+    readonly networkId: string
+
+    /**
+     * CBSD ID
+     * @type {number}
+     * @memberof CbsdsApiDpNetworkIdCbsdsCbsdIdRelinquishPost
+     */
+    readonly cbsdId: number
+}
+
+/**
  * Request parameters for dpNetworkIdCbsdsGet operation in CbsdsApi.
  * @export
  * @interface CbsdsApiDpNetworkIdCbsdsGetRequest
@@ -15946,6 +16038,18 @@ export class CbsdsApi extends BaseAPI {
      */
     public dpNetworkIdCbsdsCbsdIdPut(requestParameters: CbsdsApiDpNetworkIdCbsdsCbsdIdPutRequest, options?: AxiosRequestConfig) {
         return CbsdsApiFp(this.configuration).dpNetworkIdCbsdsCbsdIdPut(requestParameters.networkId, requestParameters.cbsdId, requestParameters.cbsd, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Force relinquish all grants in SAS of given CBSD
+     * @param {CbsdsApiDpNetworkIdCbsdsCbsdIdRelinquishPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof CbsdsApi
+     */
+    public dpNetworkIdCbsdsCbsdIdRelinquishPost(requestParameters: CbsdsApiDpNetworkIdCbsdsCbsdIdRelinquishPostRequest, options?: AxiosRequestConfig) {
+        return CbsdsApiFp(this.configuration).dpNetworkIdCbsdsCbsdIdRelinquishPost(requestParameters.networkId, requestParameters.cbsdId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -41964,7 +42068,7 @@ export const TenantsApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
-         * @summary Create an tenant
+         * @summary Create a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {Tenant} tenant Tenant to be created
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42086,7 +42190,7 @@ export const TenantsApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
-         * @summary Delete tenant
+         * @summary Delete a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {number} tenantId Tenant ID
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42162,7 +42266,7 @@ export const TenantsApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
-         * @summary Set tenant info
+         * @summary Set tenant info. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {number} tenantId Tenant ID
          * @param {Tenant} tenant Tenant to be updated
          * @param {*} [options] Override http request option.
@@ -42226,7 +42330,7 @@ export const TenantsApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Create an tenant
+         * @summary Create a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {Tenant} tenant Tenant to be created
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42260,7 +42364,7 @@ export const TenantsApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Delete tenant
+         * @summary Delete a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {number} tenantId Tenant ID
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42282,7 +42386,7 @@ export const TenantsApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Set tenant info
+         * @summary Set tenant info. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {number} tenantId Tenant ID
          * @param {Tenant} tenant Tenant to be updated
          * @param {*} [options] Override http request option.
@@ -42313,7 +42417,7 @@ export const TenantsApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
-         * @summary Create an tenant
+         * @summary Create a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {Tenant} tenant Tenant to be created
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42344,7 +42448,7 @@ export const TenantsApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
-         * @summary Delete tenant
+         * @summary Delete a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {number} tenantId Tenant ID
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -42364,7 +42468,7 @@ export const TenantsApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
-         * @summary Set tenant info
+         * @summary Set tenant info. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
          * @param {number} tenantId Tenant ID
          * @param {Tenant} tenant Tenant to be updated
          * @param {*} [options] Override http request option.
@@ -42494,7 +42598,7 @@ export class TenantsApi extends BaseAPI {
 
     /**
      * 
-     * @summary Create an tenant
+     * @summary Create a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
      * @param {TenantsApiTenantsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -42530,7 +42634,7 @@ export class TenantsApi extends BaseAPI {
 
     /**
      * 
-     * @summary Delete tenant
+     * @summary Delete a tenant. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
      * @param {TenantsApiTenantsTenantIdDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -42554,7 +42658,7 @@ export class TenantsApi extends BaseAPI {
 
     /**
      * 
-     * @summary Set tenant info
+     * @summary Set tenant info. This should not be called manually, tenants and organizations are updated in NMS and synced to orc8r.
      * @param {TenantsApiTenantsTenantIdPutRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

@@ -15,10 +15,9 @@
  *      contact@openairinterface.org
  */
 
-#ifndef S6A_GRPC_IFACE_H_SEEN
-#define S6A_GRPC_IFACE_H_SEEN
+#pragma once
 
-#include "lte/gateway/c/core/oai/tasks/s6a/s6a_viface.h"
+#include "lte/gateway/c/core/oai/tasks/s6a/s6a_viface.hpp"
 
 class S6aGrpcIface : public S6aViface {
  public:
@@ -28,7 +27,5 @@ class S6aGrpcIface : public S6aViface {
   bool send_cancel_location_ans(s6a_cancel_location_ans_t* cla_pP);
   bool purge_ue(const char* imsi);
 
-  ~S6aGrpcIface(){};
+  ~S6aGrpcIface() {};
 };
-
-#endif /* S6A_GRPC_IFACE_H_SEEN */

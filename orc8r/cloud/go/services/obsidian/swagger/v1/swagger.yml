@@ -1006,6 +1006,19 @@ paths:
       summary: Force deregistration in SAS of given CBSD
       tags:
       - cbsds
+  /dp/{network_id}/cbsds/{cbsd_id}/relinquish:
+    post:
+      parameters:
+      - $ref: '#/parameters/network_id'
+      - $ref: '#/parameters/cbsd_id'
+      responses:
+        "204":
+          description: Success
+        default:
+          $ref: '#/responses/UnexpectedError'
+      summary: Force relinquish all grants in SAS of given CBSD
+      tags:
+      - cbsds
   /dp/{network_id}/logs:
     get:
       parameters:
@@ -5817,7 +5830,8 @@ paths:
           description: Successfully created
         default:
           $ref: '#/responses/UnexpectedError'
-      summary: Create an tenant
+      summary: Create a tenant. This should not be called manually, tenants and organizations
+        are updated in NMS and synced to orc8r.
       tags:
       - Tenants
   /tenants/{tenant_id}:
@@ -5829,7 +5843,8 @@ paths:
           description: Ok
         default:
           $ref: '#/responses/UnexpectedError'
-      summary: Delete tenant
+      summary: Delete a tenant. This should not be called manually, tenants and organizations
+        are updated in NMS and synced to orc8r.
       tags:
       - Tenants
     get:
@@ -5859,7 +5874,8 @@ paths:
           description: Ok
         default:
           $ref: '#/responses/UnexpectedError'
-      summary: Set tenant info
+      summary: Set tenant info. This should not be called manually, tenants and organizations
+        are updated in NMS and synced to orc8r.
       tags:
       - Tenants
   /tenants/{tenant_id}/control_proxy:
@@ -6674,6 +6690,10 @@ definitions:
     properties:
       ambr:
         $ref: '#/definitions/aggregated_maximum_bitrate'
+      is_default:
+        default: false
+        description: Is this the default APN?
+        type: boolean
       pdn_type:
         description: Value identifier for PDN type (0=IPv4 1=IPv6 2=IPv4v6 3=IPv4orv6)
         enum:

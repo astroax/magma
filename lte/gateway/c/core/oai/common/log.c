@@ -150,8 +150,7 @@ typedef struct oai_log_s {
   log_level_t log_level[MAX_LOG_PROTOS]; /*!< \brief Loglevel id of each client
                                             (protocol/layer) */
   int log_level2syslog[MAX_LOG_LEVEL];
-  log_message_number_t
-      log_message_number; /*!< \brief Counter of log message        */
+  log_message_number_t log_message_number; /*!< \brief Counter of log message */
   hash_table_ts_t*
       thread_context_htbl; /*!< \brief Container for log_thread_ctxt_t */
   int max_threads;         /*!< \brief Maximum number of log threads */
@@ -975,7 +974,7 @@ void log_message_add_async(struct shared_log_queue_item_s* messageP,
   }
 }
 //------------------------------------------------------------------------------
-void log_message_add_sync(log_queue_item_t* messageP, char* format, ...) {
+void log_message_add_sync(log_queue_item_t* messageP, const char* format, ...) {
   va_list args;
   int rv = 0;
 
@@ -1053,7 +1052,8 @@ void log_message_start_sync(log_thread_ctxt_t* thread_ctxtP,
                             const log_proto_t protoP,
                             log_queue_item_t** messageP,  // Out parameter
                             const char* const source_fileP,
-                            const unsigned int line_numP, char* format, ...) {
+                            const unsigned int line_numP, const char* format,
+                            ...) {
   va_list args;
 
   va_start(args, format);

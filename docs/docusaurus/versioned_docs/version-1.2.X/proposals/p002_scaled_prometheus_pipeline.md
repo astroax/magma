@@ -14,7 +14,7 @@ original_id: p002_scaled_prometheus_pipeline
 **Requires Feedback From: Jacky Tian**
 
 Details:
-* I use the term pushgateway to reference [prometheus-edge-hub](https://github.com/facebookincubator/prometheus-edge-hub)
+* I use the term pushgateway to reference [prometheus-edge-hub](https://github.com/facebookarchive/prometheus-edge-hub)
 * "Prod" and "Staging" refer to FB-hosted deployments of Orchestrator which are currently our largest deployments and our source of performance data.
 
 ### Goal: Improve metrics query speed on large deployments
@@ -53,7 +53,7 @@ Time to load grafana dashboard on prod NMS: **>15s **from click until all graphs
 
 ### Thanos
 
-[Thanos](https://improbable.io/blog/thanos-prometheus-at-scale) is a very popular project which allows for easy and customizable scaling of prometheus monitoring pipelines. From the start, I believe this will be the easiest and most powerful solution to the problem. Thanos consists of several components, all of which can be used independently. The most relevant to us is the `Querier` which allows for the querying of data across multiple prometheus servers. A simple architecture diagram from Thanos shows how this works in a typical deployment:
+Thanos is a very popular project which allows for easy and customizable scaling of prometheus monitoring pipelines. From the start, I believe this will be the easiest and most powerful solution to the problem. Thanos consists of several components, all of which can be used independently. The most relevant to us is the `Querier` which allows for the querying of data across multiple prometheus servers. A simple architecture diagram from Thanos shows how this works in a typical deployment:
 ![image.png](assets/proposals/p002_scaled_prometheus_pipeline/image.png)Here we see multiple prometheus servers with the Thanos `sidecar` attached. This allows for the rest of the thanos components to work together. Then, the `Querier` components are able to accept PromQL queries and retrieve data from any set of the prometheus servers.
 
 With this setup, we only need to deploy the Thanos `sidecar` and multiple `Querier` components, along with Object storage to achieve faster queries.
@@ -83,7 +83,7 @@ All metrics go through the controller (which is already scalable and placed behi
 
 All metrics are stored for 30 days in the Prometheus TSDB storage. This means that all queries have to go through the prometheus server itself, which is the main cause of slow queries.
 
-[Object storage](https://thanos.io/storage.md/) will allow us to only store a few hours of metrics on the server itself (potentially keeping everything in-memory) and then exporting older metrics to object storage elsewhere. For example on an AWS deployment metrics would be stored in S3.
+[Object storage](https://thanos.io/tip/thanos/storage.md/) will allow us to only store a few hours of metrics on the server itself (potentially keeping everything in-memory) and then exporting older metrics to object storage elsewhere. For example on an AWS deployment metrics would be stored in S3.
 
 *Options for Object Storage*
 * Deployed on AWS: S3
@@ -105,7 +105,7 @@ We should make this as easy to configure as possible. Some goals include:
 
 ### Improving prometheus-edge-hub performance
 
-With the goal of handling 10 million datapoints per minute, the [prometheus-edge-hub](github.com/facebookincubator/prometheus-edge-hub) will probably need some improvements to handle that load. First we'll do benchmark tests on specific AWS hardware options. Then, profile the code to find the bottlenecks and improve them. It's not clear what exactly needs to be done, but I'm confident we can find significant improvements as this component hasn't gone through much optimization yet.
+With the goal of handling 10 million datapoints per minute, the [prometheus-edge-hub](https://github.com/facebookincubator/prometheus-edge-hub) will probably need some improvements to handle that load. First we'll do benchmark tests on specific AWS hardware options. Then, profile the code to find the bottlenecks and improve them. It's not clear what exactly needs to be done, but I'm confident we can find significant improvements as this component hasn't gone through much optimization yet.
 
 In the end if we can't get enough performance out of a single edge-hub, we will have to investigate scaling this horizontally.
 
